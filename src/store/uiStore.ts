@@ -11,6 +11,7 @@ interface UIState {
   showPropertiesPanel: boolean;
   showComponentPalette: boolean;
   darkMode: boolean;
+  showDirectiveModal: boolean;
 }
 
 interface UIActions {
@@ -21,6 +22,7 @@ interface UIActions {
   togglePropertiesPanel: () => void;
   toggleComponentPalette: () => void;
   toggleDarkMode: () => void;
+  toggleDirectiveModal: () => void;
 }
 
 export const useUIStore = create<UIState & UIActions>((set) => ({
@@ -30,6 +32,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   showPropertiesPanel: true,
   showComponentPalette: true,
   darkMode: false,
+  showDirectiveModal: false,
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null }),
@@ -38,4 +41,5 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   togglePropertiesPanel: () => set((s) => ({ showPropertiesPanel: !s.showPropertiesPanel })),
   toggleComponentPalette: () => set((s) => ({ showComponentPalette: !s.showComponentPalette })),
   toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
+  toggleDirectiveModal: () => set((s) => ({ showDirectiveModal: !s.showDirectiveModal })),
 }));

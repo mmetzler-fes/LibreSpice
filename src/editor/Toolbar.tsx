@@ -1,8 +1,10 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore, type EditorMode } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
+import { DirectiveModal } from "./DirectiveModal.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
+import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
 
@@ -136,9 +138,10 @@ function Divider() {
 export function Toolbar() {
   const {
     canUndo, canRedo, undo, redo,
-    clearCircuit, rotateSelected, deleteSelected, netlist, selectedComponentId,
+    clearCircuit, rotateSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
+    circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
@@ -164,6 +167,92 @@ export function Toolbar() {
     }
   };
 
+  const fallbackSave = (content: string) => {
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "circuit.asc";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSave = async (saveAs: boolean = false) => {
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit);
+    if ("showSaveFilePicker" in window) {
+      try {
+        let handle = fileHandle;
+        if (!handle || saveAs) {
+          handle = await (window as any).showSaveFilePicker({
+            suggestedName: "circuit.asc",
+            types: [{ description: "LTSpice Schematic", accept: { "text/plain": [".asc"] } }],
+          });
+          setFileHandle(handle, handle.name);
+        }
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          console.error(err);
+          fallbackSave(content);
+        }
+        return;
+      }
+    }
+    fallbackSave(content);
+  };
+
+  const handleOpen = async () => {
+    let loadedText = "";
+    let loadedHandle: any = null;
+    let loadedName = "";
+
+    if ("showOpenFilePicker" in window) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [{
+            description: "LTSpice Schematic",
+            accept: {
+              "application/octet-stream": [".asc"],
+              "text/plain": [".asc"],
+              "application/x-asc": [".asc"]
+            }
+          }],
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        loadedText = await file.text();
+        loadedHandle = handle;
+        loadedName = file.name;
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
+        console.error("showOpenFilePicker failed, falling back", err);
+      }
+    }
+
+    if (!loadedText) {
+      // Fallback
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".asc";
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) {
+          const text = await file.text();
+          loadFromAsc(text);
+          setFileHandle(null, file.name);
+        }
+      };
+      input.click();
+      return;
+    }
+
+    loadFromAsc(loadedText);
+    setFileHandle(loadedHandle, loadedName);
+  };
+
   return (
     <div
       style={{
@@ -183,14 +272,37 @@ export function Toolbar() {
       <TBtn title="New circuit (Ctrl+N)" onClick={clearCircuit}>
         <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
       </TBtn>
-      <TBtn title="Open (Ctrl+O)" onClick={() => {}}>
+      <TBtn title="Open (Ctrl+O)" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
       </TBtn>
-      <TBtn title="Save (Ctrl+S)" onClick={() => {}}>
+      <TBtn title="Save (Ctrl+S)" onClick={() => handleSave(false)}>
         <Ico d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8" />
+      </TBtn>
+      <TBtn title="Save As..." onClick={() => handleSave(true)}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+          <path d="M17 21v-8H7v8" />
+          <path d="M7 3v5h8" />
+          <path d="M12 11l0 4 M10 13l4 0" />
+        </svg>
       </TBtn>
 
       <Divider />
+
+      {/* ── SPICE Directives ── */}
+      <TBtn
+        title="Edit SPICE Directives"
+        active={spiceDirectives.trim().length > 0}
+        onClick={toggleDirectiveModal}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="4" y1="6" x2="20" y2="6" />
+          <line x1="4" y1="10" x2="14" y2="10" />
+          <line x1="4" y1="14" x2="18" y2="14" />
+          <line x1="4" y1="18" x2="12" y2="18" />
+          <circle cx="20" cy="16" r="3" fill={spiceDirectives.trim() ? "#2563eb" : "none"} strokeWidth="1.5" />
+        </svg>
+      </TBtn>
 
       {/* ── Simulation ── */}
       <TBtn title="Run Simulation (F5)" onClick={handleRun} disabled={!netlist || status === "running"}>
@@ -300,6 +412,7 @@ export function Toolbar() {
           Wire mode — drag between handles to connect
         </span>
       )}
+      <DirectiveModal />
     </div>
   );
 }

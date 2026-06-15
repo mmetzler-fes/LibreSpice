@@ -1,7 +1,9 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 
 export function PropertiesPanel() {
-  const { circuit, selectedComponentId, updateComponentProperty } = useCircuitStore();
+  // propertyVersion triggers a re-render whenever setProperty is called on any component
+  const { circuit, selectedComponentId, updateComponentProperty, propertyVersion } = useCircuitStore();
+  void propertyVersion; // consumed only for reactivity
 
   const component = selectedComponentId ? circuit.components.get(selectedComponentId) : null;
 

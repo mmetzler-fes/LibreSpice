@@ -11,12 +11,18 @@ import {
   type NodeMouseHandler,
   BackgroundVariant,
   useReactFlow,
+  ConnectionMode,
+  applyNodeChanges,
+  applyEdgeChanges,
+  type NodeChange,
+  type EdgeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
+import { NetLabelsPanel } from "./NetLabelsPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
@@ -73,6 +79,55 @@ function snapToGrid(v: number): number {
   return Math.round(v / GRID_SIZE) * GRID_SIZE;
 }
 
+/** Format a number with SI prefix for display on canvas */
+function fmtSI(v: number, unit: string): string {
+  const a = Math.abs(v);
+  if (a === 0) return `0${unit}`;
+  if (a >= 1e9)  return `${+(v / 1e9).toPrecision(3)}G${unit}`;
+  if (a >= 1e6)  return `${+(v / 1e6).toPrecision(3)}M${unit}`;
+  if (a >= 1e3)  return `${+(v / 1e3).toPrecision(3)}k${unit}`;
+  if (a >= 1)    return `${+v.toPrecision(3)}${unit}`;
+  if (a >= 1e-3) return `${+(v * 1e3).toPrecision(3)}m${unit}`;
+  if (a >= 1e-6) return `${+(v * 1e6).toPrecision(3)}µ${unit}`;
+  if (a >= 1e-9) return `${+(v * 1e9).toPrecision(3)}n${unit}`;
+  return `${+(v * 1e12).toPrecision(3)}p${unit}`;
+}
+
+/** Derive a short value label from a SpiceComponent for display on the canvas */
+export function getValueLabel(component: SpiceComponent, type: ComponentType): string {
+  switch (type) {
+    case "resistor":  {
+      const r = component as unknown as { resistance: number };
+      return fmtSI(r.resistance, "Ω");
+    }
+    case "capacitor": {
+      const c = component as unknown as { capacitance: number };
+      return fmtSI(c.capacitance, "F");
+    }
+    case "inductor":  {
+      const l = component as unknown as { inductance: number };
+      return fmtSI(l.inductance, "H");
+    }
+    case "vsource":   {
+      const v = component as unknown as { dcValue: number };
+      return `${fmtSI(v.dcValue, "V")} DC`;
+    }
+    case "isource":   {
+      const i = component as unknown as { dcValue: number };
+      return `${fmtSI(i.dcValue, "A")} DC`;
+    }
+    case "sinesource": {
+      const s = component as unknown as { amplitude: number; frequency: number };
+      return `${fmtSI(s.amplitude, "V")} ${fmtSI(s.frequency, "Hz")}`;
+    }
+    case "pulsesource": {
+      const p = component as unknown as { pulsedValue: number; period: number };
+      return `${fmtSI(p.pulsedValue, "V")} ${fmtSI(p.period, "s")}`;
+    }
+    default: return "";
+  }
+}
+
 function CanvasInner() {
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -83,7 +138,7 @@ function CanvasInner() {
     addComponent, removeComponent, setNodes, setEdges,
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
-    rotateSelected, deleteSelected,
+    rotateSelected, deleteSelected, rebuildConnections,
   } = useCircuitStore();
 
   const {
@@ -97,13 +152,15 @@ function CanvasInner() {
       const x = snapToGrid(cx);
       const y = snapToGrid(cy);
       const id = `${type}_${componentCounter++}`;
-      const label = getDefaultLabel(type, componentCounter - 1);
+      // Ground uses label "0" internally; display label is separate
+      const label = type === "ground" ? "0" : getDefaultLabel(type, componentCounter - 1);
       const component = createSpiceComponent(type, id, label, x, y);
+      const valueLabel = getValueLabel(component, type);
       const node: Node = {
         id,
         type: "component",
         position: { x, y },
-        data: { componentType: type, label },
+        data: { componentType: type, label, valueLabel },
       };
       addComponent(component, node);
     },
@@ -195,30 +252,23 @@ function CanvasInner() {
   );
 
   const onNodesChange = useCallback(
-    (changes: Array<{ type: string; id?: string; position?: { x: number; y: number }; dragging?: boolean }>) => {
-      const removals = changes.filter((c) => c.type === "remove" && c.id);
-      removals.forEach((c) => removeComponent(c.id!));
-      setNodes(
-        nodes
-          .filter((n) => !removals.some((r) => r.id === n.id))
-          .map((n) => {
-            const ch = changes.find((c) => c.type === "position" && c.id === n.id);
-            if (ch?.position) return { ...n, position: ch.position };
-            return n;
-          }),
-      );
+    (changes: NodeChange[]) => {
+      const removals = changes.filter((c) => c.type === "remove" && "id" in c);
+      removals.forEach((c) => removeComponent((c as any).id));
+      setNodes(applyNodeChanges(changes, nodes));
     },
     [nodes, setNodes, removeComponent],
   );
 
   const onEdgesChange = useCallback(
-    (changes: Array<{ type: string; id?: string }>) => {
-      const removals = changes.filter((c) => c.type === "remove" && c.id);
+    (changes: EdgeChange[]) => {
+      const removals = changes.filter((c) => c.type === "remove" && "id" in c);
+      setEdges(applyEdgeChanges(changes, edges));
       if (removals.length > 0) {
-        setEdges(edges.filter((e) => !removals.some((r) => r.id === e.id)));
+        setTimeout(() => rebuildConnections(), 0);
       }
     },
-    [edges, setEdges],
+    [edges, setEdges, rebuildConnections],
   );
 
   const cursorStyle =
@@ -256,6 +306,7 @@ function CanvasInner() {
             nodesDraggable={editorMode === "select"}
             elementsSelectable={editorMode === "select"}
             connectionRadius={24}
+            connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{
               type: "step",
               style: { stroke: "#1e293b", strokeWidth: 2 },
@@ -267,7 +318,12 @@ function CanvasInner() {
           </ReactFlow>
         </div>
 
-        {showPropertiesPanel && <PropertiesPanel />}
+        {showPropertiesPanel && (
+          <aside style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
+            <PropertiesPanel />
+            <NetLabelsPanel />
+          </aside>
+        )}
       </div>
     </div>
   );

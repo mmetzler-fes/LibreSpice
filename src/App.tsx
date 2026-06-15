@@ -1,5 +1,6 @@
 import { SchematicCanvas } from "@editor/SchematicCanvas.js";
 import { SimulationPanel } from "@simulation/SimulationPanel.js";
+import { OscilloscopeView } from "@simulation/OscilloscopeView.js";
 import { useUIStore, type ActiveTab } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 
@@ -81,7 +82,7 @@ export function App() {
       <main style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {activeTab === "schematic" && <SchematicCanvas />}
         {activeTab === "netlist" && <NetlistView />}
-        {activeTab === "oscilloscope" && <OscilloscopePlaceholder />}
+        {activeTab === "oscilloscope" && <OscilloscopeView />}
       </main>
     </div>
   );
@@ -110,26 +111,6 @@ function NetlistView() {
       <div style={{ width: 280, borderLeft: "1px solid #e2e8f0", overflow: "auto" }}>
         <SimulationPanel />
       </div>
-    </div>
-  );
-}
-
-function OscilloscopePlaceholder() {
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "column",
-        gap: 12,
-        color: "#94a3b8",
-      }}
-    >
-      <span style={{ fontSize: 48 }}>📊</span>
-      <p style={{ margin: 0, fontSize: 14 }}>Oscilloscope – coming in Phase 5</p>
-      <p style={{ margin: 0, fontSize: 12 }}>Run a simulation first, then plot results here</p>
     </div>
   );
 }
