@@ -1,0 +1,57 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ReactFlow handle styling */
+.react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  border: 2px solid #2563eb !important;
+  background: #fff !important;
+  transition: background 0.1s, transform 0.1s;
+}
+
+.react-flow__handle:hover,
+.react-flow__handle.connecting {
+  background: #2563eb !important;
+  transform: scale(1.4);
+  cursor: crosshair;
+}
+
+/* Wire edges */
+.react-flow__edge-path {
+  stroke: #1e293b;
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #2563eb;
+  stroke-width: 2.5;
+}
+
+/* Connection line in wire mode */
+.react-flow__connection-path {
+  stroke: #2563eb;
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+
+/* Node selection outline handled by SVG inside node */
+.react-flow__node.selected > div {
+  outline: none !important;
+  box-shadow: none !important;
+}
