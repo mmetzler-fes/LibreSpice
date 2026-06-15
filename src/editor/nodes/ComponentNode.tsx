@@ -35,6 +35,7 @@ export type ComponentType =
 export interface ComponentNodeData {
   componentType: ComponentType;
   label: string;
+  valueLabel?: string;   // e.g. "1kΩ", "100nF", "5V SIN"
   rotation?: number;
   [key: string]: unknown;
 }
@@ -72,9 +73,10 @@ const TWO_PORT_TYPES: ComponentType[] = [
 const THREE_PORT_TYPES: ComponentType[] = ["bjt_npn", "bjt_pnp", "mosfet_n", "mosfet_p"];
 
 function getHandles(type: ComponentType) {
+  // Ground: one source handle at the top (ConnectionMode.Loose allows source↔source)
   if (type === "ground") {
     return (
-      <Handle type="target" position={Position.Top} id="gnd" style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Top} id="gnd" style={HANDLE_STYLE} />
     );
   }
   if (TWO_PORT_TYPES.includes(type)) {
@@ -101,6 +103,7 @@ export const ComponentNode = memo(({ data, selected }: NodeProps) => {
   const nodeData = data as ComponentNodeData;
   const SymbolComponent = SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
   const rotation = nodeData.rotation ?? 0;
+  const isGround = nodeData.componentType === "ground";
 
   return (
     <div
@@ -135,22 +138,45 @@ export const ComponentNode = memo(({ data, selected }: NodeProps) => {
         )}
         <SymbolComponent />
       </svg>
-      <div
-        style={{
-          position: "absolute",
-          bottom: -18,
-          left: "50%",
-          transform: "translateX(-50%)",
-          fontSize: 11,
-          whiteSpace: "nowrap",
-          userSelect: "none",
-          fontFamily: "monospace",
-          color: selected ? "#2563eb" : "#374151",
-          fontWeight: selected ? 600 : 400,
-        }}
-      >
-        {nodeData.label}
-      </div>
+
+      {/* Reference label (R1, C1, …) – above for ground, below for others */}
+      {!isGround && (
+        <div
+          style={{
+            position: "absolute",
+            top: -16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 11,
+            whiteSpace: "nowrap",
+            userSelect: "none",
+            fontFamily: "monospace",
+            color: selected ? "#2563eb" : "#374151",
+            fontWeight: selected ? 600 : 500,
+          }}
+        >
+          {nodeData.label}
+        </div>
+      )}
+
+      {/* Value label (1kΩ, 100nF, 5V …) – below the symbol */}
+      {nodeData.valueLabel && !isGround && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: -18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 10,
+            whiteSpace: "nowrap",
+            userSelect: "none",
+            fontFamily: "monospace",
+            color: selected ? "#1d4ed8" : "#6b7280",
+          }}
+        >
+          {nodeData.valueLabel}
+        </div>
+      )}
     </div>
   );
 });

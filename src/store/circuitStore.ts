@@ -3,6 +3,9 @@ import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { NetlistGenerator, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
+import { getValueLabel } from "@editor/SchematicCanvas.js";
+import type { ComponentType } from "@editor/nodes/ComponentNode.js";
+import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 
 interface HistoryEntry {
   nodes: Node[];
@@ -16,6 +19,11 @@ interface CircuitState {
   selectedComponentId: string | null;
   netlist: string;
   simulationConfig: SimulationConfig;
+  spiceDirectives: string;
+  propertyVersion: number;
+  netVersion: number;
+  fileHandle: any | null;
+  fileName: string | null;
   _history: HistoryEntry[];
   _future: HistoryEntry[];
 }
@@ -30,13 +38,18 @@ interface CircuitActions {
   connectPorts: (portIdA: string, portIdB: string) => void;
   regenerateNetlist: () => void;
   setSimulationConfig: (config: SimulationConfig) => void;
+  setSpiceDirectives: (text: string) => void;
+  renameNet: (netId: string, label: string) => void;
+  loadFromAsc: (ascContent: string) => void;
   clearCircuit: () => void;
+  setFileHandle: (handle: any | null, name: string | null) => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
   rotateSelected: () => void;
   deleteSelected: () => void;
+  rebuildConnections: () => void;
 }
 
 const DEFAULT_CONFIG: SimulationConfig = {
@@ -52,6 +65,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   selectedComponentId: null,
   netlist: "",
   simulationConfig: DEFAULT_CONFIG,
+  spiceDirectives: "",
+  propertyVersion: 0,
+  netVersion: 0,
+  fileHandle: null,
+  fileName: null,
   _history: [],
   _future: [],
 
@@ -81,10 +99,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const component = get().circuit.components.get(id);
     if (!component) return;
     component.setProperty(key, value);
+    const type = (get().nodes.find((n) => n.id === id)?.data as { componentType?: ComponentType })?.componentType;
+    const valueLabel = type ? getValueLabel(component, type) : undefined;
     set((state) => ({
       nodes: state.nodes.map((n) =>
-        n.id === id ? { ...n, data: { ...n.data, label: component.label } } : n,
+        n.id === id
+          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }) } }
+          : n,
       ),
+      propertyVersion: state.propertyVersion + 1,
     }));
     get().regenerateNetlist();
   },
@@ -104,9 +127,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   regenerateNetlist: () => {
-    const { circuit, simulationConfig } = get();
+    const { circuit, simulationConfig, spiceDirectives } = get();
     const generator = new NetlistGenerator();
-    const netlist = generator.generate(circuit, simulationConfig);
+    const netlist = generator.generate(circuit, simulationConfig, spiceDirectives);
     set({ netlist });
   },
 
@@ -114,6 +137,42 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set({ simulationConfig: config });
     get().regenerateNetlist();
   },
+
+  setSpiceDirectives: (text) => {
+    set({ spiceDirectives: text });
+    get().regenerateNetlist();
+  },
+
+  renameNet: (netId, label) => {
+    const net = get().circuit.nets.get(netId);
+    if (!net) return;
+    net.nodeLabel = label.trim() || netId;
+    set((state) => ({ netVersion: state.netVersion + 1 }));
+    get().regenerateNetlist();
+  },
+
+  loadFromAsc: (ascContent) => {
+    const { nodes, edges, directives, components } = LTSpiceParser.parse(ascContent);
+    const snap = { nodes: get().nodes, edges: get().edges };
+    
+    const newCircuit = new Circuit();
+    for (const comp of components) {
+      newCircuit.addComponent(comp);
+    }
+    
+    set((state) => ({
+      circuit: newCircuit,
+      nodes,
+      edges,
+      spiceDirectives: directives,
+      selectedComponentId: null,
+      _history: [...state._history, snap],
+      _future: [],
+    }));
+    setTimeout(() => get().rebuildConnections(), 0);
+  },
+
+  setFileHandle: (handle, name) => set({ fileHandle: handle, fileName: name }),
 
   clearCircuit: () => {
     const snap = { nodes: get().nodes, edges: get().edges };
@@ -124,6 +183,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       edges: [],
       selectedComponentId: null,
       netlist: "",
+      fileHandle: null,
+      fileName: null,
       _history: [...state._history, snap],
       _future: [],
     }));
@@ -172,7 +233,76 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   deleteSelected: () => {
-    const { selectedComponentId, removeComponent } = get();
-    if (selectedComponentId) removeComponent(selectedComponentId);
+    const { selectedComponentId, removeComponent, edges, setEdges, rebuildConnections } = get();
+    let changed = false;
+    if (selectedComponentId) {
+      removeComponent(selectedComponentId);
+      changed = true;
+    }
+    const selectedEdges = edges.filter(e => e.selected);
+    if (selectedEdges.length > 0) {
+      setEdges(edges.filter(e => !e.selected));
+      changed = true;
+    }
+    if (changed) {
+      setTimeout(() => rebuildConnections(), 0);
+    }
+  },
+
+  rebuildConnections: () => {
+    const { circuit, edges } = get();
+    // Save existing custom labels
+    const customLabels = new Map<string, string>();
+    for (const net of circuit.nets.values()) {
+      if (net.id !== "0" && net.nodeLabel !== net.id) {
+        if (net.connectedPortIds.size > 0) {
+          customLabels.set(Array.from(net.connectedPortIds)[0], net.nodeLabel);
+        }
+      }
+    }
+
+    // Disconnect all ports
+    for (const comp of circuit.components.values()) {
+      for (const port of comp.ports) {
+        if (port.id !== `${comp.id}-gnd`) port.disconnect();
+      }
+    }
+    
+    // Remove all nets except ground
+    const groundNet = circuit.nets.get("0");
+    circuit.nets.clear();
+    if (groundNet) {
+      groundNet.connectedPortIds.clear();
+      for (const comp of circuit.components.values()) {
+        if (comp.id.startsWith("ground_")) {
+           const pid = `${comp.id}-gnd`;
+           comp.ports[0].connect("0");
+           groundNet.addPort(pid);
+        }
+      }
+      circuit.nets.set("0", groundNet);
+    }
+
+    // Reconnect based on edges
+    for (const edge of edges) {
+      if (edge.source && edge.sourceHandle && edge.target && edge.targetHandle) {
+        try {
+          circuit.connectPorts(`${edge.source}-${edge.sourceHandle}`, `${edge.target}-${edge.targetHandle}`);
+        } catch { /* visual-only */ }
+      }
+    }
+
+    // Restore custom labels
+    for (const [portId, label] of customLabels.entries()) {
+      for (const comp of circuit.components.values()) {
+        const port = comp.ports.find(p => p.id === portId);
+        if (port && port.netId) {
+          const net = circuit.nets.get(port.netId);
+          if (net) net.nodeLabel = label;
+        }
+      }
+    }
+    
+    get().regenerateNetlist();
   },
 }));
