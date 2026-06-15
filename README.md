@@ -13,7 +13,7 @@ LibreSpice is a lightweight web application inspired by LTSpice behavior for qui
 
 ## Run locally
 
-Open `/home/runner/work/LibreSpice/LibreSpice/mmetzler-fes/LibreSpice/index.html` in a browser and click **Run .op**.
+Open `index.html` from the repository root in a browser and click **Run .op**.
 
 ## Example netlist
 
