@@ -2,6 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { SymbolPreview } from "./SymbolPreview.js";
 import { NODE_SIZE, NODE_MARGIN } from "./pinGeometry.js";
+import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
 const GRID = 20;
@@ -19,6 +20,7 @@ interface PlacementGhostProps {
 export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
   const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
   const { zoom } = useViewport();
+  const placementRotation = useUIStore((s) => s.placementRotation);
   const [flowPos, setFlowPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -51,7 +53,7 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
         left,
         top,
         // Center pinned at (left, top); scaled about center so size = NODE_SIZE * zoom.
-        transform: `translate(-50%, -50%) scale(${zoom})`,
+        transform: `translate(-50%, -50%) scale(${zoom}) rotate(${placementRotation}deg)`,
         transformOrigin: "center center",
         pointerEvents: "none",
         opacity: 0.55,

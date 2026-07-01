@@ -62,8 +62,8 @@ function CanvasInner() {
   } = useCircuitStore();
 
   const {
-    editorMode, pendingPlaceType, pendingLibraryPlacement,
-    setEditorMode, startPlacing, cancelPlacing,
+    editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
+    setEditorMode, startPlacing, cancelPlacing, rotatePlacement,
     showPropertiesPanel, showComponentPalette,
     setDockTab, autoProbeCurrent,
   } = useUIStore();
@@ -88,16 +88,17 @@ function CanvasInner() {
       // Ground uses label "0" internally; display label is separate
       const label = type === "ground" ? "0" : getNextLabel(type, existingLabels());
       const component = createSpiceComponent(type, id, label, x, y);
+      if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);
       const valueLabel = getValueLabel(component, type);
       const node: Node = {
         id,
         type: "component",
         position: { x, y },
-        data: { componentType: type, label, valueLabel },
+        data: { componentType: type, label, valueLabel, rotation: placementRotation },
       };
       addComponent(component, node);
     },
-    [addComponent],
+    [addComponent, placementRotation],
   );
 
   const placeLibraryComponent = useCallback(
@@ -109,11 +110,12 @@ function CanvasInner() {
         const id = `subckt_${componentCounter++}`;
         const label = getNextLabel("subcircuit", existingLabels());
         const component = createSubcircuitComponent(id, label, x, y, placement.raw ?? "", placement.pins ?? []);
+        if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);
         const node: Node = {
           id,
           type: "component",
           position: { x, y },
-          data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name },
+          data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name, rotation: placementRotation },
         };
         addComponent(component, node);
         return;
@@ -124,17 +126,18 @@ function CanvasInner() {
       const id = `${placement.componentType}_${componentCounter++}`;
       const label = getNextLabel(placement.componentType, existingLabels());
       const component = createSpiceComponent(placement.componentType, id, label, x, y);
+      if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);
       if (placement.model) component.setProperty("model", placement.model);
       const valueLabel = getValueLabel(component, placement.componentType) || placement.model;
       const node: Node = {
         id,
         type: "component",
         position: { x, y },
-        data: { componentType: placement.componentType, label, valueLabel },
+        data: { componentType: placement.componentType, label, valueLabel, rotation: placementRotation },
       };
       addComponent(component, node);
     },
-    [addComponent],
+    [addComponent, placementRotation],
   );
 
   useEffect(() => {
@@ -145,7 +148,11 @@ function CanvasInner() {
       if (e.key === "Escape") { cancelPlacing(); setEditorMode("select"); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); if (canUndo()) undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); if (canRedo()) redo(); return; }
-      if ((e.ctrlKey || e.metaKey) && e.key === "r") { e.preventDefault(); rotateSelected(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "r") {
+        e.preventDefault();
+        if (editorMode === "place") rotatePlacement(); else rotateSelected();
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") { deleteSelected(); return; }
 
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -165,7 +172,7 @@ function CanvasInner() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, deleteSelected, startPlacing, setEditorMode]);
+  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
