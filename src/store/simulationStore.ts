@@ -45,11 +45,16 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
 
   setStatus: (status) => set({ status }),
   setResult: (result) => {
-    const { pendingProbes } = get();
+    const { pendingProbes, selectedVariables } = get();
     if (result && result.variables.length > 0) {
-      const resolved = pendingProbes.filter((p) => result.variables.includes(p));
-      const fallback = resolved.length > 0 ? resolved : [result.variables[0]];
-      set({ result, status: "done", errorMessage: null, selectedVariables: fallback, pendingProbes: [] });
+      // Keep the probes the user already had (so their panel assignment and
+      // colours survive a re-run), plus any pending ones; only fall back to
+      // the first variable when nothing carries over.
+      const kept = selectedVariables.filter((v) => result.variables.includes(v));
+      const pending = pendingProbes.filter((p) => result.variables.includes(p));
+      const merged = [...new Set([...kept, ...pending])];
+      const next = merged.length > 0 ? merged : [result.variables[0]];
+      set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [] });
     } else {
       set({ result, status: "done", errorMessage: null });
     }
