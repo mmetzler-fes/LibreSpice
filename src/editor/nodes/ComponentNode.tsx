@@ -65,12 +65,28 @@ const LABEL_POS = { left: -6, top: 30 };
 const VALUE_POS = { left: -6, top: 48 };
 
 /**
+ * Readable caption placement per rotation. Text always stays horizontal; the
+ * captions sit to the left when the part is upright (0/180) and above/below
+ * when it lies horizontal (90/270), so they never overlap the symbol.
+ */
+function captionLayout(kind: "label" | "value", rotation: number): { left: number; top: number; transform: string } {
+  const horizontal = rotation === 90 || rotation === 270;
+  if (horizontal) {
+    return kind === "label"
+      ? { left: NODE_SIZE / 2, top: -8, transform: "translate(-50%, -50%)" }
+      : { left: NODE_SIZE / 2, top: NODE_SIZE + 8, transform: "translate(-50%, -50%)" };
+  }
+  const pos = kind === "label" ? LABEL_POS : VALUE_POS;
+  return { left: pos.left, top: pos.top, transform: "translate(-100%, -50%)" };
+}
+
+/**
  * A component caption (reference or value) that sits at its default spot plus a
  * persisted, user-dragged offset. Dragging uses the `nodrag` class so ReactFlow
  * doesn't move the node instead, and divides by zoom to stay 1:1 with the mouse.
  */
 function MovableLabel({
-  nodeId, kind, base, offset, color, fontSize, fontWeight = 500, children,
+  nodeId, kind, base, offset, color, fontSize, fontWeight = 500, transform = "translate(-100%, -50%)", children,
 }: {
   nodeId: string;
   kind: "label" | "value";
@@ -79,6 +95,7 @@ function MovableLabel({
   color: string;
   fontSize: number;
   fontWeight?: number;
+  transform?: string;
   children: React.ReactNode;
 }) {
   const rf = useReactFlow();
@@ -113,7 +130,7 @@ function MovableLabel({
         position: "absolute",
         left: base.left + off.x,
         top: base.top + off.y,
-        transform: "translate(-100%, -50%)",
+        transform,
         fontSize, fontWeight, color,
         whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
         cursor: "move", zIndex: 12,
@@ -387,20 +404,22 @@ function AsyComponentNode({
         <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
       </svg>
 
-      <MovableLabel
-        nodeId={nodeId} kind="label" base={LABEL_POS} offset={data.labelOffset}
-        color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
-      >
-        {data.label}
-      </MovableLabel>
-      {data.valueLabel && (
+      {(() => { const l = captionLayout("label", rotation); return (
         <MovableLabel
-          nodeId={nodeId} kind="value" base={VALUE_POS} offset={data.valueOffset}
+          nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
+          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+        >
+          {data.label}
+        </MovableLabel>
+      ); })()}
+      {data.valueLabel && (() => { const l = captionLayout("value", rotation); return (
+        <MovableLabel
+          nodeId={nodeId} kind="value" base={l} transform={l.transform} offset={data.valueOffset}
           color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
         >
           {data.valueLabel}
         </MovableLabel>
-      )}
+      ); })()}
     </div>
   );
 }
@@ -457,25 +476,25 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
         <SymbolComponent />
       </svg>
 
-      {/* Reference label (R1, C1, …) – to the left; ground has no label */}
-      {!isGround && (
+      {/* Reference label (R1, C1, …); ground has no label */}
+      {!isGround && (() => { const l = captionLayout("label", rotation); return (
         <MovableLabel
-          nodeId={id} kind="label" base={LABEL_POS} offset={nodeData.labelOffset}
+          nodeId={id} kind="label" base={l} transform={l.transform} offset={nodeData.labelOffset}
           color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
         >
           {nodeData.label}
         </MovableLabel>
-      )}
+      ); })()}
 
-      {/* Value label (1kΩ, 100nF, 5V …) – left, below the reference */}
-      {nodeData.valueLabel && !isGround && (
+      {/* Value label (1kΩ, 100nF, 5V …) */}
+      {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation); return (
         <MovableLabel
-          nodeId={id} kind="value" base={VALUE_POS} offset={nodeData.valueOffset}
+          nodeId={id} kind="value" base={l} transform={l.transform} offset={nodeData.valueOffset}
           color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
         >
           {nodeData.valueLabel}
         </MovableLabel>
-      )}
+      ); })()}
     </div>
   );
 });
