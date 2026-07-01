@@ -338,24 +338,6 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           </div>
           {exprError && <div style={{ fontSize: 9, color: "#f87171" }}>{exprError}</div>}
         </div>
-
-        {/* Plot settings save/load (LTSpice-style .plt) */}
-        <div style={{ padding: 6, borderTop: "1px solid #1e293b", display: "flex", gap: 4 }}>
-          <button
-            onClick={handleSavePlt}
-            title="Save plot settings (.plt)"
-            style={{ flex: 1, padding: "3px 0", fontSize: 10, background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 4, cursor: "pointer" }}
-          >
-            Save .plt
-          </button>
-          <button
-            onClick={handleLoadPlt}
-            title="Load plot settings (.plt)"
-            style={{ flex: 1, padding: "3px 0", fontSize: 10, background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 4, cursor: "pointer" }}
-          >
-            Load .plt
-          </button>
-        </div>
       </div>
 
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
@@ -382,6 +364,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               onRemovePanel={() => removePanel(panel.id)}
               onFit={() => fitPanel(panel.id)}
               onToggleSyncX={toggleSyncX}
+              onSavePlt={handleSavePlt}
+              onLoadPlt={handleLoadPlt}
               onUpdate={(patch) => updatePanel(panel.id, patch)}
             />
           );
@@ -492,12 +476,14 @@ interface PlotPanelViewProps {
   onRemovePanel: () => void;
   onFit: () => void;
   onToggleSyncX: () => void;
+  onSavePlt: () => void;
+  onLoadPlt: () => void;
   onUpdate: (patch: Partial<PlotPanel>) => void;
 }
 
 function PlotPanelView(props: PlotPanelViewProps) {
   const { panel, traces, seriesMap, time, colorFor, compact, index, count, syncX,
-    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onUpdate } = props;
+    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   const canRemove = count > 1;
 
@@ -816,6 +802,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <button style={menuItem} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
               {syncX ? "☑" : "☐"} Sync. Horiz. Axes
             </button>
+            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
+            <button style={menuItem} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
+            <button style={menuItem} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
           </div>
         </>
       )}

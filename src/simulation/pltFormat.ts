@@ -130,9 +130,17 @@ function parseAxis(body: string, re: RegExp): PltAxis | undefined {
 
 function parsePane(body: string): PltPane | null {
   const traces: string[] = [];
+  // Standard `traces: N {code,flag,"name"} …` tokens.
   const tRe = /\{[^}]*?,[^}]*?,"([^"]*)"\}/g;
   let tm: RegExpExecArray | null;
   while ((tm = tRe.exec(body)) !== null) traces.push(tm[1]);
+  // Alternative `Signal: V(n001)` lines (seen in some LTSpice versions).
+  const sRe = /^[ \t]*Signal:[ \t]*(.+?)[ \t]*$/gm;
+  let sm: RegExpExecArray | null;
+  while ((sm = sRe.exec(body)) !== null) {
+    const name = sm[1].replace(/^"|"$/g, "");
+    if (!traces.includes(name)) traces.push(name);
+  }
 
   const x = parseAxis(body, /X:\s*\(([^)]*)\)/);
   if (!x) return null;
@@ -151,7 +159,10 @@ export function parsePlt(text: string): PltDoc | null {
   if (open < 0) return null;
   const outer = matchingBraces(text, open);
   if (outer === null) return null;
-  const panes = splitTopBraces(outer).map(parsePane).filter((p): p is PltPane => p !== null);
+  const blocks = splitTopBraces(outer);
+  // Fallback: some variants have no per-pane braces — treat the outer as one pane.
+  const bodies = blocks.length > 0 ? blocks : [outer];
+  const panes = bodies.map(parsePane).filter((p): p is PltPane => p !== null);
   if (panes.length === 0) return null;
   return { analysis, panes };
 }
