@@ -3,6 +3,13 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { createSpiceComponent } from "@editor/componentFactory.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 
+// Must match LTSpiceExporter / ComponentNode so WINDOW ↔ offset round-trips.
+const CENTER = 40;
+const LABEL_DEFAULT = { left: -6, top: 30 };
+const VALUE_DEFAULT = { left: -6, top: 48 };
+const winToOffset = (def: { left: number; top: number }, w?: { x: number; y: number }) =>
+  w ? { x: w.x - (def.left - CENTER), y: w.y - (def.top - CENTER) } : undefined;
+
 const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   res: "resistor", cap: "capacitor", ind: "inductor",
   diode: "diode", LED: "led",
@@ -72,8 +79,16 @@ export class LTSpiceParser {
           y: parseInt(parts[3], 10),
           rot: parts[4] || "R0",
           attrs: {} as Record<string, string>,
+          windows: {} as Record<number, { x: number; y: number }>,
           id: `comp_${compIdCounter++}`
         };
+      } else if (cmd === "WINDOW") {
+        if (currentSymbol) {
+          const pid = parseInt(parts[1], 10);
+          const wx = parseInt(parts[2], 10);
+          const wy = parseInt(parts[3], 10);
+          if (!isNaN(pid) && !isNaN(wx) && !isNaN(wy)) currentSymbol.windows[pid] = { x: wx, y: wy };
+        }
       } else if (cmd === "SYMATTR") {
         if (currentSymbol) {
           const attrName = parts[1];
@@ -251,6 +266,10 @@ export class LTSpiceParser {
 
     components.push(comp);
 
+    const windows = (sym.windows ?? {}) as Record<number, { x: number; y: number }>;
+    const labelOffset = winToOffset(LABEL_DEFAULT, windows[0]);
+    const valueOffset = winToOffset(VALUE_DEFAULT, windows[3]);
+
     nodes.push({
       id: sym.id,
       type: "component",
@@ -259,7 +278,9 @@ export class LTSpiceParser {
         componentType: cType,
         label,
         valueLabel: valueStr,
-        rotation: rotDeg
+        rotation: rotDeg,
+        ...(labelOffset && { labelOffset }),
+        ...(valueOffset && { valueOffset }),
       }
     });
   }

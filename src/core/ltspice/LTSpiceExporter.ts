@@ -1,6 +1,18 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 
+// Default caption anchors (node-local px) and symbol centre — must match the
+// LABEL_POS/VALUE_POS/centre used by ComponentNode and LTSpiceParser so that a
+// zero offset maps to our default layout and the round-trip is exact.
+const CENTER = 40;
+const LABEL_DEFAULT = { left: -6, top: 30 };
+const VALUE_DEFAULT = { left: -6, top: 48 };
+type Offset = { x: number; y: number } | undefined;
+const winCoord = (def: { left: number; top: number }, off: Offset) => ({
+  x: Math.round(def.left - CENTER + (off?.x ?? 0)),
+  y: Math.round(def.top - CENTER + (off?.y ?? 0)),
+});
+
 const TYPE_TO_SYMBOL: Record<string, string> = {
   resistor: "res",
   capacitor: "cap",
@@ -41,7 +53,10 @@ export class LTSpiceExporter {
 
     // Export components
     for (const node of nodes) {
-      const data = node.data as { componentType: ComponentType; label: string; valueLabel?: string; rotation?: number };
+      const data = node.data as {
+        componentType: ComponentType; label: string; valueLabel?: string; rotation?: number;
+        labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
+      };
       const x = Math.round(node.position.x + 40);
       const y = Math.round(node.position.y + 40);
 
@@ -57,8 +72,18 @@ export class LTSpiceExporter {
       if (data.rotation === 270) rotStr = "R270";
 
       lines.push(`SYMBOL ${symName} ${x} ${y} ${rotStr}`);
+
+      // Persist caption positions so LTSpice (and our own re-import) keep them.
+      // Right-justified: text extends left of the anchor, like our rendering.
+      const lw = winCoord(LABEL_DEFAULT, data.labelOffset);
+      lines.push(`WINDOW 0 ${lw.x} ${lw.y} Right 2`);
+      if (data.valueLabel) {
+        const vw = winCoord(VALUE_DEFAULT, data.valueOffset);
+        lines.push(`WINDOW 3 ${vw.x} ${vw.y} Right 2`);
+      }
+
       lines.push(`SYMATTR InstName ${data.label}`);
-      
+
       let val = data.valueLabel || "";
       
       // If it's a special source, we might need to extract the actual value string from the circuit store
@@ -86,7 +111,7 @@ export class LTSpiceExporter {
 
     // Directives
     if (directives) {
-      const textLines = directives.split("\\n");
+      const textLines = directives.split("\n");
       let ty = 100;
       for (const t of textLines) {
         if (t.trim()) {
@@ -96,6 +121,6 @@ export class LTSpiceExporter {
       }
     }
 
-    return lines.join("\\n");
+    return lines.join("\n");
   }
 }
