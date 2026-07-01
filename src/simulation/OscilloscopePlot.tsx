@@ -115,6 +115,17 @@ function groupByUnit(traces: string[], seriesMap: Record<string, Float64Array | 
   });
 }
 
+/** A unit group with the panel's manual overrides applied. */
+interface AxisGroup extends UnitGroup { ticks?: number }
+
+/** Apply per-unit y-overrides (left/first axis also honours legacy yMin/yMax). */
+function applyYOverrides(groups: UnitGroup[], panel: PlotPanel): AxisGroup[] {
+  return groups.map((g, gi) => {
+    const o = panel.yAxes?.[g.unit] ?? (gi === 0 ? { min: panel.yMin, max: panel.yMax, ticks: panel.yTicks } : {});
+    return { ...g, yMin: o.min ?? g.yMin, yMax: o.max ?? g.yMax, ticks: o.ticks };
+  });
+}
+
 interface OscilloscopePlotProps {
   compact?: boolean;
 }
@@ -197,13 +208,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
       panes: panels.map((panel): PltPane => {
         const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
-        const groups = groupByUnit(traces, seriesMap.map);
-        // First (left) group honours the panel's manual y-override.
-        const y = groups.map((g, gi) => {
-          const low = gi === 0 ? panel.yMin ?? g.yMin : g.yMin;
-          const high = gi === 0 ? panel.yMax ?? g.yMax : g.yMax;
-          return axisFrom(low, high, panel.yTicks ?? 5);
-        });
+        const groups = applyYOverrides(groupByUnit(traces, seriesMap.map), panel);
+        const y = groups.map((g) => axisFrom(g.yMin, g.yMax, g.ticks ?? panel.yTicks ?? 5));
         if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks ?? 5));
         const x = axisFrom(panel.xMin ?? time[0], panel.xMax ?? time[time.length - 1], panel.xTicks ?? 5);
         return { traces, x, y, log: [!!panel.logX, false, false] };
@@ -240,10 +246,18 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
       doc.panes.forEach((pane, i) => {
         const id = `panel-${i}`;
+        // Map each Y[k] tuple to its unit group (same order as the traces).
+        const units = [...new Set(pane.traces.map((t) => inferUnit(resolveName(t))))];
+        const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
+        units.forEach((u, k) => {
+          const ax = pane.y[k];
+          if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickCount(ax) };
+        });
         newPanels.push({
           id,
           xMin: pane.x.low, xMax: pane.x.high, xTicks: tickCount(pane.x), logX: pane.log[0],
           yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickCount(pane.y[0]),
+          yAxes,
         });
         for (const t of pane.traces) {
           const name = resolveName(t);
@@ -504,6 +518,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   const canRemove = count > 1;
 
+  /** Merge a manual override into one unit's y-axis. */
+  const setYAxis = (unit: string, patch: { min?: number; max?: number; ticks?: number }) =>
+    onUpdate({ yAxes: { ...panel.yAxes, [unit]: { ...panel.yAxes?.[unit], ...patch } } });
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: compact ? 180 : 260 });
   const [showAxis, setShowAxis] = useState(false);
@@ -533,11 +551,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const RIGHT_AXIS_W = compact ? 42 : 50;
 
   // Group traces by unit → one y-axis each (first left, the rest stacked right,
-  // LTSpice-style). The panel's manual y-override applies to the left axis only.
+  // LTSpice-style). Each axis can be scaled manually (see the settings menu).
   const groups = useMemo(() => groupByUnit(traces, seriesMap), [traces, seriesMap]);
-  const yGroups: UnitGroup[] = groups.map((g, gi) =>
-    gi === 0 ? { ...g, yMin: panel.yMin ?? g.yMin, yMax: panel.yMax ?? g.yMax } : g);
-  const y0 = yGroups[0] ?? { unit: "", traces: [], yMin: -1, yMax: 1 };
+  const yGroups: AxisGroup[] = applyYOverrides(groups, panel);
+  const y0: AxisGroup = yGroups[0] ?? { unit: "", traces: [], yMin: -1, yMax: 1 };
   const rightCount = Math.max(0, yGroups.length - 1);
   const marginRight = margin.right + rightCount * RIGHT_AXIS_W;
 
@@ -582,7 +599,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const xTickCount = panel.xTicks ?? Math.max(4, Math.floor(plotW / 80));
   const yTickCount = panel.yTicks ?? Math.max(3, Math.floor(plotH / 60));
   const xTicks = logX ? logTicks(xLo, vr.xMax) : niceTicks(vr.xMin, vr.xMax, xTickCount);
-  const yTicks = niceTicks(y0.yMin, y0.yMax, yTickCount);
+  const yTicks = niceTicks(y0.yMin, y0.yMax, y0.ticks ?? yTickCount);
 
   const nearestIndex = (t: number): number => {
     let lo = 0, hi = time.length - 1;
@@ -690,14 +707,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
               </label>
             }
           />
-          <AxisFields
-            title="y-axis"
-            min={panel.yMin ?? round6(vr.yMin)} max={panel.yMax ?? round6(vr.yMax)} ticks={yTickCount}
-            minLabel="bottom" maxLabel="top"
-            onMin={(v) => onUpdate({ yMin: v })}
-            onMax={(v) => onUpdate({ yMax: v })}
-            onTicks={(v) => onUpdate({ yTicks: v })}
-          />
+          {(yGroups.length > 0 ? yGroups : [y0]).map((g) => (
+            <AxisFields
+              key={g.unit || "y"}
+              title={g.unit ? `y (${g.unit})` : "y-axis"}
+              min={round6(g.yMin)} max={round6(g.yMax)} ticks={g.ticks ?? yTickCount}
+              minLabel="bottom" maxLabel="top"
+              onMin={(v) => setYAxis(g.unit, { min: v })}
+              onMax={(v) => setYAxis(g.unit, { max: v })}
+              onTicks={(v) => setYAxis(g.unit, { ticks: v })}
+            />
+          ))}
         </div>
       )}
 
@@ -745,7 +765,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               return (
                 <g key={g.unit || r}>
                   <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke="#334155" strokeWidth={1} />
-                  {niceTicks(g.yMin, g.yMax, yTickCount).map((v) => (
+                  {niceTicks(g.yMin, g.yMax, g.ticks ?? yTickCount).map((v) => (
                     <g key={v}>
                       <line x1={xLine} y1={sy(v)} x2={xLine + 3} y2={sy(v)} stroke={col} strokeWidth={1} />
                       <text x={xLine + 5} y={sy(v) + 3} textAnchor="start" fontSize={9} fill={col}>{fmtVal(v)}</text>
