@@ -83,6 +83,30 @@ export class LED extends Diode {
   }
 }
 
+export class Zener extends Diode {
+  constructor(id: string, label: string, position?: Point, model = "DZener") {
+    super(id, label, position, model);
+  }
+
+  clone(): Zener {
+    const z = new Zener(this.id, this.label, { ...this.position }, this.model);
+    z.rotation = this.rotation;
+    return z;
+  }
+}
+
+export class Schottky extends Diode {
+  constructor(id: string, label: string, position?: Point, model = "DSchottky") {
+    super(id, label, position, model);
+  }
+
+  clone(): Schottky {
+    const s = new Schottky(this.id, this.label, { ...this.position }, this.model);
+    s.rotation = this.rotation;
+    return s;
+  }
+}
+
 export type BJTType = "NPN" | "PNP";
 
 export class BJT extends Semiconductor {

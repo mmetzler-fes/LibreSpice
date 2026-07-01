@@ -1,6 +1,6 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
-import { createSpiceComponent } from "@editor/SchematicCanvas.js";
+import { createSpiceComponent } from "@editor/componentFactory.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 
 const SYMBOL_TO_TYPE: Record<string, ComponentType> = {

@@ -8,6 +8,7 @@ import {
   addEdge,
   type Connection,
   type Node,
+  type Edge,
   type NodeMouseHandler,
   BackgroundVariant,
   useReactFlow,
@@ -19,113 +20,31 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
+import { WireEdge, WireOverlay, type WireData } from "./WireTool.js";
+import { PlacementGhost } from "./PlacementGhost.js";
+import { NODE_SIZE } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
 import { NetLabelsPanel } from "./NetLabelsPanel.js";
+import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
-import { Resistor } from "@core/components/passives/Resistor.js";
-import { Capacitor } from "@core/components/passives/Capacitor.js";
-import { Inductor } from "@core/components/passives/Inductor.js";
-import { Diode, LED, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
-import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
-import { Ground } from "@core/components/special/Special.js";
-import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
+import { createSpiceComponent, createSubcircuitComponent, getDefaultLabel, getValueLabel } from "./componentFactory.js";
+import type { PendingLibraryPlacement } from "@store/uiStore.js";
+import { getProbeCandidates, getCurrentProbeCandidates } from "@core/circuit/probeUtils.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
 const NODE_TYPES = { component: ComponentNode };
+const EDGE_TYPES = { wire: WireEdge };
 const GRID_SIZE = 20;
 let componentCounter = 1;
-
-export function createSpiceComponent(
-  type: ComponentType,
-  id: string,
-  label: string,
-  x: number,
-  y: number,
-): SpiceComponent {
-  const pos = { x, y };
-  switch (type) {
-    case "resistor":    return new Resistor(id, label, pos);
-    case "capacitor":   return new Capacitor(id, label, pos);
-    case "inductor":    return new Inductor(id, label, pos);
-    case "diode":       return new Diode(id, label, pos);
-    case "led":         return new LED(id, label, pos);
-    case "bjt_npn":     return new BJT(id, label, pos, "NPN");
-    case "bjt_pnp":     return new BJT(id, label, pos, "PNP");
-    case "mosfet_n":    return new MOSFET(id, label, pos, "NMOS");
-    case "mosfet_p":    return new MOSFET(id, label, pos, "PMOS");
-    case "vsource":     return new VoltageSource(id, label, pos);
-    case "isource":     return new CurrentSource(id, label, pos);
-    case "sinesource":  return new SineSource(id, label, pos);
-    case "pulsesource": return new PulseSource(id, label, pos);
-    case "ground":      return new Ground(id, pos);
-    default:            return new Resistor(id, label, pos);
-  }
-}
-
-function getDefaultLabel(type: ComponentType, counter: number): string {
-  const map: Partial<Record<ComponentType, string>> = {
-    resistor: "R", capacitor: "C", inductor: "L", diode: "D", led: "D",
-    bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
-    vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
-  };
-  return `${map[type] ?? "X"}${counter}`;
-}
+let wireCounter = 1;
 
 function snapToGrid(v: number): number {
   return Math.round(v / GRID_SIZE) * GRID_SIZE;
-}
-
-/** Format a number with SI prefix for display on canvas */
-function fmtSI(v: number, unit: string): string {
-  const a = Math.abs(v);
-  if (a === 0) return `0${unit}`;
-  if (a >= 1e9)  return `${+(v / 1e9).toPrecision(3)}G${unit}`;
-  if (a >= 1e6)  return `${+(v / 1e6).toPrecision(3)}M${unit}`;
-  if (a >= 1e3)  return `${+(v / 1e3).toPrecision(3)}k${unit}`;
-  if (a >= 1)    return `${+v.toPrecision(3)}${unit}`;
-  if (a >= 1e-3) return `${+(v * 1e3).toPrecision(3)}m${unit}`;
-  if (a >= 1e-6) return `${+(v * 1e6).toPrecision(3)}µ${unit}`;
-  if (a >= 1e-9) return `${+(v * 1e9).toPrecision(3)}n${unit}`;
-  return `${+(v * 1e12).toPrecision(3)}p${unit}`;
-}
-
-/** Derive a short value label from a SpiceComponent for display on the canvas */
-export function getValueLabel(component: SpiceComponent, type: ComponentType): string {
-  switch (type) {
-    case "resistor":  {
-      const r = component as unknown as { resistance: number };
-      return fmtSI(r.resistance, "Ω");
-    }
-    case "capacitor": {
-      const c = component as unknown as { capacitance: number };
-      return fmtSI(c.capacitance, "F");
-    }
-    case "inductor":  {
-      const l = component as unknown as { inductance: number };
-      return fmtSI(l.inductance, "H");
-    }
-    case "vsource":   {
-      const v = component as unknown as { dcValue: number };
-      return `${fmtSI(v.dcValue, "V")} DC`;
-    }
-    case "isource":   {
-      const i = component as unknown as { dcValue: number };
-      return `${fmtSI(i.dcValue, "A")} DC`;
-    }
-    case "sinesource": {
-      const s = component as unknown as { amplitude: number; frequency: number };
-      return `${fmtSI(s.amplitude, "V")} ${fmtSI(s.frequency, "Hz")}`;
-    }
-    case "pulsesource": {
-      const p = component as unknown as { pulsedValue: number; period: number };
-      return `${fmtSI(p.pulsedValue, "V")} ${fmtSI(p.period, "s")}`;
-    }
-    default: return "";
-  }
 }
 
 function CanvasInner() {
@@ -139,18 +58,23 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, deleteSelected, rebuildConnections,
+    circuit,
   } = useCircuitStore();
 
   const {
-    editorMode, pendingPlaceType,
+    editorMode, pendingPlaceType, pendingLibraryPlacement,
     setEditorMode, startPlacing, cancelPlacing,
     showPropertiesPanel, showComponentPalette,
+    setDockTab, autoProbeCurrent,
   } = useUIStore();
+
+  const { result, addProbeCandidates } = useSimulationStore();
 
   const placeComponent = useCallback(
     (type: ComponentType, cx: number, cy: number) => {
-      const x = snapToGrid(cx);
-      const y = snapToGrid(cy);
+      // Center the node on the (snapped) cursor: node.position is its top-left.
+      const x = snapToGrid(cx) - NODE_SIZE / 2;
+      const y = snapToGrid(cy) - NODE_SIZE / 2;
       const id = `${type}_${componentCounter++}`;
       // Ground uses label "0" internally; display label is separate
       const label = type === "ground" ? "0" : getDefaultLabel(type, componentCounter - 1);
@@ -161,6 +85,43 @@ function CanvasInner() {
         type: "component",
         position: { x, y },
         data: { componentType: type, label, valueLabel },
+      };
+      addComponent(component, node);
+    },
+    [addComponent],
+  );
+
+  const placeLibraryComponent = useCallback(
+    (placement: PendingLibraryPlacement, cx: number, cy: number) => {
+      const x = snapToGrid(cx) - NODE_SIZE / 2;
+      const y = snapToGrid(cy) - NODE_SIZE / 2;
+
+      if (placement.componentType === "subcircuit") {
+        const id = `subckt_${componentCounter++}`;
+        const label = getDefaultLabel("subcircuit", componentCounter - 1);
+        const component = createSubcircuitComponent(id, label, x, y, placement.raw ?? "", placement.pins ?? []);
+        const node: Node = {
+          id,
+          type: "component",
+          position: { x, y },
+          data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name },
+        };
+        addComponent(component, node);
+        return;
+      }
+
+      // Typed device backed by an imported .model – place the base symbol with
+      // its model property pre-set so the netlist references the model.
+      const id = `${placement.componentType}_${componentCounter++}`;
+      const label = getDefaultLabel(placement.componentType, componentCounter - 1);
+      const component = createSpiceComponent(placement.componentType, id, label, x, y);
+      if (placement.model) component.setProperty("model", placement.model);
+      const valueLabel = getValueLabel(component, placement.componentType) || placement.model;
+      const node: Node = {
+        id,
+        type: "component",
+        position: { x, y },
+        data: { componentType: placement.componentType, label, valueLabel },
       };
       addComponent(component, node);
     },
@@ -213,20 +174,57 @@ function CanvasInner() {
     [edges, setEdges, connectPorts, regenerateNetlist],
   );
 
+  const onCreateWire = useCallback(
+    (connection: Connection, data: WireData) => {
+      const id = `wire_${connection.source}-${connection.sourceHandle}__${connection.target}-${connection.targetHandle}_${wireCounter++}`;
+      const edge: Edge = { id, ...connection, type: "wire", data };
+      setEdges(addEdge(edge, edges));
+      if (connection.source && connection.sourceHandle && connection.target && connection.targetHandle) {
+        try {
+          connectPorts(`${connection.source}-${connection.sourceHandle}`, `${connection.target}-${connection.targetHandle}`);
+        } catch { /* visual-only */ }
+      }
+      regenerateNetlist();
+    },
+    [edges, setEdges, connectPorts, regenerateNetlist],
+  );
+
   const onNodeClick: NodeMouseHandler = useCallback(
-    (_, node) => setSelectedComponentId(node.id),
-    [setSelectedComponentId],
+    (_, node) => {
+      setSelectedComponentId(node.id);
+      if (!autoProbeCurrent) return;
+      const comp = circuit.components.get(node.id);
+      if (!comp || comp.id.startsWith("ground")) return;
+      // Offer this component's branch current in the waveform sidebar (selected by default).
+      addProbeCandidates(getCurrentProbeCandidates(comp.label));
+      if (result) setDockTab("waveform");
+    },
+    [setSelectedComponentId, autoProbeCurrent, circuit, addProbeCandidates, result, setDockTab],
+  );
+
+  const onNodeDoubleClick: NodeMouseHandler = useCallback(
+    (_, node) => {
+      const comp = circuit.components.get(node.id);
+      if (!comp) return;
+      addProbeCandidates(getProbeCandidates(comp, circuit));
+      setDockTab("waveform");
+    },
+    [circuit, addProbeCandidates, setDockTab],
   );
 
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
       setSelectedComponentId(null);
-      if (editorMode === "place" && pendingPlaceType) {
+      if (editorMode === "place") {
         const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-        placeComponent(pendingPlaceType, pos.x, pos.y);
+        if (pendingLibraryPlacement) {
+          placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
+        } else if (pendingPlaceType) {
+          placeComponent(pendingPlaceType, pos.x, pos.y);
+        }
       }
     },
-    [editorMode, pendingPlaceType, placeComponent, setSelectedComponentId, reactFlowInstance],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, reactFlowInstance],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
@@ -292,10 +290,12 @@ function CanvasInner() {
             nodes={nodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange as never}
             onEdgesChange={onEdgesChange as never}
             onConnect={onConnect}
             onNodeClick={onNodeClick}
+            onNodeDoubleClick={onNodeDoubleClick}
             onPaneClick={onPaneClick}
             snapToGrid
             snapGrid={[GRID_SIZE, GRID_SIZE]}
@@ -316,6 +316,14 @@ function CanvasInner() {
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" pannable zoomable nodeStrokeWidth={3} />
           </ReactFlow>
+
+          {editorMode === "wire" && (
+            <WireOverlay wrapperRef={wrapperRef} nodes={nodes} edges={edges} onCreateWire={onCreateWire} />
+          )}
+
+          {editorMode === "place" && pendingPlaceType && (
+            <PlacementGhost wrapperRef={wrapperRef} type={pendingPlaceType} />
+          )}
         </div>
 
         {showPropertiesPanel && (
@@ -325,6 +333,7 @@ function CanvasInner() {
           </aside>
         )}
       </div>
+      <DockPanel />
     </div>
   );
 }

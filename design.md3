@@ -1,0 +1,62 @@
+Implementation Plan: LibreSpice Library Integration
+1. Zielsetzung & Umfang
+Ziel dieses Meilensteins ist es, die Komponentenbibliothek der librespice-Anwendung zu überarbeiten, sie kompatibel zum LTSpice-Bibliotheksformat zu machen und moderne Web-Design-Entscheidungen zu integrieren. Anwender sollen bestehende LTSpice-Modelle und -Subcircuits direkt per Copy-Paste importieren können.
+
+2. Architektonische Designentscheidungen (Inspirationsquelle: CircuitSim.com)
+Eine Online-Recherche zu modernen webbasierten SPICE-Simulatoren (wie CircuitSim.com) zeigt folgende vorteilhafte Architektur- und Designentscheidungen, die für librespice übernommen werden sollten:
+
+Sandbox- & Echtzeit-Paradigma: CircuitSim verwendet einen "Sandbox"-Ansatz. Sobald Bauteile auf dem Canvas platziert oder Parameter geändert werden, läuft der SPICE-Solver im Hintergrund asynchron weiter.
+
+Für LibreSpice: Das UI darf beim Ändern von Bibliotheksparametern oder beim Live-Hinzufügen von LTSpice-Code nicht blockieren.
+
+Hybride Komponenten-Verwaltung ("Local" vs. "Temp"): CircuitSim löst das Laden fremder Schaltungen elegant: Werden Schaltungen mit unbekannten Custom-Modellen geöffnet, kann der Nutzer entscheiden, ob diese permanent in die lokale Bibliothek aufgenommen (Add to Local) oder nur für die aktuelle Sitzung im Speicher gehalten werden (Use Temp).
+
+Für LibreSpice: Kopiert ein Nutzer ein LTSpice-Modell hinein, sollte dieses optional isoliert für das aktuelle Projekt oder global für das System registriert werden können.
+
+Asynchrone Web-Worker für den Engine-Solver: Damit die UI flüssig bleibt, werden Berechnungen von der Benutzeroberfläche entkoppelt.
+
+3. Anforderungen für LTSpice-Kompatibilität
+Parser für .model und .subckt: Implementierung eines robusten Parsers, der die LTSpice-Syntax versteht.
+
+Direktimport per Copy-Paste: Ein einfaches Textfeld im Bibliotheksmanager, in das der Text (z. B. eine Diode .MODEL 1N4148 D(...) oder ein OPV-Subcircuit) direkt hineinkopiert werden kann.
+
+Pin-Mapping: Automatische Zuordnung der Standard-Pins (z. B. Anode/Kathode bei Dioden, Drain/Gate/Source bei MOSFETs) basierend auf der LTSpice-Namenskonvention, damit die visuelle Repräsentationskomponente mit der SPICE-Netzliste übereinstimmt.
+
+4. Phasen & Aufgaben
++---------------------------------------+
+| Phase 1: LTSpice Parser & Datenmodell |
++---------------------------------------+
+                   |
+                   v
++---------------------------------------+
+| Phase 2: UI-Integration & Text-Import |
++---------------------------------------+
+                   |
+                   v
++---------------------------------------+
+| Phase 3: Live-Simulation & Validierung|
++---------------------------------------+
+Phase 1: LTSpice Parser & Datenmodell
+[ ] Implementierung eines AST (Abstract Syntax Tree) Parsers für LTSpice .model-Direktiven.
+
+[ ] Datenstruktur zur Abbildung von Subcircuits (.subckt) auf visuelle Symbole.
+
+[ ] Fallback-Logik für unbekannte Parameter, um Abbrüche zu verhindern (Ignorieren mit Warnung).
+
+Phase 2: UI-Integration & Text-Import
+[ ] Integration eines "Text-Import"-Buttons im Bibliotheks-Panel.
+
+[ ] Implementierung des "Local vs. Temp Mode" (nach CircuitSim-Vorbild) beim Importieren neuer Modelle.
+
+[ ] Syntax-Highlighting für SPICE-Code im Import-Fenster.
+
+Phase 3: Ergänzte Punkte & System-Validierung
+[ ] Punkt 5: Automatische Pin-Zuweisung & Symbol-Generierung
+
+Erstellung einer Heuristik, die aus der Anzahl der Pins im .subckt ein generisches grafisches Symbol generiert, falls kein passendes Standard-Symbol existiert.
+
+[ ] Punkt 6: Integrierte Regressionstests für LTSpice-Bibliotheken
+
+Hinzufügen einer Testsuite, die 50 Standard-LTSpice-Modelle (Dioden, Transistoren, OpVs) importiert und prüft, ob die Netzliste fehlerfrei generiert wird.
+
+[ ] System-Start-Validierung: Lokale Ausführung von npm run dev / cargo run (je nach Stack) durchgeführt. Die App startet weiterhin fehlerfrei, Routing und Canvas-Rendering funktionieren uneingeschränkt.

@@ -26,6 +26,16 @@ export {
 
 export { Ground, CustomSubcircuit } from "./components/special/Special.js";
 
+export { ModelParser } from "./library/ModelParser.js";
+export type {
+  LibraryEntry,
+  LibraryScope,
+  ModelDeviceClass,
+  ParseResult,
+  SpiceModelDef,
+  SubcircuitDef,
+} from "./library/types.js";
+
 export { Net } from "./circuit/Net.js";
 export { Circuit } from "./circuit/Circuit.js";
 export { NetlistGenerator } from "./circuit/NetlistGenerator.js";

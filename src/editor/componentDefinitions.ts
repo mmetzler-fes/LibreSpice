@@ -14,15 +14,16 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "inductor", label: "Inductor", category: "Passives", defaultLabel: "L1", description: "Inductor (L)" },
   { type: "diode", label: "Diode", category: "Semiconductors", defaultLabel: "D1", description: "Diode (D)" },
   { type: "led", label: "LED", category: "Semiconductors", defaultLabel: "D2", description: "Light Emitting Diode" },
+  { type: "zener", label: "Zener", category: "Semiconductors", defaultLabel: "D3", description: "Zener Diode" },
+  { type: "schottky", label: "Schottky", category: "Semiconductors", defaultLabel: "D4", description: "Schottky Diode" },
   { type: "bjt_npn", label: "NPN BJT", category: "Semiconductors", defaultLabel: "Q1", description: "NPN Bipolar Junction Transistor" },
   { type: "bjt_pnp", label: "PNP BJT", category: "Semiconductors", defaultLabel: "Q2", description: "PNP Bipolar Junction Transistor" },
   { type: "mosfet_n", label: "NMOS", category: "Semiconductors", defaultLabel: "M1", description: "N-Channel MOSFET" },
   { type: "mosfet_p", label: "PMOS", category: "Semiconductors", defaultLabel: "M2", description: "P-Channel MOSFET" },
-  { type: "vsource", label: "V Source", category: "Sources", defaultLabel: "V1", description: "Voltage Source" },
+  { type: "vsource", label: "Voltage Source", category: "Sources", defaultLabel: "V1", description: "Voltage Source (DC / Sine / Pulse — selectable)" },
   { type: "isource", label: "I Source", category: "Sources", defaultLabel: "I1", description: "Current Source" },
-  { type: "sinesource", label: "Sin Source", category: "Sources", defaultLabel: "V2", description: "Sinusoidal Voltage Source" },
-  { type: "pulsesource", label: "Pulse", category: "Sources", defaultLabel: "V3", description: "Pulse Voltage Source" },
+  { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },
   { type: "ground", label: "Ground", category: "Special", defaultLabel: "GND", description: "Ground reference (node 0)" },
 ];
 
-export const CATEGORIES = ["Passives", "Semiconductors", "Sources", "Special"];
+export const CATEGORIES = ["Passives", "Semiconductors", "Active", "Sources", "Special"];

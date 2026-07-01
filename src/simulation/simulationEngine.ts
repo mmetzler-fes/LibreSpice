@@ -1,5 +1,6 @@
 import { Simulation, type ResultType } from "eecircuit-engine";
 import type { SimulationResult } from "@store/simulationStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
 
 let sim: Simulation | null = null;
 
@@ -11,13 +12,35 @@ async function getSimulation(): Promise<Simulation> {
   return sim;
 }
 
+/** Read the ngspice stdout/stderr log from the engine and push it to the store. */
+function captureLog(engine: Simulation, netlist: string): void {
+  const parts: string[] = [];
+  const tryGet = (fn: () => string | string[]): string => {
+    try {
+      const v = fn();
+      return Array.isArray(v) ? v.join("\n") : v;
+    } catch {
+      return "";
+    }
+  };
+  parts.push("===== Netlist =====", netlist.trim());
+  const info = tryGet(() => engine.getInfo());
+  const errors = tryGet(() => engine.getError());
+  if (info.trim()) parts.push("===== ngspice output =====", info.trim());
+  if (errors.trim()) parts.push("===== Errors / warnings =====", errors.trim());
+  useSimulationStore.getState().setLog(parts.join("\n\n"));
+}
+
 export async function runSimulation(netlist: string): Promise<SimulationResult> {
+  let engine: Simulation | undefined;
   try {
-    const engine = await getSimulation();
+    engine = await getSimulation();
     engine.setNetList(netlist);
     const result: ResultType = await engine.runSim();
+    captureLog(engine, netlist);
     return convertResult(result);
   } catch (e) {
+    if (engine) captureLog(engine, netlist);
     sim = null;
     throw new Error(`Simulation failed: ${e instanceof Error ? e.message : String(e)}`);
   }

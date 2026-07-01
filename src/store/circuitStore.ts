@@ -1,11 +1,14 @@
 import { create } from "zustand";
 import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
+import { Net } from "@core/circuit/Net.js";
 import { NetlistGenerator, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel } from "@editor/SchematicCanvas.js";
+import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
+import { useLibraryStore } from "./libraryStore.js";
+import type { CircuitSnapshot } from "./persistence.js";
 
 interface HistoryEntry {
   nodes: Node[];
@@ -50,6 +53,8 @@ interface CircuitActions {
   rotateSelected: () => void;
   deleteSelected: () => void;
   rebuildConnections: () => void;
+  exportSnapshot: () => CircuitSnapshot;
+  loadFromSnapshot: (snapshot: CircuitSnapshot) => void;
 }
 
 const DEFAULT_CONFIG: SimulationConfig = {
@@ -101,10 +106,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     component.setProperty(key, value);
     const type = (get().nodes.find((n) => n.id === id)?.data as { componentType?: ComponentType })?.componentType;
     const valueLabel = type ? getValueLabel(component, type) : undefined;
+    // Keep the node's sourceType in sync so the generalized source's symbol updates.
+    const sourceType = (component as { sourceType?: string }).sourceType;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }) } }
+          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }) } }
           : n,
       ),
       propertyVersion: state.propertyVersion + 1,
@@ -123,13 +130,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   connectPorts: (portIdA, portIdB) => {
     get().circuit.connectPorts(portIdA, portIdB);
+    set((state) => ({ netVersion: state.netVersion + 1 }));
     get().regenerateNetlist();
   },
 
   regenerateNetlist: () => {
     const { circuit, simulationConfig, spiceDirectives } = get();
     const generator = new NetlistGenerator();
-    const netlist = generator.generate(circuit, simulationConfig, spiceDirectives);
+    const libraryDefs = useLibraryStore.getState().getDefinitionsText();
+    const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryDefs);
     set({ netlist });
   },
 
@@ -268,16 +277,19 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
     }
     
-    // Remove all nets except ground
-    const groundNet = circuit.nets.get("0");
+    // Remove all nets, then (re)create the single ground net "0" if any ground
+    // component exists. Recreating it even when it was lost keeps GND robust.
+    const prevGround = circuit.nets.get("0");
     circuit.nets.clear();
-    if (groundNet) {
+    const hasGround = [...circuit.components.values()].some((c) => c.id.startsWith("ground_"));
+    if (hasGround) {
+      const groundNet = prevGround ?? new Net("0", "GND");
+      if (groundNet.nodeLabel === "0") groundNet.nodeLabel = "GND";
       groundNet.connectedPortIds.clear();
       for (const comp of circuit.components.values()) {
         if (comp.id.startsWith("ground_")) {
-           const pid = `${comp.id}-gnd`;
-           comp.ports[0].connect("0");
-           groundNet.addPort(pid);
+          comp.ports[0].connect("0");
+          groundNet.addPort(`${comp.id}-gnd`);
         }
       }
       circuit.nets.set("0", groundNet);
@@ -292,17 +304,76 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
     }
 
-    // Restore custom labels
+    // Restore custom labels – never relabel the ground net "0".
     for (const [portId, label] of customLabels.entries()) {
       for (const comp of circuit.components.values()) {
         const port = comp.ports.find(p => p.id === portId);
-        if (port && port.netId) {
+        if (port && port.netId && port.netId !== "0") {
           const net = circuit.nets.get(port.netId);
           if (net) net.nodeLabel = label;
         }
       }
     }
-    
+
+    set((state) => ({ netVersion: state.netVersion + 1 }));
     get().regenerateNetlist();
+  },
+
+  exportSnapshot: () => {
+    const { nodes, edges, spiceDirectives, simulationConfig, circuit } = get();
+    const componentProps: Record<string, Record<string, string | number>> = {};
+    for (const [id, comp] of circuit.components) {
+      const props: Record<string, string | number> = {};
+      for (const p of comp.getProperties()) props[p.key] = p.value;
+      componentProps[id] = props;
+    }
+    const netLabels: Record<string, string> = {};
+    for (const [id, net] of circuit.nets) {
+      if (id !== "0" && net.nodeLabel !== id) netLabels[id] = net.nodeLabel;
+    }
+    return { version: 1, nodes, edges, spiceDirectives, simulationConfig, componentProps, netLabels };
+  },
+
+  loadFromSnapshot: (snapshot) => {
+    const newCircuit = new Circuit();
+    const rebuiltNodes = snapshot.nodes.map((n) => ({ ...n }));
+
+    for (const node of rebuiltNodes) {
+      const type = (node.data as { componentType?: ComponentType }).componentType;
+      if (!type) continue;
+      const label = String((node.data as { label?: string }).label ?? node.id);
+      const { x, y } = node.position;
+      const comp = createSpiceComponent(type, node.id, label, x, y);
+      const props = snapshot.componentProps[node.id];
+      if (props) {
+        for (const [key, val] of Object.entries(props)) comp.setProperty(key, val);
+      }
+      const rotation = (node.data as { rotation?: number }).rotation;
+      if (rotation) {
+        const steps = (rotation / 90) % 4;
+        for (let i = 0; i < steps; i++) comp.rotate(90);
+      }
+      newCircuit.addComponent(comp);
+    }
+
+    set({
+      circuit: newCircuit,
+      nodes: rebuiltNodes,
+      edges: snapshot.edges.map((e) => ({ ...e })),
+      spiceDirectives: snapshot.spiceDirectives,
+      simulationConfig: snapshot.simulationConfig,
+      selectedComponentId: null,
+      fileHandle: null,
+      fileName: null,
+      _history: [],
+      _future: [],
+    });
+
+    setTimeout(() => {
+      get().rebuildConnections();
+      for (const [netId, label] of Object.entries(snapshot.netLabels)) {
+        get().renameNet(netId, label);
+      }
+    }, 0);
   },
 }));
