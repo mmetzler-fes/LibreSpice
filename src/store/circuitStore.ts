@@ -239,7 +239,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (!selectedComponentId) return;
     const comp = circuit.components.get(selectedComponentId);
     if (!comp) return;
-    comp.rotate(90);
+    comp.rotate(270); // 270° CW == 90° counter-clockwise (rotate left)
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === selectedComponentId
