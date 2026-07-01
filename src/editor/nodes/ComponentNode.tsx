@@ -18,7 +18,7 @@ import {
   PulseSourceSymbol,
   GroundSymbol,
 } from "./symbols/Symbols.js";
-import { symbolForType } from "@sym/asyParser.js";
+import { symbolForType, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, NODE_MARGIN, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 
@@ -60,24 +60,39 @@ export interface ComponentNodeData {
   [key: string]: unknown;
 }
 
-/** Default label spot: close to the left of the symbol; value just below it. */
-const LABEL_POS = { left: 8, top: 30 };
-const VALUE_POS = { left: 8, top: 48 };
+/** Gap (px) between a caption and the symbol's drawn bounding box. */
+const CAPTION_GAP = 5;
+/** Fallback half-extents for symbols we can't measure (hand-drawn fallbacks). */
+const DEFAULT_HALF = { w: 18, h: 26 };
 
 /**
- * Readable caption placement per rotation. Text always stays horizontal; the
- * captions sit to the left when the part is upright (0/180) and above/below
- * when it lies horizontal (90/270), so they never overlap the symbol.
+ * Readable caption placement that hugs the symbol's actual shape: captions sit
+ * just left of a narrow part (e.g. resistor) or further out for a wide one
+ * (e.g. voltage source), and move above/below when the part lies horizontal.
+ * Text always stays upright. `halfW`/`halfH` are the drawn symbol's pixel
+ * half-extents (before rotation).
  */
-function captionLayout(kind: "label" | "value", rotation: number): { left: number; top: number; transform: string } {
+function captionLayout(
+  kind: "label" | "value",
+  rotation: number,
+  halfW: number,
+  halfH: number,
+): { left: number; top: number; transform: string } {
+  const c = NODE_SIZE / 2;
   const horizontal = rotation === 90 || rotation === 270;
+  const extentX = horizontal ? halfH : halfW; // horizontal reach after rotation
+  const extentY = horizontal ? halfW : halfH; // vertical reach after rotation
   if (horizontal) {
+    // Above / below the part, centered.
     return kind === "label"
-      ? { left: NODE_SIZE / 2, top: 6, transform: "translate(-50%, -50%)" }
-      : { left: NODE_SIZE / 2, top: NODE_SIZE - 6, transform: "translate(-50%, -50%)" };
+      ? { left: c, top: c - extentY - CAPTION_GAP, transform: "translate(-50%, -100%)" }
+      : { left: c, top: c + extentY + CAPTION_GAP, transform: "translate(-50%, 0)" };
   }
-  const pos = kind === "label" ? LABEL_POS : VALUE_POS;
-  return { left: pos.left, top: pos.top, transform: "translate(-100%, -50%)" };
+  // Left of the part, stacked near the vertical centre.
+  const rightEdge = c - extentX - CAPTION_GAP;
+  return kind === "label"
+    ? { left: rightEdge, top: c - 8, transform: "translate(-100%, -50%)" }
+    : { left: rightEdge, top: c + 9, transform: "translate(-100%, -50%)" };
 }
 
 /**
@@ -369,6 +384,10 @@ function AsyComponentNode({
   const rotation = data.rotation ?? 0;
   const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN);
   const center = NODE_SIZE / 2;
+  // Drawn symbol half-extents in px, to place captions right against the shape.
+  const bounds = symbolBounds(sym);
+  const halfW = (bounds.width / 2) * mapping.scale;
+  const halfH = (bounds.height / 2) * mapping.scale;
 
   return (
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
@@ -404,7 +423,7 @@ function AsyComponentNode({
         <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
       </svg>
 
-      {(() => { const l = captionLayout("label", rotation); return (
+      {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
           color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
@@ -412,7 +431,7 @@ function AsyComponentNode({
           {data.label}
         </MovableLabel>
       ); })()}
-      {data.valueLabel && (() => { const l = captionLayout("value", rotation); return (
+      {data.valueLabel && (() => { const l = captionLayout("value", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="value" base={l} transform={l.transform} offset={data.valueOffset}
           color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
@@ -477,7 +496,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       </svg>
 
       {/* Reference label (R1, C1, …); ground has no label */}
-      {!isGround && (() => { const l = captionLayout("label", rotation); return (
+      {!isGround && (() => { const l = captionLayout("label", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="label" base={l} transform={l.transform} offset={nodeData.labelOffset}
           color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
@@ -487,7 +506,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       ); })()}
 
       {/* Value label (1kΩ, 100nF, 5V …) */}
-      {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation); return (
+      {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="value" base={l} transform={l.transform} offset={nodeData.valueOffset}
           color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
