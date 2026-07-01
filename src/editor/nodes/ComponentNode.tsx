@@ -60,9 +60,9 @@ export interface ComponentNodeData {
   [key: string]: unknown;
 }
 
-/** Default label spot: to the left of the symbol; value just below it. */
-const LABEL_POS = { left: -6, top: 30 };
-const VALUE_POS = { left: -6, top: 48 };
+/** Default label spot: close to the left of the symbol; value just below it. */
+const LABEL_POS = { left: 8, top: 30 };
+const VALUE_POS = { left: 8, top: 48 };
 
 /**
  * Readable caption placement per rotation. Text always stays horizontal; the
@@ -73,8 +73,8 @@ function captionLayout(kind: "label" | "value", rotation: number): { left: numbe
   const horizontal = rotation === 90 || rotation === 270;
   if (horizontal) {
     return kind === "label"
-      ? { left: NODE_SIZE / 2, top: -8, transform: "translate(-50%, -50%)" }
-      : { left: NODE_SIZE / 2, top: NODE_SIZE + 8, transform: "translate(-50%, -50%)" };
+      ? { left: NODE_SIZE / 2, top: 6, transform: "translate(-50%, -50%)" }
+      : { left: NODE_SIZE / 2, top: NODE_SIZE - 6, transform: "translate(-50%, -50%)" };
   }
   const pos = kind === "label" ? LABEL_POS : VALUE_POS;
   return { left: pos.left, top: pos.top, transform: "translate(-100%, -50%)" };
