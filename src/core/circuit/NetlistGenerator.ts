@@ -4,7 +4,12 @@ export interface TransientConfig {
   type: "tran";
   stepTime: number;
   stopTime: number;
+  /** Time to start saving data (Tstart). */
   startTime?: number;
+  /** Maximum internal timestep (Tmax). */
+  maxStep?: number;
+  /** Start from the DC solution / use initial conditions. */
+  uic?: boolean;
 }
 
 export interface DCConfig {
@@ -94,20 +99,27 @@ export class NetlistGenerator {
   }
 
   private _analysisLine(config: SimulationConfig): string {
-    switch (config.type) {
-      case "tran": {
-        // ngspice requires TSTART < TSTOP; drop an out-of-range start time.
-        const startTime = config.startTime && config.startTime > 0 && config.startTime < config.stopTime
-          ? ` ${config.startTime}`
-          : "";
-        return `.tran ${config.stepTime} ${config.stopTime}${startTime}`;
-      }
-      case "dc":
-        return `.dc ${config.sourceName} ${config.start} ${config.stop} ${config.step}`;
-      case "ac":
-        return `.ac ${config.variation} ${config.points} ${config.startFreq} ${config.stopFreq}`;
-      case "op":
-        return ".op";
+    return formatAnalysisDirective(config);
+  }
+}
+
+/** Render a {@link SimulationConfig} as its SPICE analysis directive line. */
+export function formatAnalysisDirective(config: SimulationConfig): string {
+  switch (config.type) {
+    case "tran": {
+      // Tmax requires Tstart to be present first; use a valid Tstart or 0.
+      const hasStart = !!config.startTime && config.startTime > 0 && config.startTime < config.stopTime;
+      const hasMax = !!config.maxStep && config.maxStep > 0;
+      const parts = [".tran", `${config.stepTime}`, `${config.stopTime}`];
+      if (hasStart || hasMax) parts.push(`${hasStart ? config.startTime : 0}`);
+      if (hasMax) parts.push(`${config.maxStep}`);
+      return parts.join(" ") + (config.uic ? " uic" : "");
     }
+    case "dc":
+      return `.dc ${config.sourceName} ${config.start} ${config.stop} ${config.step}`;
+    case "ac":
+      return `.ac ${config.variation} ${config.points} ${config.startFreq} ${config.stopFreq}`;
+    case "op":
+      return ".op";
   }
 }

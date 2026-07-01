@@ -1,13 +1,14 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
-import type { SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+import { formatAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+import { SimDirectiveDialog } from "@editor/SimDirectiveDialog.js";
 
 export function SimulationPanel({ compact = false }: { compact?: boolean }) {
   const { netlist, simulationConfig, setSimulationConfig } = useCircuitStore();
   const { status, result, errorMessage, selectedVariables, toggleVariable, setStatus, setResult, setErrorMessage } =
     useSimulationStore();
-  const { setDockTab } = useUIStore();
+  const { setDockTab, setSimConfigDialog } = useUIStore();
 
   const cfg = simulationConfig;
 
@@ -28,6 +29,20 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: compact ? 10 : 16, padding: compact ? 12 : 16, flex: 1, overflowY: "auto", height: "100%" }}>
       <h3 style={{ margin: 0, fontSize: compact ? 13 : 14, fontWeight: 600 }}>Simulation</h3>
+
+      {/* Analysis directive — right-click to edit all parameters in a dialog. */}
+      <div
+        onContextMenu={(e) => { e.preventDefault(); setSimConfigDialog(true); }}
+        onDoubleClick={() => setSimConfigDialog(true)}
+        title="Right-click (or double-click) to edit parameters"
+        style={{
+          fontFamily: "monospace", fontSize: 12, cursor: "context-menu",
+          background: "#0f172a", color: "#67e8f9", border: "1px solid #334155",
+          borderRadius: 4, padding: "6px 8px",
+        }}
+      >
+        {formatAnalysisDirective(cfg)}
+      </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <label style={{ fontSize: 12, fontWeight: 500 }}>Analysis Type</label>
@@ -148,6 +163,8 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
         </pre>
       </div>
       )}
+
+      <SimDirectiveDialog />
     </div>
   );
 }
