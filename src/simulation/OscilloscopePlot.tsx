@@ -80,9 +80,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const { result, selectedVariables, toggleVariable } = useSimulationStore();
   const { autoProbeCurrent, toggleAutoProbeCurrent } = useUIStore();
   const {
-    panels, traceToPanel, colors, expressions,
-    addPanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
-    addExpression, removeExpression,
+    panels, traceToPanel, colors, expressions, syncX,
+    addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
+    addExpression, removeExpression, toggleSyncX, exportSettings, importSettings,
   } = usePlotStore();
 
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
@@ -141,6 +141,33 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     addExpression(expr);
     setExprInput("");
     setExprError(null);
+  };
+
+  // Save/load the plot configuration as an LTSpice-style `.plt` file.
+  const handleSavePlt = () => {
+    const blob = new Blob([JSON.stringify(exportSettings(), null, 2)], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "plot.plt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoadPlt = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".plt";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        importSettings(JSON.parse(await file.text()));
+      } catch {
+        alert("Invalid .plt file");
+      }
+    };
+    input.click();
   };
 
   // No result, or a result without a usable time base (e.g. failed run, `.op`).
@@ -239,11 +266,29 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           </div>
           {exprError && <div style={{ fontSize: 9, color: "#f87171" }}>{exprError}</div>}
         </div>
+
+        {/* Plot settings save/load (LTSpice-style .plt) */}
+        <div style={{ padding: 6, borderTop: "1px solid #1e293b", display: "flex", gap: 4 }}>
+          <button
+            onClick={handleSavePlt}
+            title="Save plot settings (.plt)"
+            style={{ flex: 1, padding: "3px 0", fontSize: 10, background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 4, cursor: "pointer" }}
+          >
+            Save .plt
+          </button>
+          <button
+            onClick={handleLoadPlt}
+            title="Load plot settings (.plt)"
+            style={{ flex: 1, padding: "3px 0", fontSize: 10, background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 4, cursor: "pointer" }}
+          >
+            Load .plt
+          </button>
+        </div>
       </div>
 
-      {/* ── Panels (stacked, add/remove, drag targets) ── */}
+      {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
-        {panels.map((panel) => {
+        {panels.map((panel, i) => {
           const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
           return (
             <PlotPanelView
@@ -254,24 +299,21 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               time={result.time!}
               colorFor={colorFor}
               compact={compact}
-              canRemove={panels.length > 1}
+              index={i}
+              count={panels.length}
+              syncX={syncX}
               onDropTrace={(trace) => setTracePanel(trace, panel.id)}
               onRemoveTrace={(trace) =>
                 expressions.includes(trace) ? removeExpression(trace) : toggleVariable(trace)}
+              onAddRelative={(pos) => addPanelRelative(panel.id, pos)}
+              onMove={(dir) => movePanel(panel.id, dir)}
               onRemovePanel={() => removePanel(panel.id)}
               onFit={() => fitPanel(panel.id)}
+              onToggleSyncX={toggleSyncX}
               onUpdate={(patch) => updatePanel(panel.id, patch)}
             />
           );
         })}
-        <div style={{ padding: 8, flexShrink: 0 }}>
-          <button
-            onClick={addPanel}
-            style={{ width: "100%", padding: "6px 0", background: "#1e293b", color: "#94a3b8", border: "1px dashed #334155", borderRadius: 4, cursor: "pointer", fontSize: 11 }}
-          >
-            + Add diagram panel
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -368,17 +410,24 @@ interface PlotPanelViewProps {
   time: Float64Array;
   colorFor: (trace: string) => string;
   compact: boolean;
-  canRemove: boolean;
+  index: number;
+  count: number;
+  syncX: boolean;
   onDropTrace: (trace: string) => void;
   onRemoveTrace: (trace: string) => void;
+  onAddRelative: (position: "above" | "below") => void;
+  onMove: (dir: "up" | "down") => void;
   onRemovePanel: () => void;
   onFit: () => void;
+  onToggleSyncX: () => void;
   onUpdate: (patch: Partial<PlotPanel>) => void;
 }
 
 function PlotPanelView(props: PlotPanelViewProps) {
-  const { panel, traces, seriesMap, time, colorFor, compact, canRemove, onDropTrace, onRemoveTrace, onRemovePanel, onFit, onUpdate } = props;
+  const { panel, traces, seriesMap, time, colorFor, compact, index, count, syncX,
+    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
+  const canRemove = count > 1;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: compact ? 180 : 260 });
@@ -386,8 +435,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const [dragOver, setDragOver] = useState(false);
   /** Measurement cursor bound to one probe; `t` is a value on the x-axis. */
   const [cursor, setCursor] = useState<{ trace: string; t: number } | null>(null);
-  /** Right-click context menu (viewport coords). */
+  /** Probe context menu (cursor toggle), at viewport coords. */
   const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
+  /** Pane context menu (add/move/delete/sync), at viewport coords. */
+  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -544,7 +595,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
         </div>
         <button onClick={() => setShowAxis((s) => !s)} title="Axis settings" style={ctrlBtn}>⚙</button>
         <button onClick={onFit} title="Fit view" style={ctrlBtn}>Fit</button>
-        {canRemove && <button onClick={onRemovePanel} title="Remove panel" style={{ ...ctrlBtn, color: "#f87171" }}>✕</button>}
+        <button onClick={(e) => setPaneMenu({ x: e.clientX, y: e.clientY })} title="Pane menu" style={ctrlBtn}>⋯</button>
       </div>
 
       {/* Axis configuration */}
@@ -579,6 +630,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       <div
         ref={containerRef}
         style={{ flex: 1, overflow: "hidden", position: "relative" }}
+        onContextMenu={(e) => { e.preventDefault(); setPaneMenu({ x: e.clientX, y: e.clientY }); }}
       >
         <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
           <defs>
@@ -669,6 +721,32 @@ function PlotPanelView(props: PlotPanelViewProps) {
           </div>
         </>
       )}
+
+      {/* Pane context menu (LTSpice-style add/move/delete/sync) */}
+      {paneMenu && (
+        <>
+          <div
+            onClick={() => setPaneMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setPaneMenu(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 40 }}
+          />
+          <div style={{
+            position: "fixed", left: paneMenu.x, top: paneMenu.y, zIndex: 41,
+            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+            padding: 4, fontSize: 11, boxShadow: "0 4px 12px #00000070", minWidth: 180,
+          }}>
+            <button style={menuItem} onClick={() => { onAddRelative("above"); setPaneMenu(null); }}>Add Plot Pane Above</button>
+            <button style={menuItem} onClick={() => { onAddRelative("below"); setPaneMenu(null); }}>Add Plot Pane Below</button>
+            <button style={menuItemMaybe(index > 0)} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
+            <button style={menuItemMaybe(index < count - 1)} disabled={index === count - 1} onClick={() => { onMove("down"); setPaneMenu(null); }}>Move Plot Pane Down</button>
+            <button style={menuItemMaybe(canRemove, "#f87171")} disabled={!canRemove} onClick={() => { onRemovePanel(); setPaneMenu(null); }}>Delete this Pane</button>
+            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
+            <button style={menuItem} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
+              {syncX ? "☑" : "☐"} Sync. Horiz. Axes
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -678,6 +756,15 @@ const menuItem: React.CSSProperties = {
   border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer", fontSize: 11,
   borderRadius: 4, whiteSpace: "nowrap",
 };
+
+/** Menu item that is greyed out and non-interactive when `enabled` is false. */
+function menuItemMaybe(enabled: boolean, color = "#e2e8f0"): React.CSSProperties {
+  return {
+    ...menuItem,
+    color: enabled ? color : "#475569",
+    cursor: enabled ? "pointer" : "default",
+  };
+}
 
 /** Round for display so auto axis bounds don't show float noise. */
 function round6(n: number): number {

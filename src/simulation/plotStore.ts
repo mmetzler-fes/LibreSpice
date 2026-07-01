@@ -33,10 +33,24 @@ interface PlotState {
   colors: Record<string, string>;
   /** Arithmetic traces (e.g. `V(a)-V(b)`), persisted across simulation runs. */
   expressions: string[];
+  /** LTSpice "Sync. Horiz. Axes": all panels share one x-axis range. */
+  syncX: boolean;
+}
+
+/** Serialisable plot configuration, saved to / loaded from `.plt` files. */
+export interface PlotSettings {
+  version: 1;
+  panels: PlotPanel[];
+  traceToPanel: Record<string, string>;
+  colors: Record<string, string>;
+  expressions: string[];
+  syncX: boolean;
 }
 
 interface PlotActions {
   addPanel: () => void;
+  addPanelRelative: (refId: string, position: "above" | "below") => void;
+  movePanel: (id: string, dir: "up" | "down") => void;
   removePanel: (id: string) => void;
   setTracePanel: (trace: string, panelId: string) => void;
   updatePanel: (id: string, patch: Partial<PlotPanel>) => void;
@@ -44,18 +58,48 @@ interface PlotActions {
   setColor: (trace: string, color: string) => void;
   addExpression: (expr: string) => void;
   removeExpression: (expr: string) => void;
+  toggleSyncX: () => void;
+  exportSettings: () => PlotSettings;
+  importSettings: (settings: PlotSettings) => void;
 }
 
 let panelCounter = 1;
 const newPanelId = () => `panel-${panelCounter++}`;
+
+/** x-axis fields that {@link PlotState.syncX} keeps identical across panels. */
+const X_KEYS: (keyof PlotPanel)[] = ["xMin", "xMax", "xTicks", "logX"];
 
 export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
   panels: [{ id: "panel-0" }],
   traceToPanel: {},
   colors: {},
   expressions: [],
+  syncX: false,
 
   addPanel: () => set((s) => ({ panels: [...s.panels, { id: newPanelId() }] })),
+
+  addPanelRelative: (refId, position) =>
+    set((s) => {
+      const idx = s.panels.findIndex((p) => p.id === refId);
+      if (idx < 0) return s;
+      const at = position === "above" ? idx : idx + 1;
+      const panel: PlotPanel = { id: newPanelId() };
+      // Inherit the synced x-axis so a new pane lines up with the others.
+      if (s.syncX) Object.assign(panel, pick(s.panels[idx], X_KEYS));
+      const panels = [...s.panels];
+      panels.splice(at, 0, panel);
+      return { panels };
+    }),
+
+  movePanel: (id, dir) =>
+    set((s) => {
+      const idx = s.panels.findIndex((p) => p.id === id);
+      const target = dir === "up" ? idx - 1 : idx + 1;
+      if (idx < 0 || target < 0 || target >= s.panels.length) return s;
+      const panels = [...s.panels];
+      [panels[idx], panels[target]] = [panels[target], panels[idx]];
+      return { panels };
+    }),
 
   removePanel: (id) =>
     set((s) => {
@@ -73,7 +117,16 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
     set((s) => ({ traceToPanel: { ...s.traceToPanel, [trace]: panelId } })),
 
   updatePanel: (id, patch) =>
-    set((s) => ({ panels: s.panels.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+    set((s) => {
+      const touchesX = Object.keys(patch).some((k) => (X_KEYS as string[]).includes(k));
+      if (s.syncX && touchesX) {
+        const xPatch = pick(patch, X_KEYS);
+        return {
+          panels: s.panels.map((p) => (p.id === id ? { ...p, ...patch } : { ...p, ...xPatch })),
+        };
+      }
+      return { panels: s.panels.map((p) => (p.id === id ? { ...p, ...patch } : p)) };
+    }),
 
   fitPanel: (id) =>
     set((s) => ({
@@ -98,7 +151,47 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       delete traceToPanel[expr];
       return { expressions: s.expressions.filter((e) => e !== expr), traceToPanel };
     }),
+
+  toggleSyncX: () =>
+    set((s) => {
+      const syncX = !s.syncX;
+      if (syncX && s.panels.length > 0) {
+        const ref = pick(s.panels[0], X_KEYS);
+        return { syncX, panels: s.panels.map((p) => ({ ...p, ...ref })) };
+      }
+      return { syncX };
+    }),
+
+  exportSettings: () => {
+    const { panels, traceToPanel, colors, expressions, syncX } = get();
+    return { version: 1, panels, traceToPanel, colors, expressions, syncX };
+  },
+
+  importSettings: (settings) => {
+    if (!settings || settings.version !== 1 || !Array.isArray(settings.panels) || settings.panels.length === 0) {
+      return;
+    }
+    // Avoid id collisions with panels created later.
+    for (const p of settings.panels) {
+      const m = /^panel-(\d+)$/.exec(p.id);
+      if (m) panelCounter = Math.max(panelCounter, Number(m[1]) + 1);
+    }
+    set({
+      panels: settings.panels,
+      traceToPanel: settings.traceToPanel ?? {},
+      colors: settings.colors ?? {},
+      expressions: settings.expressions ?? [],
+      syncX: !!settings.syncX,
+    });
+  },
 }));
+
+/** Shallow pick of the given keys from an object. */
+function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Partial<T> {
+  const out: Partial<T> = {};
+  for (const k of keys) if (k in obj) out[k] = obj[k];
+  return out;
+}
 
 /** Default (unoverridden) colour for a trace, by its index in the trace list. */
 export function defaultColor(index: number): string {
