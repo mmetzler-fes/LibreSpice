@@ -32,7 +32,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
-import { createSpiceComponent, createSubcircuitComponent, getDefaultLabel, getValueLabel } from "./componentFactory.js";
+import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates } from "@core/circuit/probeUtils.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
@@ -70,6 +70,10 @@ function CanvasInner() {
 
   const { result, addProbeCandidates } = useSimulationStore();
 
+  // Reference designators already in use, for per-prefix auto-numbering.
+  const existingLabels = () =>
+    useCircuitStore.getState().nodes.map((n) => String((n.data as { label?: string }).label ?? "")).filter(Boolean);
+
   const placeComponent = useCallback(
     (type: ComponentType, cx: number, cy: number) => {
       // Center the node on the (snapped) cursor: node.position is its top-left.
@@ -77,7 +81,7 @@ function CanvasInner() {
       const y = snapToGrid(cy) - NODE_SIZE / 2;
       const id = `${type}_${componentCounter++}`;
       // Ground uses label "0" internally; display label is separate
-      const label = type === "ground" ? "0" : getDefaultLabel(type, componentCounter - 1);
+      const label = type === "ground" ? "0" : getNextLabel(type, existingLabels());
       const component = createSpiceComponent(type, id, label, x, y);
       const valueLabel = getValueLabel(component, type);
       const node: Node = {
@@ -98,7 +102,7 @@ function CanvasInner() {
 
       if (placement.componentType === "subcircuit") {
         const id = `subckt_${componentCounter++}`;
-        const label = getDefaultLabel("subcircuit", componentCounter - 1);
+        const label = getNextLabel("subcircuit", existingLabels());
         const component = createSubcircuitComponent(id, label, x, y, placement.raw ?? "", placement.pins ?? []);
         const node: Node = {
           id,
@@ -113,7 +117,7 @@ function CanvasInner() {
       // Typed device backed by an imported .model – place the base symbol with
       // its model property pre-set so the netlist references the model.
       const id = `${placement.componentType}_${componentCounter++}`;
-      const label = getDefaultLabel(placement.componentType, componentCounter - 1);
+      const label = getNextLabel(placement.componentType, existingLabels());
       const component = createSpiceComponent(placement.componentType, id, label, x, y);
       if (placement.model) component.setProperty("model", placement.model);
       const valueLabel = getValueLabel(component, placement.componentType) || placement.model;
