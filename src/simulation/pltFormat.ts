@@ -31,8 +31,8 @@ export interface PltAxis {
 export interface PltPane {
   traces: string[];
   x: PltAxis;
-  y0?: PltAxis;
-  y1?: PltAxis;
+  /** One entry per y-axis (Y[0] left, Y[1..] right), by unit group. */
+  y: PltAxis[];
   /** [x, y0, y1] logarithmic flags. */
   log: [boolean, boolean, boolean];
 }
@@ -78,8 +78,7 @@ export function serializePlt(doc: PltDoc): string {
     const toks = pane.traces.map((name, i) => `{${524290 + i},0,"${name}"}`).join(" ");
     lines.push(`      traces: ${pane.traces.length} ${toks}`);
     lines.push(`      X: ${fmtAxis(pane.x)}`);
-    if (pane.y0) lines.push(`      Y[0]: ${fmtAxis(pane.y0)}`);
-    if (pane.y1) lines.push(`      Y[1]: ${fmtAxis(pane.y1)}`);
+    pane.y.forEach((y, yi) => lines.push(`      Y[${yi}]: ${fmtAxis(y)}`));
     lines.push(`      Log: ${pane.log.map((b) => (b ? 1 : 0)).join(" ")}`);
     lines.push(`      GridStyle: 1`);
     lines.push(pi < doc.panes.length - 1 ? "   }," : "   }");
@@ -144,12 +143,16 @@ function parsePane(body: string): PltPane | null {
 
   const x = parseAxis(body, /X:\s*\(([^)]*)\)/);
   if (!x) return null;
-  const y0 = parseAxis(body, /Y\[0\]:\s*\(([^)]*)\)/);
-  const y1 = parseAxis(body, /Y\[1\]:\s*\(([^)]*)\)/);
+  const y: PltAxis[] = [];
+  for (let i = 0; i < 8; i++) {
+    const ax = parseAxis(body, new RegExp(`Y\\[${i}\\]:\\s*\\(([^)]*)\\)`));
+    if (!ax) break;
+    y.push(ax);
+  }
 
   const logM = body.match(/Log:\s*([\d ]+)/);
   const logs = logM ? logM[1].trim().split(/\s+/).map((v) => v === "1") : [];
-  return { traces, x, y0, y1, log: [!!logs[0], !!logs[1], !!logs[2]] };
+  return { traces, x, y, log: [!!logs[0], !!logs[1], !!logs[2]] };
 }
 
 export function parsePlt(text: string): PltDoc | null {

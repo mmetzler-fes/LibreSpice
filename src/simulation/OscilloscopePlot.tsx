@@ -5,6 +5,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { matchResultVariable } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
+import { inferUnit } from "./units.js";
 import { serializePlt, parsePlt, siPrefix, tickCount, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
 
 /** ngspice analysis type → LTSpice `.plt` section header. */
@@ -88,6 +89,32 @@ function logTicks(min: number, max: number): number[] {
 
 interface ViewRange { xMin: number; xMax: number; yMin: number; yMax: number }
 
+/** A set of traces sharing one unit, with its own fitted y-range. */
+interface UnitGroup { unit: string; traces: string[]; yMin: number; yMax: number }
+
+/** Group a panel's traces by physical unit (V, A, Ω, …) for separate y-axes. */
+function groupByUnit(traces: string[], seriesMap: Record<string, Float64Array | null>): UnitGroup[] {
+  const byUnit = new Map<string, string[]>();
+  for (const t of traces) {
+    const u = inferUnit(t);
+    const arr = byUnit.get(u) ?? [];
+    arr.push(t);
+    byUnit.set(u, arr);
+  }
+  return [...byUnit.entries()].map(([unit, ts]) => {
+    let mn = Infinity, mx = -Infinity;
+    for (const t of ts) {
+      const d = seriesMap[t];
+      if (!d) continue;
+      for (const v of d) { if (isFinite(v)) { if (v < mn) mn = v; if (v > mx) mx = v; } }
+    }
+    if (!isFinite(mn)) { mn = -1; mx = 1; }
+    if (mn === mx) { mn -= 1; mx += 1; }
+    const pad = (mx - mn) * 0.12;
+    return { unit, traces: ts, yMin: mn - pad, yMax: mx + pad };
+  });
+}
+
 interface OscilloscopePlotProps {
   compact?: boolean;
 }
@@ -160,36 +187,26 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     setExprError(null);
   };
 
-  // Build the effective bounds for a panel's x/y axes (overrides ?? data fit).
-  const paneAxes = (panel: PlotPanel, traces: string[]): { x: PltAxis; y0: PltAxis; logX: boolean } => {
-    const time = result!.time!;
-    let yMin = Infinity, yMax = -Infinity;
-    for (const t of traces) {
-      const d = seriesMap.map[t];
-      if (!d) continue;
-      for (const v of d) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
-    }
-    if (!isFinite(yMin)) { yMin = -1; yMax = 1; }
-    if (yMin === yMax) { yMin -= 1; yMax += 1; }
-    const xLow = panel.xMin ?? time[0];
-    const xHigh = panel.xMax ?? time[time.length - 1];
-    const yLow = panel.yMin ?? yMin;
-    const yHigh = panel.yMax ?? yMax;
-    const xN = panel.xTicks ?? 5;
-    const yN = panel.yTicks ?? 5;
-    const axis = (low: number, high: number, n: number): PltAxis =>
-      ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: (high - low) / Math.max(1, n), high });
-    return { x: axis(xLow, xHigh, xN), y0: axis(yLow, yHigh, yN), logX: !!panel.logX };
-  };
+  const axisFrom = (low: number, high: number, n: number): PltAxis =>
+    ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: (high - low) / Math.max(1, n), high });
 
   // Save the plot configuration as an LTSpice-compatible `.plt` file.
   const handleSavePlt = () => {
+    const time = result!.time!;
     const doc: PltDoc = {
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
       panes: panels.map((panel): PltPane => {
         const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
-        const { x, y0, logX } = paneAxes(panel, traces);
-        return { traces, x, y0, log: [logX, false, false] };
+        const groups = groupByUnit(traces, seriesMap.map);
+        // First (left) group honours the panel's manual y-override.
+        const y = groups.map((g, gi) => {
+          const low = gi === 0 ? panel.yMin ?? g.yMin : g.yMin;
+          const high = gi === 0 ? panel.yMax ?? g.yMax : g.yMax;
+          return axisFrom(low, high, panel.yTicks ?? 5);
+        });
+        if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks ?? 5));
+        const x = axisFrom(panel.xMin ?? time[0], panel.xMax ?? time[time.length - 1], panel.xTicks ?? 5);
+        return { traces, x, y, log: [!!panel.logX, false, false] };
       }),
     };
     const blob = new Blob([serializePlt(doc)], { type: "text/plain" });
@@ -226,7 +243,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         newPanels.push({
           id,
           xMin: pane.x.low, xMax: pane.x.high, xTicks: tickCount(pane.x), logX: pane.log[0],
-          yMin: pane.y0?.low, yMax: pane.y0?.high, yTicks: tickCount(pane.y0),
+          yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickCount(pane.y[0]),
         });
         for (const t of pane.traces) {
           const name = resolveName(t);
@@ -513,29 +530,26 @@ function PlotPanelView(props: PlotPanelViewProps) {
     if (cursor && !traces.includes(cursor.trace)) setCursor(null);
   }, [cursor, traces]);
 
-  const plotW = dims.w - margin.left - margin.right;
+  const RIGHT_AXIS_W = compact ? 42 : 50;
+
+  // Group traces by unit → one y-axis each (first left, the rest stacked right,
+  // LTSpice-style). The panel's manual y-override applies to the left axis only.
+  const groups = useMemo(() => groupByUnit(traces, seriesMap), [traces, seriesMap]);
+  const yGroups: UnitGroup[] = groups.map((g, gi) =>
+    gi === 0 ? { ...g, yMin: panel.yMin ?? g.yMin, yMax: panel.yMax ?? g.yMax } : g);
+  const y0 = yGroups[0] ?? { unit: "", traces: [], yMin: -1, yMax: 1 };
+  const rightCount = Math.max(0, yGroups.length - 1);
+  const marginRight = margin.right + rightCount * RIGHT_AXIS_W;
+
+  const plotW = dims.w - margin.left - marginRight;
   const plotH = dims.h - margin.top - margin.bottom;
 
-  // Auto range: x defaults to the saved-data window (first..last sample time,
-  // i.e. tstart..tstop); y is fitted to the panel's traces.
-  const auto = useMemo<ViewRange>(() => {
-    let yMin = Infinity, yMax = -Infinity;
-    for (const t of traces) {
-      const d = seriesMap[t];
-      if (!d) continue;
-      for (const v of d) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
-    }
-    if (!isFinite(yMin)) { yMin = -1; yMax = 1; }
-    if (yMin === yMax) { yMin -= 1; yMax += 1; }
-    const yPad = (yMax - yMin) * 0.12;
-    return { xMin: time[0], xMax: time[time.length - 1], yMin: yMin - yPad, yMax: yMax + yPad };
-  }, [traces, seriesMap, time]);
-
+  // x defaults to the saved-data window (tstart..tstop).
   const vr: ViewRange = {
-    xMin: panel.xMin ?? auto.xMin,
-    xMax: panel.xMax ?? auto.xMax,
-    yMin: panel.yMin ?? auto.yMin,
-    yMax: panel.yMax ?? auto.yMax,
+    xMin: panel.xMin ?? time[0],
+    xMax: panel.xMax ?? time[time.length - 1],
+    yMin: y0.yMin,
+    yMax: y0.yMax,
   };
 
   const logX = !!panel.logX;
@@ -547,14 +561,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
     if (logX) return t <= 0 ? NaN : ((Math.log10(t) - lxMin) / (lxMax - lxMin)) * plotW;
     return ((t - vr.xMin) / (vr.xMax - vr.xMin)) * plotW;
   };
-  const toSy = (v: number): number => plotH - ((v - vr.yMin) / (vr.yMax - vr.yMin)) * plotH;
+  const mkToSy = (g: { yMin: number; yMax: number }) =>
+    (v: number): number => plotH - ((v - g.yMin) / (g.yMax - g.yMin)) * plotH;
+  const toSy = mkToSy(y0); // left axis
+  const groupOf = (t: string) => yGroups.find((g) => g.traces.includes(t)) ?? y0;
 
-  const buildPath = (data: Float64Array): string => {
+  const buildPath = (data: Float64Array, sy: (v: number) => number): string => {
     let d = "";
     let first = true;
     for (let i = 0; i < time.length; i++) {
       const x = toSx(time[i]);
-      const y = toSy(data[i]);
+      const y = sy(data[i]);
       if (!isFinite(x) || !isFinite(y)) { first = true; continue; }
       d += first ? `M${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
       first = false;
@@ -565,7 +582,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const xTickCount = panel.xTicks ?? Math.max(4, Math.floor(plotW / 80));
   const yTickCount = panel.yTicks ?? Math.max(3, Math.floor(plotH / 60));
   const xTicks = logX ? logTicks(xLo, vr.xMax) : niceTicks(vr.xMin, vr.xMax, xTickCount);
-  const yTicks = niceTicks(vr.yMin, vr.yMax, yTickCount);
+  const yTicks = niceTicks(y0.yMin, y0.yMax, yTickCount);
 
   const nearestIndex = (t: number): number => {
     let lo = 0, hi = time.length - 1;
@@ -705,26 +722,51 @@ function PlotPanelView(props: PlotPanelViewProps) {
                 <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill="#475569">{fmtTime(t)}</text>
               </g>
             ))}
+            {/* Left y-axis (first unit group) with horizontal grid */}
             {yTicks.map((v) => (
               <g key={v}>
                 <line x1={0} y1={toSy(v)} x2={plotW} y2={toSy(v)} stroke="#1e293b" strokeWidth={1} />
-                <text x={-4} y={toSy(v) + 3} textAnchor="end" fontSize={9} fill="#475569">{fmtVal(v)}</text>
+                <text x={-4} y={toSy(v) + 3} textAnchor="end" fontSize={9}
+                  fill={yGroups.length > 1 ? colorFor(y0.traces[0]) : "#475569"}>{fmtVal(v)}</text>
               </g>
             ))}
+            {y0.unit && yGroups.length > 1 && (
+              <text x={-4} y={-4} textAnchor="end" fontSize={9} fill={colorFor(y0.traces[0])}>{y0.unit}</text>
+            )}
             {vr.yMin < 0 && vr.yMax > 0 && (
               <line x1={0} y1={toSy(0)} x2={plotW} y2={toSy(0)} stroke="#334155" strokeWidth={1} strokeDasharray="4 3" />
             )}
+
+            {/* Additional y-axes (further unit groups), stacked to the right */}
+            {yGroups.slice(1).map((g, r) => {
+              const xLine = plotW + r * RIGHT_AXIS_W;
+              const sy = mkToSy(g);
+              const col = colorFor(g.traces[0]);
+              return (
+                <g key={g.unit || r}>
+                  <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke="#334155" strokeWidth={1} />
+                  {niceTicks(g.yMin, g.yMax, yTickCount).map((v) => (
+                    <g key={v}>
+                      <line x1={xLine} y1={sy(v)} x2={xLine + 3} y2={sy(v)} stroke={col} strokeWidth={1} />
+                      <text x={xLine + 5} y={sy(v) + 3} textAnchor="start" fontSize={9} fill={col}>{fmtVal(v)}</text>
+                    </g>
+                  ))}
+                  {g.unit && <text x={xLine + 5} y={-4} textAnchor="start" fontSize={9} fill={col}>{g.unit}</text>}
+                </g>
+              );
+            })}
+
             <g clipPath={`url(#osc-clip-${panel.id})`}>
               {traces.map((t) => {
                 const d = seriesMap[t];
-                return d ? <path key={t} d={buildPath(d)} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
+                return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
             {cursorInfo && isFinite(cursorInfo.sx) && (
               <g>
                 <line x1={cursorInfo.sx} y1={0} x2={cursorInfo.sx} y2={plotH} stroke={cursorInfo.color} strokeWidth={1} strokeDasharray="4 3" />
                 {isFinite(cursorInfo.value) && (
-                  <circle cx={cursorInfo.sx} cy={toSy(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke="#0f172a" strokeWidth={1} style={{ pointerEvents: "none" }} />
+                  <circle cx={cursorInfo.sx} cy={mkToSy(groupOf(cursor!.trace))(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke="#0f172a" strokeWidth={1} style={{ pointerEvents: "none" }} />
                 )}
                 {/* Draggable handle + hit area */}
                 <rect x={cursorInfo.sx - 5} y={0} width={10} height={plotH} fill="transparent" style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
