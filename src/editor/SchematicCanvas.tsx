@@ -216,11 +216,26 @@ function CanvasInner() {
     [circuit, addProbeCandidates, setDockTab],
   );
 
+  // Screen → flow using the wrapper's *live* rect and the current viewport, so
+  // placement matches the ghost even on the very first click (ReactFlow's own
+  // cached container rect can still be stale then, landing the node offset).
+  const clientToFlow = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      const vp = reactFlowInstance.getViewport();
+      return {
+        x: (clientX - (rect?.left ?? 0) - vp.x) / vp.zoom,
+        y: (clientY - (rect?.top ?? 0) - vp.y) / vp.zoom,
+      };
+    },
+    [reactFlowInstance],
+  );
+
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
       setSelectedComponentId(null);
       if (editorMode === "place") {
-        const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const pos = clientToFlow(event.clientX, event.clientY);
         if (pendingLibraryPlacement) {
           placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
         } else if (pendingPlaceType) {
@@ -228,7 +243,7 @@ function CanvasInner() {
         }
       }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, reactFlowInstance],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, clientToFlow],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
@@ -246,11 +261,11 @@ function CanvasInner() {
       event.preventDefault();
       const def = dragDefRef.current;
       if (!def) return;
-      const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const pos = clientToFlow(event.clientX, event.clientY);
       placeComponent(def.type as ComponentType, pos.x, pos.y);
       dragDefRef.current = null;
     },
-    [reactFlowInstance, placeComponent],
+    [clientToFlow, placeComponent],
   );
 
   const onNodesChange = useCallback(
