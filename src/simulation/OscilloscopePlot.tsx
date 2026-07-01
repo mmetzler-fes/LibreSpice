@@ -1,8 +1,24 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useCircuitStore } from "@store/circuitStore.js";
+import { matchResultVariable } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
+import { serializePlt, parsePlt, siPrefix, tickCount, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+
+/** ngspice analysis type → LTSpice `.plt` section header. */
+const ANALYSIS_LABEL: Record<string, string> = {
+  tran: "Transient Analysis",
+  ac: "AC Analysis",
+  dc: "DC transfer characteristic",
+  op: "Operating Point",
+};
+
+/** A trace name is a formula unless it is a single variable / `V(..)` / `I(..)`. */
+function looksLikeExpression(name: string): boolean {
+  return !/^\s*[@A-Za-z_][\w.]*\s*(\([^()]*\))?\s*$/.test(name);
+}
 
 const MARGIN = { top: 16, right: 16, bottom: 36, left: 56 };
 const MARGIN_COMPACT = { top: 8, right: 8, bottom: 28, left: 48 };
@@ -77,12 +93,13 @@ interface OscilloscopePlotProps {
 }
 
 export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
-  const { result, selectedVariables, toggleVariable } = useSimulationStore();
+  const { result, selectedVariables, toggleVariable, setSelectedVariables } = useSimulationStore();
   const { autoProbeCurrent, toggleAutoProbeCurrent } = useUIStore();
+  const analysisType = useCircuitStore((s) => s.simulationConfig.type);
   const {
     panels, traceToPanel, colors, expressions, syncX,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
-    addExpression, removeExpression, toggleSyncX, exportSettings, importSettings,
+    addExpression, removeExpression, toggleSyncX, importSettings,
   } = usePlotStore();
 
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
@@ -143,9 +160,39 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     setExprError(null);
   };
 
-  // Save/load the plot configuration as an LTSpice-style `.plt` file.
+  // Build the effective bounds for a panel's x/y axes (overrides ?? data fit).
+  const paneAxes = (panel: PlotPanel, traces: string[]): { x: PltAxis; y0: PltAxis; logX: boolean } => {
+    const time = result!.time!;
+    let yMin = Infinity, yMax = -Infinity;
+    for (const t of traces) {
+      const d = seriesMap.map[t];
+      if (!d) continue;
+      for (const v of d) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+    }
+    if (!isFinite(yMin)) { yMin = -1; yMax = 1; }
+    if (yMin === yMax) { yMin -= 1; yMax += 1; }
+    const xLow = panel.xMin ?? time[0];
+    const xHigh = panel.xMax ?? time[time.length - 1];
+    const yLow = panel.yMin ?? yMin;
+    const yHigh = panel.yMax ?? yMax;
+    const xN = panel.xTicks ?? 5;
+    const yN = panel.yTicks ?? 5;
+    const axis = (low: number, high: number, n: number): PltAxis =>
+      ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: (high - low) / Math.max(1, n), high });
+    return { x: axis(xLow, xHigh, xN), y0: axis(yLow, yHigh, yN), logX: !!panel.logX };
+  };
+
+  // Save the plot configuration as an LTSpice-compatible `.plt` file.
   const handleSavePlt = () => {
-    const blob = new Blob([JSON.stringify(exportSettings(), null, 2)], { type: "text/plain" });
+    const doc: PltDoc = {
+      analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
+      panes: panels.map((panel): PltPane => {
+        const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
+        const { x, y0, logX } = paneAxes(panel, traces);
+        return { traces, x, y0, log: [logX, false, false] };
+      }),
+    };
+    const blob = new Blob([serializePlt(doc)], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -154,6 +201,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     URL.revokeObjectURL(url);
   };
 
+  // Load an LTSpice `.plt` file, rebuild the panels and re-plot the data.
   const handleLoadPlt = () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -161,11 +209,35 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      try {
-        importSettings(JSON.parse(await file.text()));
-      } catch {
-        alert("Invalid .plt file");
-      }
+      const doc = parsePlt(await file.text());
+      if (!doc) { alert("Invalid .plt file"); return; }
+
+      // Resolve raw probe names to the actual result variable when possible.
+      const resolveName = (n: string) =>
+        looksLikeExpression(n) ? n : (result ? matchResultVariable(result, [n]) ?? n : n);
+
+      const newPanels: PlotPanel[] = [];
+      const tracePanel: Record<string, string> = {};
+      const exprs = new Set<string>();
+      const raw = new Set<string>();
+
+      doc.panes.forEach((pane, i) => {
+        const id = `panel-${i}`;
+        newPanels.push({
+          id,
+          xMin: pane.x.low, xMax: pane.x.high, xTicks: tickCount(pane.x), logX: pane.log[0],
+          yMin: pane.y0?.low, yMax: pane.y0?.high, yTicks: tickCount(pane.y0),
+        });
+        for (const t of pane.traces) {
+          const name = resolveName(t);
+          tracePanel[name] = id;
+          if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
+        }
+      });
+
+      importSettings({ version: 1, panels: newPanels, traceToPanel: tracePanel, colors: {}, expressions: [...exprs], syncX: false });
+      // Make the referenced probes active so the traces are re-plotted.
+      setSelectedVariables([...raw]);
     };
     input.click();
   };

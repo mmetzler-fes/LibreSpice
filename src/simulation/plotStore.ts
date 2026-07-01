@@ -59,7 +59,6 @@ interface PlotActions {
   addExpression: (expr: string) => void;
   removeExpression: (expr: string) => void;
   toggleSyncX: () => void;
-  exportSettings: () => PlotSettings;
   importSettings: (settings: PlotSettings) => void;
 }
 
@@ -161,11 +160,6 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       }
       return { syncX };
     }),
-
-  exportSettings: () => {
-    const { panels, traceToPanel, colors, expressions, syncX } = get();
-    return { version: 1, panels, traceToPanel, colors, expressions, syncX };
-  },
 
   importSettings: (settings) => {
     if (!settings || settings.version !== 1 || !Array.isArray(settings.panels) || settings.panels.length === 0) {
