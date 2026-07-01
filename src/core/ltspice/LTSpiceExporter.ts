@@ -5,8 +5,8 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 // LABEL_POS/VALUE_POS/centre used by ComponentNode and LTSpiceParser so that a
 // zero offset maps to our default layout and the round-trip is exact.
 const CENTER = 40;
-const LABEL_DEFAULT = { left: -6, top: 30 };
-const VALUE_DEFAULT = { left: -6, top: 48 };
+const LABEL_DEFAULT = { left: 8, top: 30 };
+const VALUE_DEFAULT = { left: 8, top: 48 };
 type Offset = { x: number; y: number } | undefined;
 const winCoord = (def: { left: number; top: number }, off: Offset) => ({
   x: Math.round(def.left - CENTER + (off?.x ?? 0)),

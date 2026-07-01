@@ -5,8 +5,8 @@ import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 
 // Must match LTSpiceExporter / ComponentNode so WINDOW ↔ offset round-trips.
 const CENTER = 40;
-const LABEL_DEFAULT = { left: -6, top: 30 };
-const VALUE_DEFAULT = { left: -6, top: 48 };
+const LABEL_DEFAULT = { left: 8, top: 30 };
+const VALUE_DEFAULT = { left: 8, top: 48 };
 const winToOffset = (def: { left: number; top: number }, w?: { x: number; y: number }) =>
   w ? { x: w.x - (def.left - CENTER), y: w.y - (def.top - CENTER) } : undefined;
 
