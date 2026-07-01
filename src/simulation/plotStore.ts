@@ -19,10 +19,18 @@ export interface PlotPanel {
   xMax?: number;
   xTicks?: number;
   logX?: boolean;
-  /** y-axis: bottom bound, top bound, desired tick count. */
+  /** y-axis: bottom bound, top bound, desired tick count (left/first axis). */
   yMin?: number;
   yMax?: number;
   yTicks?: number;
+  /** Per-unit y-axis overrides, for panels showing several units (V, A, …). */
+  yAxes?: Record<string, YAxisOverride>;
+}
+
+export interface YAxisOverride {
+  min?: number;
+  max?: number;
+  ticks?: number;
 }
 
 interface PlotState {
@@ -131,7 +139,7 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
     set((s) => ({
       panels: s.panels.map((p) =>
         p.id === id
-          ? { ...p, xMin: undefined, xMax: undefined, yMin: undefined, yMax: undefined }
+          ? { ...p, xMin: undefined, xMax: undefined, yMin: undefined, yMax: undefined, yAxes: undefined }
           : p,
       ),
     })),
