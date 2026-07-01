@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo, useState } from "react";
+import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import type { AsySymbol } from "@sym/asyParser.js";
@@ -54,7 +54,74 @@ export interface ComponentNodeData {
   pins?: string[];
   /** Subcircuit/model name shown inside a generic symbol. */
   subName?: string;
+  /** User-dragged label offsets (px, in flow coords) from their default spot. */
+  labelOffset?: { x: number; y: number };
+  valueOffset?: { x: number; y: number };
   [key: string]: unknown;
+}
+
+/** Default label spot: to the left of the symbol; value just below it. */
+const LABEL_POS = { left: -6, top: 30 };
+const VALUE_POS = { left: -6, top: 48 };
+
+/**
+ * A component caption (reference or value) that sits at its default spot plus a
+ * persisted, user-dragged offset. Dragging uses the `nodrag` class so ReactFlow
+ * doesn't move the node instead, and divides by zoom to stay 1:1 with the mouse.
+ */
+function MovableLabel({
+  nodeId, kind, base, offset, color, fontSize, fontWeight = 500, children,
+}: {
+  nodeId: string;
+  kind: "label" | "value";
+  base: { left: number; top: number };
+  offset?: { x: number; y: number };
+  color: string;
+  fontSize: number;
+  fontWeight?: number;
+  children: React.ReactNode;
+}) {
+  const rf = useReactFlow();
+  const setLabelOffset = useCircuitStore((s) => s.setLabelOffset);
+  const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+  const off = live ?? offset ?? { x: 0, y: 0 };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const b = offset ?? { x: 0, y: 0 };
+    const zoom = rf.getViewport().zoom || 1;
+    const at = (ev: MouseEvent) => ({ x: b.x + (ev.clientX - sx) / zoom, y: b.y + (ev.clientY - sy) / zoom });
+    const move = (ev: MouseEvent) => setLive(at(ev));
+    const up = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setLive(null);
+      setLabelOffset(nodeId, kind, at(ev));
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  return (
+    <div
+      className="nodrag"
+      onMouseDown={onMouseDown}
+      title="Drag to move label"
+      style={{
+        position: "absolute",
+        left: base.left + off.x,
+        top: base.top + off.y,
+        transform: "translate(-100%, -50%)",
+        fontSize, fontWeight, color,
+        whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
+        cursor: "move", zIndex: 12,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
@@ -153,7 +220,7 @@ function getHandles(type: ComponentType) {
  * external pin distributed down the left and right edges. Used when no dedicated
  * symbol exists for a `.subckt` (Phase 3 auto symbol generation).
  */
-function SubcircuitBox({ data, selected }: { data: ComponentNodeData; selected?: boolean }) {
+function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: ComponentNodeData; selected?: boolean }) {
   const pins = data.pins ?? [];
   const leftCount = Math.ceil(pins.length / 2);
   const left = pins.slice(0, leftCount);
@@ -211,22 +278,12 @@ function SubcircuitBox({ data, selected }: { data: ComponentNodeData; selected?:
           {data.subName ?? "X"}
         </text>
       </svg>
-      <div
-        style={{
-          position: "absolute",
-          top: -14,
-          left: "50%",
-          transform: "translateX(-50%)",
-          fontSize: 11,
-          whiteSpace: "nowrap",
-          userSelect: "none",
-          fontFamily: "monospace",
-          color: selected ? "#2563eb" : "#374151",
-          fontWeight: selected ? 600 : 500,
-        }}
+      <MovableLabel
+        nodeId={nodeId} kind="label" base={{ left: -6, top: height / 2 }} offset={data.labelOffset}
+        color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
       >
         {data.label}
-      </div>
+      </MovableLabel>
     </div>
   );
 }
@@ -330,25 +387,19 @@ function AsyComponentNode({
         <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
       </svg>
 
-      <div
-        style={{
-          position: "absolute", top: -16, left: "50%", transform: "translateX(-50%)",
-          fontSize: 11, whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
-          color: selected ? "#2563eb" : "#374151", fontWeight: selected ? 600 : 500,
-        }}
+      <MovableLabel
+        nodeId={nodeId} kind="label" base={LABEL_POS} offset={data.labelOffset}
+        color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
       >
         {data.label}
-      </div>
+      </MovableLabel>
       {data.valueLabel && (
-        <div
-          style={{
-            position: "absolute", bottom: -18, left: "50%", transform: "translateX(-50%)",
-            fontSize: 10, whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
-            color: selected ? "#1d4ed8" : "#6b7280",
-          }}
+        <MovableLabel
+          nodeId={nodeId} kind="value" base={VALUE_POS} offset={data.valueOffset}
+          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
         >
           {data.valueLabel}
-        </div>
+        </MovableLabel>
       )}
     </div>
   );
@@ -358,7 +409,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "subcircuit") {
-    return <SubcircuitBox data={nodeData} selected={selected} />;
+    return <SubcircuitBox nodeId={id} data={nodeData} selected={selected} />;
   }
   const asySym = symbolForType(nodeData.componentType, symbolNorm);
   if (asySym) {
@@ -406,43 +457,24 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
         <SymbolComponent />
       </svg>
 
-      {/* Reference label (R1, C1, …) – above for ground, below for others */}
+      {/* Reference label (R1, C1, …) – to the left; ground has no label */}
       {!isGround && (
-        <div
-          style={{
-            position: "absolute",
-            top: -16,
-            left: "50%",
-            transform: "translateX(-50%)",
-            fontSize: 11,
-            whiteSpace: "nowrap",
-            userSelect: "none",
-            fontFamily: "monospace",
-            color: selected ? "#2563eb" : "#374151",
-            fontWeight: selected ? 600 : 500,
-          }}
+        <MovableLabel
+          nodeId={id} kind="label" base={LABEL_POS} offset={nodeData.labelOffset}
+          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
         >
           {nodeData.label}
-        </div>
+        </MovableLabel>
       )}
 
-      {/* Value label (1kΩ, 100nF, 5V …) – below the symbol */}
+      {/* Value label (1kΩ, 100nF, 5V …) – left, below the reference */}
       {nodeData.valueLabel && !isGround && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: -18,
-            left: "50%",
-            transform: "translateX(-50%)",
-            fontSize: 10,
-            whiteSpace: "nowrap",
-            userSelect: "none",
-            fontFamily: "monospace",
-            color: selected ? "#1d4ed8" : "#6b7280",
-          }}
+        <MovableLabel
+          nodeId={id} kind="value" base={VALUE_POS} offset={nodeData.valueOffset}
+          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
         >
           {nodeData.valueLabel}
-        </div>
+        </MovableLabel>
       )}
     </div>
   );
