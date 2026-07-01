@@ -26,14 +26,31 @@ const MARGIN_COMPACT = { top: 8, right: 8, bottom: 28, left: 48 };
 
 const DND_MIME = "application/x-librespice-trace";
 
+const SI_PREFIXES: { e: number; s: string }[] = [
+  { e: 12, s: "T" }, { e: 9, s: "G" }, { e: 6, s: "M" }, { e: 3, s: "k" }, { e: 0, s: "" },
+  { e: -3, s: "m" }, { e: -6, s: "µ" }, { e: -9, s: "n" }, { e: -12, s: "p" }, { e: -15, s: "f" },
+];
+
+/**
+ * Engineering-notation number: scales by a power-of-1000 SI prefix so the
+ * mantissa stays in [1, 1000) (e.g. 0.01 → "10m", 10 → "10", 10000 → "10k"),
+ * with up to 4 significant digits and trailing zeros trimmed. No prefix is used
+ * when the value is already in a readable range.
+ */
+function siFormat(v: number): string {
+  if (!isFinite(v)) return "—";
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a < 1e-15 || a >= 1e15) return v.toExponential(2);
+  const group = Math.max(-15, Math.min(12, Math.floor(Math.log10(a) / 3) * 3));
+  const scaled = Number((v / 10 ** group).toPrecision(4));
+  const prefix = SI_PREFIXES.find((p) => p.e === group)?.s ?? "";
+  return `${scaled}${prefix}`;
+}
+
 function fmtTime(t: number): string {
-  if (t === 0) return "0";
-  const a = Math.abs(t);
-  if (a >= 1) return `${t.toFixed(3)}s`;
-  if (a >= 1e-3) return `${(t * 1e3).toFixed(3)}ms`;
-  if (a >= 1e-6) return `${(t * 1e6).toFixed(3)}µs`;
-  if (a >= 1e-9) return `${(t * 1e9).toFixed(3)}ns`;
-  return `${t.toExponential(2)}s`;
+  const s = siFormat(t);
+  return s === "0" || s === "—" ? s : `${s}s`;
 }
 
 /** Pretty-print ngspice vector names: `@r1[i]` → `I(R1)`, `@r1[p]` → `P(R1)`. */
@@ -45,17 +62,8 @@ function displayVar(name: string): string {
 }
 
 function fmtVal(v: number, unit = ""): string {
-  if (!isFinite(v)) return "—";
-  const a = Math.abs(v);
-  if (a === 0) return `0${unit}`;
-  if (a >= 1e9) return `${(v / 1e9).toFixed(3)}G${unit}`;
-  if (a >= 1e6) return `${(v / 1e6).toFixed(3)}M${unit}`;
-  if (a >= 1e3) return `${(v / 1e3).toFixed(3)}k${unit}`;
-  if (a >= 1) return `${v.toFixed(5)}${unit}`;
-  if (a >= 1e-3) return `${(v * 1e3).toFixed(3)}m${unit}`;
-  if (a >= 1e-6) return `${(v * 1e6).toFixed(3)}µ${unit}`;
-  if (a >= 1e-9) return `${(v * 1e9).toFixed(3)}n${unit}`;
-  return `${v.toExponential(3)}${unit}`;
+  const s = siFormat(v);
+  return s === "—" ? s : `${s}${unit}`;
 }
 
 function niceTicks(min: number, max: number, count = 6): number[] {
