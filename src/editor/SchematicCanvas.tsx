@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -69,6 +69,11 @@ function CanvasInner() {
   } = useUIStore();
 
   const { result, addProbeCandidates } = useSimulationStore();
+
+  // Only auto-fit when the canvas already has content at mount. On an empty
+  // canvas fitView would stay pending and first fire when the first node is
+  // placed, jerking the zoom (shrinking the ghost and offsetting placement).
+  const [fitOnInit] = useState(() => nodes.length > 0);
 
   // Reference designators already in use, for per-prefix auto-numbering.
   const existingLabels = () =>
@@ -318,8 +323,9 @@ function CanvasInner() {
             onPaneClick={onPaneClick}
             snapToGrid
             snapGrid={[GRID_SIZE, GRID_SIZE]}
-            fitView
+            fitView={fitOnInit}
             fitViewOptions={{ padding: 0.3 }}
+            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             deleteKeyCode={null}
             panOnDrag={editorMode !== "wire"}
             nodesDraggable={editorMode === "select"}
