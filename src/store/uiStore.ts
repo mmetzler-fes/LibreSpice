@@ -25,6 +25,8 @@ interface UIState {
   editorMode: EditorMode;
   pendingPlaceType: ComponentType | null;
   pendingLibraryPlacement: PendingLibraryPlacement | null;
+  /** Rotation (deg) applied to the placement ghost and the next placed part. */
+  placementRotation: number;
   showPropertiesPanel: boolean;
   showComponentPalette: boolean;
   darkMode: boolean;
@@ -46,6 +48,7 @@ interface UIActions {
   startPlacing: (type: ComponentType) => void;
   startPlacingLibrary: (placement: PendingLibraryPlacement) => void;
   cancelPlacing: () => void;
+  rotatePlacement: () => void;
   togglePropertiesPanel: () => void;
   toggleComponentPalette: () => void;
   toggleDarkMode: () => void;
@@ -64,6 +67,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   editorMode: "select",
   pendingPlaceType: null,
   pendingLibraryPlacement: null,
+  placementRotation: 0,
   showPropertiesPanel: true,
   showComponentPalette: true,
   darkMode: false,
@@ -82,6 +86,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   startPlacingLibrary: (placement) =>
     set({ editorMode: "place", pendingPlaceType: placement.componentType, pendingLibraryPlacement: placement }),
   cancelPlacing: () => set({ editorMode: "select", pendingPlaceType: null, pendingLibraryPlacement: null }),
+  rotatePlacement: () => set((s) => ({ placementRotation: (s.placementRotation + 270) % 360 })),
   togglePropertiesPanel: () => set((s) => ({ showPropertiesPanel: !s.showPropertiesPanel })),
   toggleComponentPalette: () => set((s) => ({ showComponentPalette: !s.showComponentPalette })),
   toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
