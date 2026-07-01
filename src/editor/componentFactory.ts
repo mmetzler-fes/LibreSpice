@@ -55,15 +55,39 @@ export function createSubcircuitComponent(
   return new CustomSubcircuit(id, label, { x, y }, raw, portNames);
 }
 
+const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
+  resistor: "R", capacitor: "C", inductor: "L", diode: "D", led: "D",
+  zener: "D", schottky: "D", opamp: "U",
+  bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
+  vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
+  subcircuit: "X",
+};
+
+/** Reference-designator prefix for a component type (e.g. resistor → "R"). */
+export function labelPrefix(type: ComponentType): string {
+  return LABEL_PREFIX[type] ?? "X";
+}
+
 export function getDefaultLabel(type: ComponentType, counter: number): string {
-  const map: Partial<Record<ComponentType, string>> = {
-    resistor: "R", capacitor: "C", inductor: "L", diode: "D", led: "D",
-    zener: "D", schottky: "D", opamp: "U",
-    bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
-    vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
-    subcircuit: "X",
-  };
-  return `${map[type] ?? "X"}${counter}`;
+  return `${labelPrefix(type)}${counter}`;
+}
+
+/**
+ * Next free reference designator for a type, numbered independently per prefix
+ * (so resistors count R1, R2, … regardless of how many capacitors exist).
+ * Derived from the labels already present, which keeps it stable across
+ * deletions and undo/redo. Types sharing a prefix (e.g. diode/LED/zener → D)
+ * share the same sequence.
+ */
+export function getNextLabel(type: ComponentType, existingLabels: Iterable<string>): string {
+  const prefix = labelPrefix(type);
+  const re = new RegExp(`^${prefix}(\\d+)$`);
+  let max = 0;
+  for (const label of existingLabels) {
+    const m = re.exec(label);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${prefix}${max + 1}`;
 }
 
 function fmtSI(v: number, unit: string): string {
