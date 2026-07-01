@@ -143,7 +143,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     setExprError(null);
   };
 
-  if (!result) {
+  // No result, or a result without a usable time base (e.g. failed run, `.op`).
+  if (!result || !result.time || result.time.length === 0) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: "#0f172a" }}>
         <p style={{ margin: 0, fontSize: compact ? 12 : 14 }}>No simulation data</p>
@@ -381,12 +382,12 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: compact ? 180 : 260 });
-  const [cursor, setCursor] = useState<{ px: number; py: number } | null>(null);
   const [showAxis, setShowAxis] = useState(false);
-  const [isPanning, setIsPanning] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const panStart = useRef<{ px: number; vr: ViewRange } | null>(null);
-  const rangeRef = useRef<ViewRange>({ xMin: 0, xMax: 1, yMin: -1, yMax: 1 });
+  /** Measurement cursor bound to one probe; `t` is a value on the x-axis. */
+  const [cursor, setCursor] = useState<{ trace: string; t: number } | null>(null);
+  /** Right-click context menu (viewport coords). */
+  const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -398,10 +399,16 @@ function PlotPanelView(props: PlotPanelViewProps) {
     return () => ro.disconnect();
   }, []);
 
+  // Drop the cursor if its probe leaves this panel.
+  useEffect(() => {
+    if (cursor && !traces.includes(cursor.trace)) setCursor(null);
+  }, [cursor, traces]);
+
   const plotW = dims.w - margin.left - margin.right;
   const plotH = dims.h - margin.top - margin.bottom;
 
-  // Auto range from the panel's own traces; explicit axis bounds override it.
+  // Auto range: x defaults to the saved-data window (first..last sample time,
+  // i.e. tstart..tstop); y is fitted to the panel's traces.
   const auto = useMemo<ViewRange>(() => {
     let yMin = Infinity, yMax = -Infinity;
     for (const t of traces) {
@@ -421,7 +428,6 @@ function PlotPanelView(props: PlotPanelViewProps) {
     yMin: panel.yMin ?? auto.yMin,
     yMax: panel.yMax ?? auto.yMax,
   };
-  rangeRef.current = vr;
 
   const logX = !!panel.logX;
   const xLo = logX ? Math.max(vr.xMin, 1e-30) : vr.xMin;
@@ -447,53 +453,49 @@ function PlotPanelView(props: PlotPanelViewProps) {
     return d;
   };
 
-  const xTicks = logX
-    ? logTicks(xLo, vr.xMax)
-    : niceTicks(vr.xMin, vr.xMax, panel.xTicks ?? Math.max(4, Math.floor(plotW / 80)));
-  const yTicks = niceTicks(vr.yMin, vr.yMax, panel.yTicks ?? Math.max(3, Math.floor(plotH / 60)));
+  const xTickCount = panel.xTicks ?? Math.max(4, Math.floor(plotW / 80));
+  const yTickCount = panel.yTicks ?? Math.max(3, Math.floor(plotH / 60));
+  const xTicks = logX ? logTicks(xLo, vr.xMax) : niceTicks(vr.xMin, vr.xMax, xTickCount);
+  const yTicks = niceTicks(vr.yMin, vr.yMax, yTickCount);
 
-  // Cursor readout: nearest sample by x.
-  const cursorT = cursor
-    ? (logX ? 10 ** (lxMin + (cursor.px / plotW) * (lxMax - lxMin)) : vr.xMin + (cursor.px / plotW) * (vr.xMax - vr.xMin))
-    : null;
-  const cVals = useMemo(() => {
-    if (cursorT === null) return [];
+  const nearestIndex = (t: number): number => {
     let lo = 0, hi = time.length - 1;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (time[mid] < cursorT) lo = mid + 1; else hi = mid; }
-    return traces.map((t) => ({ name: t, value: seriesMap[t]?.[lo] ?? NaN, color: colorFor(t) }));
-  }, [cursorT, time, traces, seriesMap, colorFor]);
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (time[mid] < t) lo = mid + 1; else hi = mid; }
+    if (lo > 0 && Math.abs(time[lo - 1] - t) < Math.abs(time[lo] - t)) return lo - 1;
+    return lo;
+  };
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  // Snap the cursor to the nearest sample and read its x/y.
+  const cursorInfo = cursor
+    ? (() => {
+        const idx = nearestIndex(cursor.t);
+        const sampleT = time[idx];
+        const value = seriesMap[cursor.trace]?.[idx] ?? NaN;
+        return { idx, sampleT, value, sx: toSx(sampleT), color: colorFor(cursor.trace) };
+      })()
+    : null;
+
+  // Drag the cursor horizontally (this is the only mouse interaction; axis
+  // range is set exclusively through the settings menu).
+  const startCursorDrag = (e: React.MouseEvent) => {
     e.preventDefault();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const px = e.clientX - rect.left - margin.left;
-    const pxFrac = Math.max(0, Math.min(1, px / plotW));
-    const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2;
-    const r = rangeRef.current;
-    const xMid = r.xMin + pxFrac * (r.xMax - r.xMin);
-    const newW = (r.xMax - r.xMin) * factor;
-    onUpdate({ xMin: xMid - pxFrac * newW, xMax: xMid + (1 - pxFrac) * newW });
-  }, [plotW, margin.left, onUpdate]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    setIsPanning(true);
-    panStart.current = { px: e.clientX, vr: { ...rangeRef.current } };
-  }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const px = e.clientX - rect.left - margin.left;
-    const py = e.clientY - rect.top - margin.top;
-    setCursor(px >= 0 && px <= plotW && py >= 0 && py <= plotH ? { px, py } : null);
-    if (isPanning && panStart.current) {
-      const dx = e.clientX - panStart.current.px;
-      const xRange = panStart.current.vr.xMax - panStart.current.vr.xMin;
-      const shift = -(dx / plotW) * xRange;
-      onUpdate({ xMin: panStart.current.vr.xMin + shift, xMax: panStart.current.vr.xMax + shift });
-    }
-  }, [isPanning, plotW, plotH, margin.left, margin.top, onUpdate]);
-
-  const handleMouseUp = useCallback(() => { setIsPanning(false); panStart.current = null; }, []);
+    e.stopPropagation();
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const move = (ev: MouseEvent) => {
+      const px = ev.clientX - rect.left - margin.left;
+      const frac = Math.max(0, Math.min(1, px / plotW));
+      const t = logX ? 10 ** (lxMin + frac * (lxMax - lxMin)) : vr.xMin + frac * (vr.xMax - vr.xMin);
+      setCursor((c) => (c ? { ...c, t } : c));
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   return (
     <div
@@ -521,9 +523,12 @@ function PlotPanelView(props: PlotPanelViewProps) {
               key={t}
               draggable
               onDragStart={(e) => e.dataTransfer.setData(DND_MIME, t)}
+              onContextMenu={(e) => { e.preventDefault(); setMenu({ trace: t, x: e.clientX, y: e.clientY }); }}
+              title="Right-click for cursor"
               style={{
                 display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "1px 6px", borderRadius: 10, background: "#1e293b",
+                padding: "1px 6px", borderRadius: 10,
+                background: cursor?.trace === t ? "#334155" : "#1e293b",
                 fontSize: 10, fontFamily: "monospace", color: colorFor(t), cursor: "grab",
               }}
             >
@@ -547,7 +552,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
         <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: "#0b1120", borderTop: "1px solid #1e293b", flexWrap: "wrap" }}>
           <AxisFields
             title="x-axis"
-            min={panel.xMin} max={panel.xMax} ticks={panel.xTicks}
+            min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={xTickCount}
             minLabel="left" maxLabel="right"
             onMin={(v) => onUpdate({ xMin: v })}
             onMax={(v) => onUpdate({ xMax: v })}
@@ -561,7 +566,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
           />
           <AxisFields
             title="y-axis"
-            min={panel.yMin} max={panel.yMax} ticks={panel.yTicks}
+            min={panel.yMin ?? round6(vr.yMin)} max={panel.yMax ?? round6(vr.yMax)} ticks={yTickCount}
             minLabel="bottom" maxLabel="top"
             onMin={(v) => onUpdate({ yMin: v })}
             onMax={(v) => onUpdate({ yMax: v })}
@@ -570,15 +575,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
         </div>
       )}
 
-      {/* Plot */}
+      {/* Plot (axis range is set only via the settings menu — no zoom/pan) */}
       <div
         ref={containerRef}
-        style={{ flex: 1, overflow: "hidden", cursor: isPanning ? "grabbing" : "crosshair", position: "relative" }}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => { setCursor(null); handleMouseUp(); }}
+        style={{ flex: 1, overflow: "hidden", position: "relative" }}
       >
         <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
           <defs>
@@ -610,34 +610,78 @@ function PlotPanelView(props: PlotPanelViewProps) {
                 return d ? <path key={t} d={buildPath(d)} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
-            {cursor && (
-              <g style={{ pointerEvents: "none" }}>
-                <line x1={cursor.px} y1={0} x2={cursor.px} y2={plotH} stroke="#ffffff30" strokeWidth={1} />
-                {cVals.map(({ name, value, color }) => (
-                  <circle key={name} cx={cursor.px} cy={toSy(value)} r={3} fill={color} stroke="#0f172a" strokeWidth={1} />
-                ))}
+            {cursorInfo && isFinite(cursorInfo.sx) && (
+              <g>
+                <line x1={cursorInfo.sx} y1={0} x2={cursorInfo.sx} y2={plotH} stroke={cursorInfo.color} strokeWidth={1} strokeDasharray="4 3" />
+                {isFinite(cursorInfo.value) && (
+                  <circle cx={cursorInfo.sx} cy={toSy(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke="#0f172a" strokeWidth={1} style={{ pointerEvents: "none" }} />
+                )}
+                {/* Draggable handle + hit area */}
+                <rect x={cursorInfo.sx - 5} y={0} width={10} height={plotH} fill="transparent" style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
+                <rect x={cursorInfo.sx - 4} y={2} width={8} height={9} rx={2} fill={cursorInfo.color} style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
               </g>
             )}
             <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke="#334155" strokeWidth={1} />
           </g>
         </svg>
-        {cursor && cVals.length > 0 && cursorT !== null && (
+        {cursorInfo && isFinite(cursorInfo.sx) && (
           <div style={{
-            position: "absolute", top: 4, right: 4, padding: 6, background: "#1e293bd0",
-            border: "1px solid #334155", borderRadius: 4, fontSize: 10, pointerEvents: "none",
+            position: "absolute", top: 4,
+            left: Math.min(dims.w - 130, margin.left + cursorInfo.sx + 8),
+            padding: 6, background: "#1e293be6", border: `1px solid ${cursorInfo.color}`,
+            borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96,
           }}>
-            <div style={{ color: "#64748b", marginBottom: 2 }}>t = {fmtTime(cursorT)}</div>
-            {cVals.map(({ name, value, color }) => (
-              <div key={name} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ color, fontFamily: "monospace" }}>{displayVar(name)}</span>
-                <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>{fmtVal(value)}</span>
-              </div>
-            ))}
+            <div style={{ color: cursorInfo.color, fontFamily: "monospace", marginBottom: 2 }}>{displayVar(cursor!.trace)}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ color: "#64748b" }}>x</span>
+              <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>{fmtTime(cursorInfo.sampleT)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ color: "#64748b" }}>y</span>
+              <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>{fmtVal(cursorInfo.value)}</span>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Probe context menu: toggle the measurement cursor */}
+      {menu && (
+        <>
+          <div
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 40 }}
+          />
+          <div style={{
+            position: "fixed", left: menu.x, top: menu.y, zIndex: 41,
+            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+            padding: 4, fontSize: 11, boxShadow: "0 4px 12px #00000070",
+          }}>
+            <button
+              onClick={() => {
+                setCursor((c) => c?.trace === menu.trace ? null : { trace: menu.trace, t: (vr.xMin + vr.xMax) / 2 });
+                setMenu(null);
+              }}
+              style={menuItem}
+            >
+              {cursor?.trace === menu.trace ? "Cursor entfernen" : "Cursor anzeigen"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+const menuItem: React.CSSProperties = {
+  display: "block", width: "100%", padding: "4px 10px", textAlign: "left",
+  border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer", fontSize: 11,
+  borderRadius: 4, whiteSpace: "nowrap",
+};
+
+/** Round for display so auto axis bounds don't show float noise. */
+function round6(n: number): number {
+  return isFinite(n) ? Number(n.toPrecision(6)) : n;
 }
 
 const ctrlBtn: React.CSSProperties = {

@@ -95,8 +95,13 @@ export class NetlistGenerator {
 
   private _analysisLine(config: SimulationConfig): string {
     switch (config.type) {
-      case "tran":
-        return `.tran ${config.stepTime} ${config.stopTime}${config.startTime ? ` ${config.startTime}` : ""}`;
+      case "tran": {
+        // ngspice requires TSTART < TSTOP; drop an out-of-range start time.
+        const startTime = config.startTime && config.startTime > 0 && config.startTime < config.stopTime
+          ? ` ${config.startTime}`
+          : "";
+        return `.tran ${config.stepTime} ${config.stopTime}${startTime}`;
+      }
       case "dc":
         return `.dc ${config.sourceName} ${config.start} ${config.stop} ${config.step}`;
       case "ac":
