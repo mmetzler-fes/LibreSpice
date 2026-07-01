@@ -118,7 +118,8 @@ export const PulseSourceSymbol = () => (
 
 export const GroundSymbol = () => (
   <g>
-    <line x1="0" y1="-10" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
+    {/* Connection point is the top of the vertical line, at y = -20. */}
+    <line x1="0" y1="-20" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
     <line x1="-16" y1="0" x2="16" y2="0" stroke="currentColor" strokeWidth="2" />
     <line x1="-10" y1="6" x2="10" y2="6" stroke="currentColor" strokeWidth="2" />
     <line x1="-4" y1="12" x2="4" y2="12" stroke="currentColor" strokeWidth="2" />

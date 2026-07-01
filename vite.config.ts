@@ -11,6 +11,7 @@ export default defineConfig({
       "@store": resolve(__dirname, "src/store"),
       "@simulation": resolve(__dirname, "src/simulation"),
       "@oscilloscope": resolve(__dirname, "src/oscilloscope"),
+      "@sym": resolve(__dirname, "src/sym"),
     },
   },
   worker: {

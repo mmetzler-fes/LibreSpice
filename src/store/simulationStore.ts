@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { matchResultVariable } from "@core/circuit/probeUtils.js";
 
 export type SimulationStatus = "idle" | "running" | "done" | "error";
 
@@ -14,6 +15,10 @@ interface SimulationState {
   errorMessage: string | null;
   selectedVariables: string[];
   hoveredVariable: string | null;
+  /** Probes requested before a simulation has been run */
+  pendingProbes: string[];
+  /** Raw ngspice stdout/stderr from the last run, for the Log panel. */
+  log: string;
 }
 
 interface SimulationActions {
@@ -22,7 +27,10 @@ interface SimulationActions {
   setErrorMessage: (msg: string | null) => void;
   setSelectedVariables: (vars: string[]) => void;
   toggleVariable: (variable: string) => void;
+  addProbe: (variable: string) => void;
+  addProbeCandidates: (candidates: string[]) => void;
   setHoveredVariable: (variable: string | null) => void;
+  setLog: (log: string) => void;
   reset: () => void;
 }
 
@@ -32,12 +40,18 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   errorMessage: null,
   selectedVariables: [],
   hoveredVariable: null,
+  pendingProbes: [],
+  log: "",
 
   setStatus: (status) => set({ status }),
   setResult: (result) => {
-    set({ result, status: "done", errorMessage: null });
+    const { pendingProbes } = get();
     if (result && result.variables.length > 0) {
-      set({ selectedVariables: [result.variables[0]] });
+      const resolved = pendingProbes.filter((p) => result.variables.includes(p));
+      const fallback = resolved.length > 0 ? resolved : [result.variables[0]];
+      set({ result, status: "done", errorMessage: null, selectedVariables: fallback, pendingProbes: [] });
+    } else {
+      set({ result, status: "done", errorMessage: null });
     }
   },
   setErrorMessage: (errorMessage) => set({ errorMessage, status: "error" }),
@@ -49,6 +63,34 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       : [...current, variable];
     set({ selectedVariables: next });
   },
+  addProbe: (variable) => {
+    const { result, selectedVariables, pendingProbes } = get();
+    if (result) {
+      if (!selectedVariables.includes(variable)) {
+        set({ selectedVariables: [...selectedVariables, variable] });
+      }
+    } else if (!pendingProbes.includes(variable)) {
+      set({ pendingProbes: [...pendingProbes, variable] });
+    }
+  },
+  addProbeCandidates: (candidates) => {
+    const { result, selectedVariables, pendingProbes } = get();
+    if (result) {
+      const matched = candidates
+        .map((c) => matchResultVariable(result, c))
+        .filter((v): v is string => v !== null);
+      const toAdd = matched.filter((v) => !selectedVariables.includes(v));
+      if (toAdd.length > 0) {
+        set({ selectedVariables: [...selectedVariables, ...toAdd] });
+      }
+    } else {
+      const toAdd = candidates.filter((c) => !pendingProbes.includes(c));
+      if (toAdd.length > 0) {
+        set({ pendingProbes: [...pendingProbes, ...toAdd] });
+      }
+    }
+  },
   setHoveredVariable: (hoveredVariable) => set({ hoveredVariable }),
-  reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [] }),
+  setLog: (log) => set({ log }),
+  reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "" }),
 }));

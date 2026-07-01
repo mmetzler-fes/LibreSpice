@@ -1,0 +1,26 @@
+- DC 
+    DC Value
+- Pulse
+    ParameteKrs:
+    VInitial[V],
+    Von[V],
+    Tdelay[s],
+    Trise[s],
+    Tfall[s],
+    Tperiod[s],
+    Ncycles
+- Sine
+    DC offset[V],
+    Amplitude[V],
+    Frequency[Hz],
+    Tdelay[s],
+    Theta[1/s],
+    Phi[degrees],
+    Ncycles 
+
+For all other sources, the following parameters are available:
+- Parasitic Properties
+    Series Resistance[Ohm]
+    Parallel Capacitance[F]
+    show this in the schematic (yes/no)
+

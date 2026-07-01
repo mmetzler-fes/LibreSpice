@@ -2,9 +2,11 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore, type EditorMode } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import { DirectiveModal } from "./DirectiveModal.js";
+import { ModelImportModal } from "./ModelImportModal.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
+import { buildShareUrl } from "@store/persistence.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
 
@@ -79,19 +81,6 @@ const SymM = () => (
     <polygon points="4,3 9,6 4,9" fill="currentColor" />
   </svg>
 );
-const SymSin = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    <path d="M-6,0 Q-3,-6 0,0 Q3,6 6,0" fill="none" stroke="currentColor" strokeWidth="1.5" />
-  </svg>
-);
-const SymPulse = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    <polyline points="-6,4 -6,-4 0,-4 0,4 6,4" fill="none" stroke="currentColor" strokeWidth="1.5" />
-  </svg>
-);
-
 // ── Toolbar helpers ───────────────────────────────────────────────────────────
 
 interface TBtnProps {
@@ -139,9 +128,9 @@ export function Toolbar() {
   const {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
-    circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle
+    circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
@@ -162,6 +151,7 @@ export function Toolbar() {
     try {
       const res = await runSimulation(netlist);
       setResult(res);
+      setDockTab("waveform");
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : "Simulation error");
     }
@@ -253,6 +243,16 @@ export function Toolbar() {
     setFileHandle(loadedHandle, loadedName);
   };
 
+  const handleShareUrl = async () => {
+    const url = buildShareUrl(exportSnapshot());
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Share link copied to clipboard!");
+    } catch {
+      prompt("Copy this link to share your circuit:", url);
+    }
+  };
+
   return (
     <div
       style={{
@@ -285,6 +285,9 @@ export function Toolbar() {
           <path d="M7 3v5h8" />
           <path d="M12 11l0 4 M10 13l4 0" />
         </svg>
+      </TBtn>
+      <TBtn title="Copy Share URL" onClick={handleShareUrl}>
+        <Ico d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
       </TBtn>
 
       <Divider />
@@ -335,6 +338,23 @@ export function Toolbar() {
 
       <Divider />
 
+      {/* ── Symbol norm ── */}
+      <select
+        title="Symbol standard (drawing norm)"
+        value={symbolNorm}
+        onChange={(e) => setSymbolNorm(e.target.value as typeof symbolNorm)}
+        style={{
+          height: 28, fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 4,
+          background: "#fff", color: "#334155", padding: "0 4px", cursor: "pointer",
+        }}
+      >
+        <option value="default">Symbols: EU</option>
+        <option value="en">Symbols: EN</option>
+        <option value="ansi">Symbols: ANSI</option>
+      </select>
+
+      <Divider />
+
       {/* ── Quick-place components ── */}
       <TBtn title="Place Resistor (R)" active={isPlacing("resistor")} onClick={() => handlePlace("resistor")}>
         <SymR />
@@ -359,12 +379,6 @@ export function Toolbar() {
       </TBtn>
       <TBtn title="Place Current Source (I)" active={isPlacing("isource")} onClick={() => handlePlace("isource")}>
         <SymI />
-      </TBtn>
-      <TBtn title="Place Sine Source" active={isPlacing("sinesource")} onClick={() => handlePlace("sinesource")}>
-        <SymSin />
-      </TBtn>
-      <TBtn title="Place Pulse Source" active={isPlacing("pulsesource")} onClick={() => handlePlace("pulsesource")}>
-        <SymPulse />
       </TBtn>
 
       <Divider />
@@ -409,10 +423,11 @@ export function Toolbar() {
       )}
       {editorMode === "wire" && (
         <span style={{ fontSize: 11, color: "#16a34a", fontStyle: "italic", marginLeft: 4, whiteSpace: "nowrap" }}>
-          Wire mode — drag between handles to connect
+          Wire mode — click a pin to start, click to bend 90°, click another pin to finish (right-click/Esc cancels)
         </span>
       )}
       <DirectiveModal />
+      <ModelImportModal />
     </div>
   );
 }

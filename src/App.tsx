@@ -1,8 +1,12 @@
+import { useEffect, useRef } from "react";
 import { SchematicCanvas } from "@editor/SchematicCanvas.js";
 import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopeView } from "@simulation/OscilloscopeView.js";
+import { LiveNetlistPanel } from "@editor/LiveNetlistPanel.js";
 import { useUIStore, type ActiveTab } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
+import { getSnapshotFromUrl, loadFromLocalStorage } from "@store/persistence.js";
+import { useAutosave } from "@store/useAutosave.js";
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: "schematic", label: "Schematic" },
@@ -12,6 +16,24 @@ const TABS: { id: ActiveTab; label: string }[] = [
 
 export function App() {
   const { activeTab, setActiveTab, toggleDarkMode, darkMode } = useUIStore();
+  const loadFromSnapshot = useCircuitStore((s) => s.loadFromSnapshot);
+  const initialized = useRef(false);
+
+  useAutosave();
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    const fromUrl = getSnapshotFromUrl();
+    if (fromUrl) {
+      loadFromSnapshot(fromUrl);
+      return;
+    }
+    const saved = loadFromLocalStorage();
+    if (saved && saved.nodes.length > 0) {
+      loadFromSnapshot(saved);
+    }
+  }, [loadFromSnapshot]);
 
   return (
     <div
@@ -89,25 +111,11 @@ export function App() {
 }
 
 function NetlistView() {
-  const { netlist } = useCircuitStore();
   return (
     <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-      <pre
-        style={{
-          flex: 1,
-          margin: 0,
-          padding: 24,
-          fontFamily: "'Cascadia Code', 'Fira Code', monospace",
-          fontSize: 13,
-          lineHeight: 1.6,
-          background: "#1e293b",
-          color: "#e2e8f0",
-          overflowY: "auto",
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        {netlist || "* Empty circuit – add components in the Schematic tab"}
-      </pre>
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <LiveNetlistPanel />
+      </div>
       <div style={{ width: 280, borderLeft: "1px solid #e2e8f0", overflow: "auto" }}>
         <SimulationPanel />
       </div>

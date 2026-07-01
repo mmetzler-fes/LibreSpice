@@ -11,7 +11,7 @@ export class Circuit {
     this.components.set(component.id, component);
     if (component instanceof Ground) {
       component.ports[0].connect("0");
-      this._ensureNet("0", "0");
+      this._ensureNet("0", "GND");
       this.nets.get("0")!.addPort(component.ports[0].id);
     }
   }
@@ -33,6 +33,9 @@ export class Circuit {
     if (portA.netId && portA.netId === portB.netId) return portA.netId;
 
     if (portA.netId && portB.netId) {
+      // The ground net "0" must always survive a merge so the circuit keeps a
+      // single ground node (and the netlist keeps referencing node 0).
+      if (portB.netId === "0") return this._mergeNets("0", portA.netId);
       return this._mergeNets(portA.netId, portB.netId);
     }
 

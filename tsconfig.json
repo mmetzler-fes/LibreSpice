@@ -20,7 +20,8 @@
       "@editor/*": ["./src/editor/*"],
       "@store/*": ["./src/store/*"],
       "@simulation/*": ["./src/simulation/*"],
-      "@oscilloscope/*": ["./src/oscilloscope/*"]
+      "@oscilloscope/*": ["./src/oscilloscope/*"],
+      "@sym/*": ["./src/sym/*"]
     }
   },
   "include": ["src"]

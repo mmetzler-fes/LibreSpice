@@ -38,12 +38,26 @@ export class NetlistGenerator {
     config: SimulationConfig,
     directives = "",
     title = "LibreSpice Netlist",
+    libraryDefs = "",
   ): string {
     const lines: string[] = [`* ${title}`];
 
     for (const component of circuit.components.values()) {
       const line = component.getNetlistLine();
       if (line) lines.push(line);
+    }
+
+    // Imported .model / .subckt definitions from the component library.
+    const libLines = libraryDefs
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0 && !l.trim().startsWith("*"));
+    for (const ll of libLines) lines.push(ll);
+
+    // Compute branch currents for every device (R, C, L, sources, …) so they can
+    // be plotted as @dev[i]. Skip if the user already set the option themselves.
+    if (!/savecurrents/i.test(directives)) {
+      lines.push(".options savecurrents");
     }
 
     // Parse directive lines – skip blank lines and full-line comments

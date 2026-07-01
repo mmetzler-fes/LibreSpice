@@ -1,11 +1,13 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
+import { useUIStore } from "@store/uiStore.js";
 import type { SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 
-export function SimulationPanel() {
+export function SimulationPanel({ compact = false }: { compact?: boolean }) {
   const { netlist, simulationConfig, setSimulationConfig } = useCircuitStore();
   const { status, result, errorMessage, selectedVariables, toggleVariable, setStatus, setResult, setErrorMessage } =
     useSimulationStore();
+  const { setDockTab } = useUIStore();
 
   const cfg = simulationConfig;
 
@@ -16,14 +18,16 @@ export function SimulationPanel() {
       const { runSimulation } = await import("./simulationEngine.js");
       const res = await runSimulation(netlist);
       setResult(res);
+      setDockTab("waveform");
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : "Unknown simulation error");
+      setDockTab("log");
     }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, flex: 1, overflowY: "auto" }}>
-      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Simulation</h3>
+    <div style={{ display: "flex", flexDirection: "column", gap: compact ? 10 : 16, padding: compact ? 12 : 16, flex: 1, overflowY: "auto", height: "100%" }}>
+      <h3 style={{ margin: 0, fontSize: compact ? 13 : 14, fontWeight: 600 }}>Simulation</h3>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <label style={{ fontSize: 12, fontWeight: 500 }}>Analysis Type</label>
@@ -125,6 +129,7 @@ export function SimulationPanel() {
         </div>
       )}
 
+      {!compact && (
       <div>
         <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Generated Netlist</h4>
         <pre
@@ -142,6 +147,7 @@ export function SimulationPanel() {
           {netlist || "* (empty – add components and connect them)"}
         </pre>
       </div>
+      )}
     </div>
   );
 }
