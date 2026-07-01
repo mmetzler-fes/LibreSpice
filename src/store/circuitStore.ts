@@ -35,6 +35,7 @@ interface CircuitActions {
   addComponent: (component: SpiceComponent, nodeData: Node) => void;
   removeComponent: (id: string) => void;
   updateComponentProperty: (id: string, key: string, value: string | number) => void;
+  setLabelOffset: (id: string, kind: "label" | "value", offset: { x: number; y: number }) => void;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   setSelectedComponentId: (id: string | null) => void;
@@ -117,6 +118,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       propertyVersion: state.propertyVersion + 1,
     }));
     get().regenerateNetlist();
+  },
+
+  setLabelOffset: (id, kind, offset) => {
+    const key = kind === "label" ? "labelOffset" : "valueOffset";
+    set((state) => ({
+      nodes: state.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, [key]: offset } } : n)),
+    }));
   },
 
   setNodes: (nodes) => set({ nodes }),
