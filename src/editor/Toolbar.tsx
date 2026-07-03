@@ -7,6 +7,7 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { buildShareUrl } from "@store/persistence.js";
+import { buildSchematicSvg } from "./svgExport.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
 
@@ -127,8 +128,9 @@ function Divider() {
 export function Toolbar() {
   const {
     canUndo, canRedo, undo, redo,
-    clearCircuit, rotateSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
+    clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
+    circuitName, setCircuitName,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
@@ -157,14 +159,23 @@ export function Toolbar() {
     }
   };
 
-  const fallbackSave = (content: string) => {
-    const blob = new Blob([content], { type: "text/plain" });
+  // Filesystem-safe base name derived from the diagram name.
+  const safeName = (circuitName.trim() || "circuit").replace(/[^\w.\- ]+/g, "_");
+
+  const downloadBlob = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "circuit.asc";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
+
+  const handleExportSvg = () => {
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm), `${safeName}.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {
@@ -174,7 +185,7 @@ export function Toolbar() {
         let handle = fileHandle;
         if (!handle || saveAs) {
           handle = await (window as any).showSaveFilePicker({
-            suggestedName: "circuit.asc",
+            suggestedName: `${safeName}.asc`,
             types: [{ description: "LTSpice Schematic", accept: { "text/plain": [".asc"] } }],
           });
           setFileHandle(handle, handle.name);
@@ -233,6 +244,7 @@ export function Toolbar() {
           const text = await file.text();
           loadFromAsc(text);
           setFileHandle(null, file.name);
+          setCircuitName(file.name.replace(/\.asc$/i, ""));
         }
       };
       input.click();
@@ -241,6 +253,7 @@ export function Toolbar() {
 
     loadFromAsc(loadedText);
     setFileHandle(loadedHandle, loadedName);
+    setCircuitName(loadedName.replace(/\.asc$/i, ""));
   };
 
   const handleShareUrl = async () => {
@@ -289,6 +302,26 @@ export function Toolbar() {
       <TBtn title="Copy Share URL" onClick={handleShareUrl}>
         <Ico d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
       </TBtn>
+      <TBtn title="Export schematic as SVG" onClick={handleExportSvg}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12 M8 11l4 4 4-4 M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+          <text x="12" y="9" textAnchor="middle" fontSize="7" fill="currentColor" stroke="none">SVG</text>
+        </svg>
+      </TBtn>
+
+      <Divider />
+
+      {/* ── Diagram name (default file name for .asc/.plt) ── */}
+      <input
+        title="Diagram name — used as the default file name when saving"
+        value={circuitName}
+        onChange={(e) => setCircuitName(e.target.value)}
+        placeholder="Diagram name"
+        style={{
+          height: 26, width: 140, fontSize: 12, padding: "0 8px",
+          border: "1px solid #cbd5e1", borderRadius: 4, background: "#fff", color: "#334155",
+        }}
+      />
 
       <Divider />
 
@@ -396,7 +429,7 @@ export function Toolbar() {
       <TBtn title="Rotate 90° left (Ctrl+R)" onClick={rotateSelected} disabled={!selectedComponentId}>
         <Ico d="M23 4v6h-6 M1 20v-6h6 M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
       </TBtn>
-      <TBtn title="Mirror Horizontal (Ctrl+M)" onClick={() => {}} disabled={!selectedComponentId}>
+      <TBtn title="Mirror Horizontal (Ctrl+M)" onClick={mirrorSelected} disabled={!selectedComponentId}>
         <Ico d="M12 3v18 M4 7l4 5-4 5 M20 7l-4 5 4 5" />
       </TBtn>
 

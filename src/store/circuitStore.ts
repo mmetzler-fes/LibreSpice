@@ -23,6 +23,8 @@ interface CircuitState {
   netlist: string;
   simulationConfig: SimulationConfig;
   spiceDirectives: string;
+  /** User-facing diagram/circuit name; default file name for .asc and .plt. */
+  circuitName: string;
   propertyVersion: number;
   netVersion: number;
   fileHandle: any | null;
@@ -43,6 +45,7 @@ interface CircuitActions {
   regenerateNetlist: () => void;
   setSimulationConfig: (config: SimulationConfig) => void;
   setSpiceDirectives: (text: string) => void;
+  setCircuitName: (name: string) => void;
   renameNet: (netId: string, label: string) => void;
   loadFromAsc: (ascContent: string) => void;
   clearCircuit: () => void;
@@ -52,6 +55,7 @@ interface CircuitActions {
   canUndo: () => boolean;
   canRedo: () => boolean;
   rotateSelected: () => void;
+  mirrorSelected: () => void;
   deleteSelected: () => void;
   rebuildConnections: () => void;
   exportSnapshot: () => CircuitSnapshot;
@@ -72,6 +76,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   netlist: "",
   simulationConfig: DEFAULT_CONFIG,
   spiceDirectives: "",
+  circuitName: "Untitled",
   propertyVersion: 0,
   netVersion: 0,
   fileHandle: null,
@@ -160,6 +165,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     get().regenerateNetlist();
   },
 
+  setCircuitName: (name) => set({ circuitName: name }),
+
   renameNet: (netId, label) => {
     const net = get().circuit.nets.get(netId);
     if (!net) return;
@@ -200,6 +207,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       edges: [],
       selectedComponentId: null,
       netlist: "",
+      circuitName: "Untitled",
       fileHandle: null,
       fileName: null,
       _history: [...state._history, snap],
@@ -247,6 +255,22 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           : n,
       ),
     }));
+  },
+
+  mirrorSelected: () => {
+    const { selectedComponentId } = get();
+    if (!selectedComponentId) return;
+    // Mirror is purely visual (pin identity is unchanged, so the netlist stays
+    // the same); it toggles a flag on the node that the renderer/pin geometry
+    // read to flip the symbol and its handles horizontally.
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === selectedComponentId
+          ? { ...n, data: { ...n.data, mirrored: !(n.data as { mirrored?: boolean }).mirrored } }
+          : n,
+      ),
+    }));
+    set((state) => ({ netVersion: state.netVersion + 1 }));
   },
 
   deleteSelected: () => {
@@ -328,7 +352,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   exportSnapshot: () => {
-    const { nodes, edges, spiceDirectives, simulationConfig, circuit } = get();
+    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName } = get();
     const componentProps: Record<string, Record<string, string | number>> = {};
     for (const [id, comp] of circuit.components) {
       const props: Record<string, string | number> = {};
@@ -339,7 +363,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     for (const [id, net] of circuit.nets) {
       if (id !== "0" && net.nodeLabel !== id) netLabels[id] = net.nodeLabel;
     }
-    return { version: 1, nodes, edges, spiceDirectives, simulationConfig, componentProps, netLabels };
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -368,6 +392,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuit: newCircuit,
       nodes: rebuiltNodes,
       edges: snapshot.edges.map((e) => ({ ...e })),
+      circuitName: snapshot.circuitName ?? "Untitled",
       spiceDirectives: snapshot.spiceDirectives,
       simulationConfig: snapshot.simulationConfig,
       selectedComponentId: null,

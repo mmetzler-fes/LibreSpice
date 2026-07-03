@@ -6,7 +6,19 @@ import { matchResultVariable } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
-import { serializePlt, parsePlt, siPrefix, tickCount, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+import { serializePlt, parsePlt, siPrefix, tickStep, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
+
+/** Trigger a browser download of a text payload. */
+function downloadText(content: string, filename: string, mime: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 /** ngspice analysis type → LTSpice `.plt` section header. */
 const ANALYSIS_LABEL: Record<string, string> = {
@@ -80,6 +92,24 @@ function niceTicks(min: number, max: number, count = 6): number[] {
   return ticks;
 }
 
+/**
+ * Ticks for a linear axis. When `step` (the grid spacing) is given it is used
+ * verbatim (aligned to a multiple of the step); otherwise a "nice" spacing is
+ * chosen automatically to give roughly `autoCount` ticks.
+ */
+function ticksFor(min: number, max: number, step: number | undefined, autoCount: number): number[] {
+  if (step && isFinite(step) && step > 0 && max > min) {
+    const ticks: number[] = [];
+    const start = Math.ceil(min / step) * step;
+    for (let v = start; v <= max + step * 1e-6; v += step) {
+      ticks.push(v);
+      if (ticks.length > 500) break; // guard against a tiny step
+    }
+    return ticks;
+  }
+  return niceTicks(min, max, autoCount);
+}
+
 /** Decade ticks (1·10ⁿ, 2·10ⁿ, 5·10ⁿ) inside a positive range, for log axes. */
 function logTicks(min: number, max: number): number[] {
   if (min <= 0 || max <= 0) return [];
@@ -142,6 +172,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const { result, selectedVariables, toggleVariable, setSelectedVariables } = useSimulationStore();
   const { autoProbeCurrent, toggleAutoProbeCurrent } = useUIStore();
   const analysisType = useCircuitStore((s) => s.simulationConfig.type);
+  const circuitName = useCircuitStore((s) => s.circuitName);
   const {
     panels, traceToPanel, colors, expressions, syncX,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
@@ -206,8 +237,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     setExprError(null);
   };
 
-  const axisFrom = (low: number, high: number, n: number): PltAxis =>
-    ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: (high - low) / Math.max(1, n), high });
+  // `step` is the grid spacing (our tick model); fall back to ~5 divisions.
+  const axisFrom = (low: number, high: number, step?: number): PltAxis =>
+    ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: step && step > 0 ? step : (high - low) / 5, high });
 
   // Save the plot configuration as an LTSpice-compatible `.plt` file.
   const handleSavePlt = () => {
@@ -217,19 +249,13 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       panes: panels.map((panel): PltPane => {
         const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
         const groups = applyYOverrides(groupByUnit(traces, seriesMap.map), panel);
-        const y = groups.map((g) => axisFrom(g.yMin, g.yMax, g.ticks ?? panel.yTicks ?? 5));
-        if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks ?? 5));
-        const x = axisFrom(panel.xMin ?? time[0], panel.xMax ?? time[time.length - 1], panel.xTicks ?? 5);
+        const y = groups.map((g) => axisFrom(g.yMin, g.yMax, g.ticks ?? panel.yTicks));
+        if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks));
+        const x = axisFrom(panel.xMin ?? time[0], panel.xMax ?? time[time.length - 1], panel.xTicks);
         return { traces, x, y, log: [!!panel.logX, false, false] };
       }),
     };
-    const blob = new Blob([serializePlt(doc)], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "plot.plt";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText(serializePlt(doc), `${circuitName.trim() || "plot"}.plt`, "text/plain");
   };
 
   // Load an LTSpice `.plt` file, rebuild the panels and re-plot the data.
@@ -259,12 +285,12 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
         units.forEach((u, k) => {
           const ax = pane.y[k];
-          if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickCount(ax) };
+          if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickStep(ax) };
         });
         newPanels.push({
           id,
-          xMin: pane.x.low, xMax: pane.x.high, xTicks: tickCount(pane.x), logX: pane.log[0],
-          yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickCount(pane.y[0]),
+          xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
+          yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
           yAxes,
         });
         for (const t of pane.traces) {
@@ -525,6 +551,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   const canRemove = count > 1;
+  const circuitName = useCircuitStore((s) => s.circuitName);
+
+  // Serialise this panel's SVG to a downloadable standalone file.
+  const handleExportSvg = () => {
+    const svg = document.getElementById(`osc-svg-${panel.id}`);
+    if (!svg) return;
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+    downloadText(xml, `${circuitName.trim() || "plot"}.svg`, "image/svg+xml");
+  };
 
   /** Merge a manual override into one unit's y-axis. */
   const setYAxis = (unit: string, patch: { min?: number; max?: number; ticks?: number }) =>
@@ -536,6 +573,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const [dragOver, setDragOver] = useState(false);
   /** Measurement cursor bound to one probe; `t` is a value on the x-axis. */
   const [cursor, setCursor] = useState<{ trace: string; t: number } | null>(null);
+  /** Permanently "stamped" cursor positions (each an x on one probe). */
+  const [stamps, setStamps] = useState<{ trace: string; t: number }[]>([]);
   /** Probe context menu (cursor toggle), at viewport coords. */
   const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
   /** Pane context menu (add/move/delete/sync), at viewport coords. */
@@ -551,9 +590,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Drop the cursor if its probe leaves this panel.
+  // Drop the cursor / stamps whose probe leaves this panel.
   useEffect(() => {
     if (cursor && !traces.includes(cursor.trace)) setCursor(null);
+    setStamps((s) => s.filter((st) => traces.includes(st.trace)));
   }, [cursor, traces]);
 
   const RIGHT_AXIS_W = compact ? 42 : 50;
@@ -604,10 +644,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
     return d;
   };
 
-  const xTickCount = panel.xTicks ?? Math.max(4, Math.floor(plotW / 80));
-  const yTickCount = panel.yTicks ?? Math.max(3, Math.floor(plotH / 60));
-  const xTicks = logX ? logTicks(xLo, vr.xMax) : niceTicks(vr.xMin, vr.xMax, xTickCount);
-  const yTicks = niceTicks(y0.yMin, y0.yMax, y0.ticks ?? yTickCount);
+  // Auto tick counts when no explicit spacing (panel.xTicks/yTicks) is set.
+  const autoXCount = Math.max(4, Math.floor(plotW / 80));
+  const autoYCount = Math.max(3, Math.floor(plotH / 60));
+  const xTicks = logX ? logTicks(xLo, vr.xMax) : ticksFor(vr.xMin, vr.xMax, panel.xTicks, autoXCount);
+  const yTicks = ticksFor(y0.yMin, y0.yMax, y0.ticks, autoYCount);
 
   const nearestIndex = (t: number): number => {
     let lo = 0, hi = time.length - 1;
@@ -625,6 +666,20 @@ function PlotPanelView(props: PlotPanelViewProps) {
         return { idx, sampleT, value, sx: toSx(sampleT), color: colorFor(cursor.trace) };
       })()
     : null;
+
+  // Screen positions for each stamp (snapped to the nearest sample).
+  const stampInfos = stamps.map((st, i) => {
+    const idx = nearestIndex(st.t);
+    const sampleT = time[idx];
+    const value = seriesMap[st.trace]?.[idx] ?? NaN;
+    return { i, trace: st.trace, sampleT, value, sx: toSx(sampleT), sy: mkToSy(groupOf(st.trace))(value), color: colorFor(st.trace) };
+  });
+
+  // Stamp the current cursor position (or the panel centre) for `trace`.
+  const stampCursor = (trace: string) => {
+    const t = cursor?.trace === trace ? cursor.t : (vr.xMin + vr.xMax) / 2;
+    setStamps((s) => [...s, { trace, t }]);
+  };
 
   // Drag the cursor horizontally (this is the only mouse interaction; axis
   // range is set exclusively through the settings menu).
@@ -703,7 +758,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
         <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: "#0b1120", borderTop: "1px solid #1e293b", flexWrap: "wrap" }}>
           <AxisFields
             title="x-axis"
-            min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={xTickCount}
+            min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={panel.xTicks}
             minLabel="left" maxLabel="right"
             onMin={(v) => onUpdate({ xMin: v })}
             onMax={(v) => onUpdate({ xMax: v })}
@@ -719,7 +774,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <AxisFields
               key={g.unit || "y"}
               title={g.unit ? `y (${g.unit})` : "y-axis"}
-              min={round6(g.yMin)} max={round6(g.yMax)} ticks={g.ticks ?? yTickCount}
+              min={round6(g.yMin)} max={round6(g.yMax)} ticks={g.ticks}
               minLabel="bottom" maxLabel="top"
               onMin={(v) => setYAxis(g.unit, { min: v })}
               onMax={(v) => setYAxis(g.unit, { max: v })}
@@ -735,7 +790,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
         style={{ flex: 1, overflow: "hidden", position: "relative" }}
         onContextMenu={(e) => { e.preventDefault(); setPaneMenu({ x: e.clientX, y: e.clientY }); }}
       >
-        <svg width={dims.w} height={dims.h} style={{ display: "block" }}>
+        <svg id={`osc-svg-${panel.id}`} width={dims.w} height={dims.h} style={{ display: "block" }}>
           <defs>
             <clipPath id={`osc-clip-${panel.id}`}>
               <rect x={0} y={0} width={plotW} height={plotH} />
@@ -773,7 +828,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               return (
                 <g key={g.unit || r}>
                   <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke="#334155" strokeWidth={1} />
-                  {niceTicks(g.yMin, g.yMax, g.ticks ?? yTickCount).map((v) => (
+                  {ticksFor(g.yMin, g.yMax, g.ticks, autoYCount).map((v) => (
                     <g key={v}>
                       <line x1={xLine} y1={sy(v)} x2={xLine + 3} y2={sy(v)} stroke={col} strokeWidth={1} />
                       <text x={xLine + 5} y={sy(v) + 3} textAnchor="start" fontSize={9} fill={col}>{fmtVal(v)}</text>
@@ -790,6 +845,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
                 return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
+            {/* Stamped cursor positions: dashed marker + inline x/y readout */}
+            {stampInfos.map((s) => isFinite(s.sx) ? (
+              <g key={`stamp-${s.i}`} style={{ pointerEvents: "none" }}>
+                <line x1={s.sx} y1={0} x2={s.sx} y2={plotH} stroke={s.color} strokeWidth={1} strokeDasharray="2 3" opacity={0.75} />
+                {isFinite(s.value) && <circle cx={s.sx} cy={s.sy} r={3} fill={s.color} stroke="#0f172a" strokeWidth={1} />}
+                <text x={Math.min(plotW - 2, s.sx + 4)} y={12 + (s.i % 3) * 11} fontSize={8} fontFamily="monospace"
+                  textAnchor={s.sx > plotW - 60 ? "end" : "start"} fill={s.color}>
+                  {fmtTime(s.sampleT)}, {fmtVal(s.value)}
+                </text>
+              </g>
+            ) : null)}
             {cursorInfo && isFinite(cursorInfo.sx) && (
               <g>
                 <line x1={cursorInfo.sx} y1={0} x2={cursorInfo.sx} y2={plotH} stroke={cursorInfo.color} strokeWidth={1} strokeDasharray="4 3" />
@@ -822,6 +888,22 @@ function PlotPanelView(props: PlotPanelViewProps) {
             </div>
           </div>
         )}
+        {/* One × per stamp to remove it individually. */}
+        {stampInfos.map((s) => isFinite(s.sx) ? (
+          <button
+            key={`del-${s.i}`}
+            onClick={() => setStamps((list) => list.filter((_, j) => j !== s.i))}
+            title="Abdruck entfernen"
+            style={{
+              position: "absolute",
+              top: margin.top + plotH - 14,
+              left: Math.min(dims.w - 16, margin.left + s.sx - 6),
+              width: 14, height: 14, lineHeight: "12px", padding: 0,
+              borderRadius: 3, fontSize: 11, cursor: "pointer",
+              background: "#0f172acc", color: s.color, border: `1px solid ${s.color}`,
+            }}
+          >×</button>
+        ) : null)}
       </div>
 
       {/* Probe context menu: toggle the measurement cursor */}
@@ -845,6 +927,13 @@ function PlotPanelView(props: PlotPanelViewProps) {
               style={menuItem}
             >
               {cursor?.trace === menu.trace ? "Cursor entfernen" : "Cursor anzeigen"}
+            </button>
+            <button
+              onClick={() => { stampCursor(menu.trace); setMenu(null); }}
+              style={menuItem}
+              title="Aktuelle Cursorposition dauerhaft auf das Diagramm drucken"
+            >
+              Position abdrucken
             </button>
           </div>
         </>
@@ -872,9 +961,16 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <button style={menuItem} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
               {syncX ? "☑" : "☐"} Sync. Horiz. Axes
             </button>
+            {stamps.length > 0 && (
+              <>
+                <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
+                <button style={menuItem} onClick={() => { setStamps([]); setPaneMenu(null); }}>Alle Abdrücke entfernen</button>
+              </>
+            )}
             <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
             <button style={menuItem} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
             <button style={menuItem} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
+            <button style={menuItem} onClick={() => { handleExportSvg(); setPaneMenu(null); }}>Export Diagram (.svg)</button>
           </div>
         </>
       )}
@@ -923,31 +1019,46 @@ interface AxisFieldsProps {
 }
 
 function AxisFields({ title, min, max, ticks, minLabel, maxLabel, onMin, onMax, onTicks, extra }: AxisFieldsProps) {
-  const parse = (s: string): number | undefined => {
-    if (s.trim() === "") return undefined;
-    const n = parseFloat(s);
-    return isFinite(n) ? n : undefined;
-  };
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <span style={{ fontSize: 9, fontWeight: 600, color: "#64748b", width: 40 }}>{title}</span>
-      <AxisInput label={minLabel} value={min} onChange={(s) => onMin(parse(s))} />
-      <AxisInput label="tick" value={ticks} onChange={(s) => onTicks(parse(s))} />
-      <AxisInput label={maxLabel} value={max} onChange={(s) => onMax(parse(s))} />
+      <AxisInput label={minLabel} value={min} onChange={onMin} />
+      <AxisInput label="tick" value={ticks} onChange={onTicks} />
+      <AxisInput label={maxLabel} value={max} onChange={onMax} />
       {extra}
     </div>
   );
 }
 
-function AxisInput({ label, value, onChange }: { label: string; value?: number; onChange: (s: string) => void }) {
+/**
+ * SI-aware axis field: shows the value in engineering notation (e.g. `1.5k`,
+ * `10m`) and accepts SI-suffixed input (`1k`, `10meg`, `4.7µ`). No spinner
+ * arrows; empty commits `undefined` (auto). A local buffer lets the user type
+ * freely; the value is committed on blur / Enter.
+ */
+function AxisInput({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const shown = text ?? (value === undefined || !isFinite(value) ? "" : siFormat(value));
+
+  const commit = () => {
+    if (text === null) return;
+    const t = text.trim();
+    setText(null);
+    if (t === "") { onChange(undefined); return; }
+    const n = parseSpiceNumber(t);
+    if (n !== undefined) onChange(n); // invalid input → revert to the shown value
+  };
+
   return (
     <label style={{ display: "flex", flexDirection: "column", fontSize: 8, color: "#64748b" }}>
       {label}
       <input
-        type="number"
-        value={value ?? ""}
+        type="text"
+        value={shown}
         placeholder="auto"
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") { commit(); (e.target as HTMLInputElement).blur(); } }}
         style={{ width: 52, padding: "2px 4px", fontSize: 9, background: "#0b1120", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 3 }}
       />
     </label>

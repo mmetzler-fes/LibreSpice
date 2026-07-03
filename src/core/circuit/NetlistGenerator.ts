@@ -123,3 +123,61 @@ export function formatAnalysisDirective(config: SimulationConfig): string {
       return ".op";
   }
 }
+
+/** Parse a SPICE value token with an optional SI suffix (1u, 10m, 1meg, 1k). */
+export function parseSpiceNumber(v?: string): number | undefined {
+  if (!v) return undefined;
+  const m = v.match(/^([-+]?[\d.]+(?:e[-+]?\d+)?)([a-zµ]*)$/i);
+  if (!m) return undefined;
+  let n = parseFloat(m[1]);
+  const s = m[2].toLowerCase();
+  if (s.startsWith("meg")) n *= 1e6;
+  else if (s.startsWith("g")) n *= 1e9;
+  else if (s.startsWith("t")) n *= 1e12;
+  else if (s.startsWith("k")) n *= 1e3;
+  else if (s.startsWith("m")) n *= 1e-3;
+  else if (s.startsWith("u") || s.startsWith("µ")) n *= 1e-6;
+  else if (s.startsWith("n")) n *= 1e-9;
+  else if (s.startsWith("p")) n *= 1e-12;
+  else if (s.startsWith("f")) n *= 1e-15;
+  return isFinite(n) ? n : undefined;
+}
+
+/** Parse an analysis directive line (e.g. `.tran 1u 10m`) into a config. */
+export function parseAnalysisDirective(line: string): SimulationConfig | null {
+  const m = line.trim().match(/^\.(tran|ac|dc|op)\b(.*)$/i);
+  if (!m) return null;
+  const type = m[1].toLowerCase();
+  const rest = m[2].trim().split(/\s+/).filter(Boolean);
+  if (type === "op") return { type: "op" };
+  if (type === "tran") {
+    const uic = /\buic\b/i.test(m[2]);
+    const nums = rest.filter((t) => !/^uic$/i.test(t)).map((t) => parseSpiceNumber(t));
+    return {
+      type: "tran",
+      stepTime: nums[0] ?? 1e-6,
+      stopTime: nums[1] ?? 1e-3,
+      startTime: nums[2],
+      maxStep: nums[3],
+      uic,
+    };
+  }
+  if (type === "dc") {
+    return {
+      type: "dc",
+      sourceName: rest[0] ?? "V1",
+      start: parseSpiceNumber(rest[1]) ?? 0,
+      stop: parseSpiceNumber(rest[2]) ?? 5,
+      step: parseSpiceNumber(rest[3]) ?? 0.1,
+    };
+  }
+  // ac
+  const variation = (rest[0] ?? "DEC").toUpperCase();
+  return {
+    type: "ac",
+    variation: (["DEC", "OCT", "LIN"].includes(variation) ? variation : "DEC") as ACConfig["variation"],
+    points: parseSpiceNumber(rest[1]) ?? 10,
+    startFreq: parseSpiceNumber(rest[2]) ?? 1,
+    stopFreq: parseSpiceNumber(rest[3]) ?? 1e6,
+  };
+}

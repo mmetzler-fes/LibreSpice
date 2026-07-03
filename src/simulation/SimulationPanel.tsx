@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
@@ -8,7 +9,8 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
   const { netlist, simulationConfig, setSimulationConfig } = useCircuitStore();
   const { status, result, errorMessage, selectedVariables, toggleVariable, setStatus, setResult, setErrorMessage } =
     useSimulationStore();
-  const { setDockTab, setSimConfigDialog } = useUIStore();
+  const { setDockTab } = useUIStore();
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const cfg = simulationConfig;
 
@@ -32,8 +34,8 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
 
       {/* Analysis directive — right-click to edit all parameters in a dialog. */}
       <div
-        onContextMenu={(e) => { e.preventDefault(); setSimConfigDialog(true); }}
-        onDoubleClick={() => setSimConfigDialog(true)}
+        onContextMenu={(e) => { e.preventDefault(); setDialogOpen(true); }}
+        onDoubleClick={() => setDialogOpen(true)}
         title="Right-click (or double-click) to edit parameters"
         style={{
           fontFamily: "monospace", fontSize: 12, cursor: "context-menu",
@@ -164,7 +166,12 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
       </div>
       )}
 
-      <SimDirectiveDialog />
+      <SimDirectiveDialog
+        open={dialogOpen}
+        initialConfig={simulationConfig}
+        onApply={setSimulationConfig}
+        onClose={() => setDialogOpen(false)}
+      />
     </div>
   );
 }

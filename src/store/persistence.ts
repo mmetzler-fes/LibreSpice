@@ -9,6 +9,8 @@ export interface CircuitSnapshot {
   version: 1;
   nodes: Node[];
   edges: Edge[];
+  /** User-facing diagram/circuit name (default file name). */
+  circuitName?: string;
   spiceDirectives: string;
   simulationConfig: SimulationConfig;
   /** component id → property key → value */

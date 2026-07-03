@@ -47,6 +47,8 @@ export interface ComponentNodeData {
   label: string;
   valueLabel?: string;
   rotation?: number;
+  /** Horizontal mirror flag (visual only; pin identity is unchanged). */
+  mirrored?: boolean;
   /** For the generalized voltage source: "DC" | "Sine" | "Pulse". */
   sourceType?: string;
   hasProbe?: boolean;
@@ -200,7 +202,7 @@ const SOURCE_SYMBOLS: Record<string, React.FC> = {
   Pulse: PulseSourceSymbol,
 };
 
-function getHandles(type: ComponentType) {
+function getHandles(type: ComponentType, mirrored = false) {
   // Ground: one source handle at the top (ConnectionMode.Loose allows source↔source)
   if (type === "ground") {
     // Dock at the top of the vertical line (symbol y=-20 → local 20 in the 80px box).
@@ -236,10 +238,12 @@ function getHandles(type: ComponentType) {
     const top = isMos ? "d" : "c";
     const left = isMos ? "g" : "b";
     const bottom = isMos ? "s" : "e";
+    // Horizontal mirror moves the side (gate/base) pin to the opposite edge so
+    // the handle tracks the flipped symbol.
     return (
       <>
         <Handle type="source" position={Position.Top} id={top} style={HANDLE_STYLE} />
-        <Handle type="source" position={Position.Left} id={left} style={HANDLE_STYLE} />
+        <Handle type="source" position={mirrored ? Position.Right : Position.Left} id={left} style={HANDLE_STYLE} />
         <Handle type="source" position={Position.Bottom} id={bottom} style={HANDLE_STYLE} />
       </>
     );
@@ -382,6 +386,7 @@ function AsyComponentNode({
   selected?: boolean;
 }) {
   const rotation = data.rotation ?? 0;
+  const mirrored = !!data.mirrored;
   const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
@@ -393,7 +398,8 @@ function AsyComponentNode({
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
       {selected && <PinNetLabels nodeId={nodeId} data={data} />}
       {mapping.pins.map((pin) => {
-        const [hx, hy] = rotatePoint(pin.px, pin.py, center, center, rotation);
+        const [rx, hy] = rotatePoint(pin.px, pin.py, center, center, rotation);
+        const hx = mirrored ? NODE_SIZE - rx : rx;
         return (
           <Handle
             key={pin.order}
@@ -410,7 +416,7 @@ function AsyComponentNode({
         style={{
           color: selected ? "#2563eb" : "#0f172a",
           overflow: "visible",
-          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
         }}
       >
@@ -458,6 +464,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol
       : SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
   const rotation = nodeData.rotation ?? 0;
+  const mirrored = !!nodeData.mirrored;
   const isGround = nodeData.componentType === "ground";
 
   return (
@@ -474,7 +481,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       }}
     >
       {selected && <PinNetLabels nodeId={id} data={nodeData} />}
-      {getHandles(nodeData.componentType)}
+      {getHandles(nodeData.componentType, mirrored)}
       <svg
         width="80"
         height="80"
@@ -482,7 +489,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
         style={{
           color: selected ? "#2563eb" : "currentColor",
           overflow: "visible",
-          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
         }}
       >

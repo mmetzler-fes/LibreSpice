@@ -89,8 +89,10 @@ const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
   ],
 };
 
-/** Node-local pin positions, accounting for rotation of `.asy` symbols. */
+/** Node-local pin positions, accounting for rotation/mirror of the symbol. */
 export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "default"): LocalPin[] {
+  const mirrored = !!data.mirrored;
+  const flip = (px: number) => (mirrored ? NODE_SIZE - px : px);
   const sym = symbolForType(data.componentType, norm);
   if (sym) {
     const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN);
@@ -98,10 +100,11 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
     const rotation = data.rotation ?? 0;
     return mapping.pins.map((pin) => {
       const [px, py] = rotatePoint(pin.px, pin.py, c, c, rotation);
-      return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px, py };
+      return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px: flip(px), py };
     });
   }
-  return FALLBACK_PINS[data.componentType] ?? [];
+  const pins = FALLBACK_PINS[data.componentType] ?? [];
+  return mirrored ? pins.map((p) => ({ ...p, px: flip(p.px) })) : pins;
 }
 
 export interface NodePin {

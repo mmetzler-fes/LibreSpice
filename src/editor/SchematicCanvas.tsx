@@ -57,7 +57,7 @@ function CanvasInner() {
     addComponent, removeComponent, setNodes, setEdges,
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
-    rotateSelected, deleteSelected, rebuildConnections,
+    rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
     circuit,
   } = useCircuitStore();
 
@@ -153,6 +153,11 @@ function CanvasInner() {
         if (editorMode === "place") rotatePlacement(); else rotateSelected();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "m") {
+        e.preventDefault();
+        mirrorSelected();
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") { deleteSelected(); return; }
 
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -172,7 +177,7 @@ function CanvasInner() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement]);
+  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, mirrorSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement]);
 
   const onConnect = useCallback(
     (connection: Connection) => {

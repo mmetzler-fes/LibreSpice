@@ -4,6 +4,6 @@
 Die Skalierung der x oder y-Achse soll eingestellt werden können
     x-Achse: left, tick, right, logarithmic (false/true)
     y-Achse: bottom, tick, top
-Es sollten arithmatisch Funktionen mit den Probevariablen angezeigt werden können
+Es sollten arithmatisch Funktionen mit den Probevariablen angezeigt werden können Sie
 Rechnungen: +,-, *, / z.B. V(punkt1)-V(punkt2)
 

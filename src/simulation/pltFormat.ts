@@ -170,9 +170,8 @@ export function parsePlt(text: string): PltDoc | null {
   return { analysis, panes };
 }
 
-/** Tick spacing → tick count for our axis model. */
-export function tickCount(axis?: PltAxis): number | undefined {
+/** Grid spacing (our tick model) from an axis tuple, or undefined if invalid. */
+export function tickStep(axis?: PltAxis): number | undefined {
   if (!axis || !isFinite(axis.tick) || axis.tick <= 0) return undefined;
-  const n = Math.round((axis.high - axis.low) / axis.tick);
-  return n >= 2 ? n : undefined;
+  return axis.tick;
 }

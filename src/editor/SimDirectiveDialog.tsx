@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { useCircuitStore } from "@store/circuitStore.js";
-import { useUIStore } from "@store/uiStore.js";
 import { formatAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 
 /** Default config when switching to a given analysis type. */
-function defaultConfig(type: SimulationConfig["type"]): SimulationConfig {
+export function defaultConfig(type: SimulationConfig["type"]): SimulationConfig {
   switch (type) {
     case "tran": return { type: "tran", stepTime: 1e-6, stopTime: 1e-3 };
     case "dc": return { type: "dc", sourceName: "V1", start: 0, stop: 5, step: 0.1 };
@@ -20,33 +18,40 @@ const TYPE_LABEL: Record<SimulationConfig["type"], string> = {
   op: "Operating Point (.op)",
 };
 
+interface SimDirectiveDialogProps {
+  open: boolean;
+  /** Initial values shown when the dialog opens. */
+  initialConfig: SimulationConfig;
+  /** Called with the edited config when the user confirms (OK). */
+  onApply: (config: SimulationConfig) => void;
+  onClose: () => void;
+}
+
 /**
- * Modal editor for the simulation directive. Opened by right-clicking the
- * `.tran …` directive; shows every parameter of the active analysis type and
- * writes them back on OK (Cancel leaves the current settings untouched).
+ * Modal editor for a simulation directive: shows every parameter of the chosen
+ * analysis type, seeded from `initialConfig`, and returns the edited config via
+ * `onApply` on OK (Cancel leaves things untouched).
  */
-export function SimDirectiveDialog() {
-  const { simulationConfig, setSimulationConfig } = useCircuitStore();
-  const { showSimConfigDialog, setSimConfigDialog } = useUIStore();
-  const [cfg, setCfg] = useState<SimulationConfig>(simulationConfig);
+export function SimDirectiveDialog({ open, initialConfig, onApply, onClose }: SimDirectiveDialogProps) {
+  const [cfg, setCfg] = useState<SimulationConfig>(initialConfig);
 
   // Seed a fresh working copy whenever the dialog opens.
   useEffect(() => {
-    if (showSimConfigDialog) setCfg(simulationConfig);
-  }, [showSimConfigDialog, simulationConfig]);
+    if (open) setCfg(initialConfig);
+  }, [open, initialConfig]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && showSimConfigDialog) setSimConfigDialog(false);
+      if (e.key === "Escape" && open) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [showSimConfigDialog, setSimConfigDialog]);
+  }, [open, onClose]);
 
-  if (!showSimConfigDialog) return null;
+  if (!open) return null;
 
-  const close = () => setSimConfigDialog(false);
-  const apply = () => { setSimulationConfig(cfg); close(); };
+  const close = onClose;
+  const apply = () => { onApply(cfg); close(); };
   const patch = (p: Partial<SimulationConfig>) => setCfg((c) => ({ ...c, ...p } as SimulationConfig));
 
   return (

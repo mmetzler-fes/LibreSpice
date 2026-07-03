@@ -31,8 +31,6 @@ interface UIState {
   showComponentPalette: boolean;
   darkMode: boolean;
   showDirectiveModal: boolean;
-  /** Simulation-parameter edit dialog (opened by right-clicking the directive). */
-  showSimConfigDialog: boolean;
   showLibraryImport: boolean;
   dockOpen: boolean;
   dockHeight: number;
@@ -53,7 +51,6 @@ interface UIActions {
   toggleComponentPalette: () => void;
   toggleDarkMode: () => void;
   toggleDirectiveModal: () => void;
-  setSimConfigDialog: (open: boolean) => void;
   toggleLibraryImport: () => void;
   toggleDock: () => void;
   setDockHeight: (height: number) => void;
@@ -72,7 +69,6 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   showComponentPalette: true,
   darkMode: false,
   showDirectiveModal: false,
-  showSimConfigDialog: false,
   showLibraryImport: false,
   dockOpen: true,
   dockHeight: 240,
@@ -91,7 +87,6 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   toggleComponentPalette: () => set((s) => ({ showComponentPalette: !s.showComponentPalette })),
   toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
   toggleDirectiveModal: () => set((s) => ({ showDirectiveModal: !s.showDirectiveModal })),
-  setSimConfigDialog: (showSimConfigDialog) => set({ showSimConfigDialog }),
   toggleLibraryImport: () => set((s) => ({ showLibraryImport: !s.showLibraryImport })),
   toggleDock: () => set((s) => ({ dockOpen: !s.dockOpen })),
   setDockHeight: (dockHeight) => set({ dockHeight: Math.max(120, Math.min(600, dockHeight)) }),
