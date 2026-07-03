@@ -1,5 +1,23 @@
 import { useEffect, useState } from "react";
-import { formatAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+import { formatAnalysisDirective, parseSpiceNumber, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+
+/** SPICE-style engineering suffixes (case follows SPICE: `meg`=1e6, `m`=milli). */
+const SPICE_UNITS: { e: number; s: string }[] = [
+  { e: 12, s: "T" }, { e: 9, s: "g" }, { e: 6, s: "meg" }, { e: 3, s: "k" }, { e: 0, s: "" },
+  { e: -3, s: "m" }, { e: -6, s: "u" }, { e: -9, s: "n" }, { e: -12, s: "p" }, { e: -15, s: "f" },
+];
+
+/** Engineering-notation string with a SPICE suffix (e.g. 1e-6 → "1u", 1e6 → "1meg"). */
+function formatSpice(v: number): string {
+  if (!isFinite(v)) return "";
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a < 1e-15 || a >= 1e15) return String(v);
+  const group = Math.max(-15, Math.min(12, Math.floor(Math.log10(a) / 3) * 3));
+  const scaled = Number((v / 10 ** group).toPrecision(6));
+  const suffix = SPICE_UNITS.find((u) => u.e === group)?.s ?? "";
+  return `${scaled}${suffix}`;
+}
 
 /** Default config when switching to a given analysis type. */
 export function defaultConfig(type: SimulationConfig["type"]): SimulationConfig {
@@ -149,21 +167,30 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * Numeric field that accepts SI/SPICE-suffixed input (`1u`, `10meg`, `4.7k`)
+ * and shows the value in engineering notation. No spinner arrows; a local text
+ * buffer lets the user type freely, reformatted on blur.
+ */
 function NumField({ label, value, optional, onChange }: {
   label: string; value?: number; optional?: boolean; onChange: (v: number | undefined) => void;
 }) {
+  const [text, setText] = useState<string | null>(null);
+  const shown = text ?? (value === undefined || !isFinite(value) ? "" : formatSpice(value));
   return (
     <Field label={label}>
       <input
-        type="number"
-        value={value ?? ""}
+        type="text"
+        value={shown}
         placeholder={optional ? "auto" : ""}
         onChange={(e) => {
           const s = e.target.value;
+          setText(s);
           if (s.trim() === "") { onChange(undefined); return; }
-          const n = parseFloat(s);
-          onChange(isFinite(n) ? n : undefined);
+          const n = parseSpiceNumber(s.trim());
+          if (n !== undefined) onChange(n); // keep last valid value while typing
         }}
+        onBlur={() => setText(null)}
         style={inputStyle}
       />
     </Field>
