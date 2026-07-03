@@ -175,7 +175,7 @@ export function Toolbar() {
   const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
 
   const handleExportSvg = () => {
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm), `${safeName}.svg`, "image/svg+xml");
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {

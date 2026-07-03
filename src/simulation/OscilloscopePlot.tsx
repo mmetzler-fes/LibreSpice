@@ -562,7 +562,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
     const clone = svg.cloneNode(true) as SVGSVGElement;
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
-    downloadText(xml, `${circuitName.trim() || "plot"}.svg`, "image/svg+xml");
+    downloadText(xml, `${(circuitName.trim() || "plot")}_Diagramm.svg`, "image/svg+xml");
   };
 
   /** Merge a manual override into one unit's y-axis. */
