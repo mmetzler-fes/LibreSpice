@@ -274,10 +274,19 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   deleteSelected: () => {
-    const { selectedComponentId, removeComponent, edges, setEdges, rebuildConnections } = get();
+    const { selectedComponentId, nodes, removeComponent, edges, setEdges, rebuildConnections } = get();
     let changed = false;
-    if (selectedComponentId) {
-      removeComponent(selectedComponentId);
+    // Delete only what is *actually* selected in the canvas. Selecting a wire
+    // deselects any node, so we must not fall back to a stale selectedComponentId
+    // (that would also delete e.g. a previously-selected ground).
+    const selectedNodes = nodes.filter((n) => n.selected);
+    const nodeIds = selectedNodes.length > 0
+      ? selectedNodes.map((n) => n.id)
+      // No node carries the ReactFlow selection flag: only honour the tracked
+      // selection when no wire is selected (keyboard/toolbar delete of a part).
+      : (selectedComponentId && !edges.some((e) => e.selected) ? [selectedComponentId] : []);
+    for (const id of nodeIds) {
+      removeComponent(id);
       changed = true;
     }
     const selectedEdges = edges.filter(e => e.selected);
