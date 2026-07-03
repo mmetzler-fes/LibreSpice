@@ -66,18 +66,31 @@ export function orthoPath(points: FlowPoint[]): string {
 }
 
 /** Custom edge that routes through stored waypoints with right angles. */
-export function WireEdge({ id, source, sourceHandleId, sourceX, sourceY, targetX, targetY, data, selected, markerEnd }: EdgeProps) {
+export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, sourceX, sourceY, targetX, targetY, data, selected, markerEnd }: EdgeProps) {
   const circuit = useCircuitStore((s) => s.circuit);
+  const nodes = useCircuitStore((s) => s.nodes);
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
+  const symbolNorm = useUIStore((s) => s.symbolNorm);
+
+  // Exact pin centre for an endpoint. React Flow anchors an edge at the handle's
+  // Position edge (e.g. the *top* of a Position.Top handle circle), which shows
+  // as an off-centre dock on horizontal wires; route to the true pin centre.
+  const pinCenter = (nodeId?: string, handleId?: string | null): FlowPoint | null => {
+    if (!nodeId || !handleId) return null;
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return null;
+    const pin = getNodePins(node, symbolNorm).find((p) => p.handleId === handleId);
+    return pin ? { x: pin.x, y: pin.y } : null;
+  };
 
   const waypoints = (data?.waypoints as FlowPoint[] | undefined) ?? [];
   // When an endpoint taps an existing wire, draw only to the junction point
   // instead of routing all the way to the (electrical) target port.
   const sourceTap = data?.sourceTap as FlowPoint | undefined;
   const targetTap = data?.targetTap as FlowPoint | undefined;
-  const start = sourceTap ?? { x: sourceX, y: sourceY };
-  const end = targetTap ?? { x: targetX, y: targetY };
+  const start = sourceTap ?? pinCenter(source, sourceHandleId) ?? { x: sourceX, y: sourceY };
+  const end = targetTap ?? pinCenter(target, targetHandleId) ?? { x: targetX, y: targetY };
   const verts = orthoVertices([start, ...waypoints, end]);
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
