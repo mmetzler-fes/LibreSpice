@@ -8,6 +8,8 @@ import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { useLibraryStore } from "./libraryStore.js";
+import { useSimulationStore } from "./simulationStore.js";
+import { usePlotStore } from "@simulation/plotStore.js";
 import type { CircuitSnapshot } from "./persistence.js";
 
 interface HistoryEntry {
@@ -170,9 +172,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   renameNet: (netId, label) => {
     const net = get().circuit.nets.get(netId);
     if (!net) return;
-    net.nodeLabel = label.trim() || netId;
+    const oldLabel = net.nodeLabel;
+    const newLabel = label.trim() || netId;
+    if (oldLabel === newLabel) return;
+    net.nodeLabel = newLabel;
     set((state) => ({ netVersion: state.netVersion + 1 }));
     get().regenerateNetlist();
+    // Carry the rename into the waveform so plotted traces follow the new name
+    // (both immediately and after a re-run), instead of keeping the old label.
+    useSimulationStore.getState().renameNetVariable(oldLabel, newLabel);
+    usePlotStore.getState().renameTraceNet(oldLabel, newLabel);
   },
 
   loadFromAsc: (ascContent) => {

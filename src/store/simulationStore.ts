@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { matchResultVariable } from "@core/circuit/probeUtils.js";
+import { matchResultVariable, renameNetInProbe } from "@core/circuit/probeUtils.js";
 
 export type SimulationStatus = "idle" | "running" | "done" | "error";
 
@@ -31,6 +31,8 @@ interface SimulationActions {
   addProbeCandidates: (candidates: string[]) => void;
   setHoveredVariable: (variable: string | null) => void;
   setLog: (log: string) => void;
+  /** Follow a net rename: update selected probes and the current result's keys. */
+  renameNetVariable: (oldLabel: string, newLabel: string) => void;
   reset: () => void;
 }
 
@@ -100,5 +102,22 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   },
   setHoveredVariable: (hoveredVariable) => set({ hoveredVariable }),
   setLog: (log) => set({ log }),
+  renameNetVariable: (oldLabel, newLabel) => {
+    if (oldLabel === newLabel) return;
+    const rw = (s: string) => renameNetInProbe(s, oldLabel, newLabel);
+    set((state) => {
+      const selectedVariables = state.selectedVariables.map(rw);
+      const pendingProbes = state.pendingProbes.map(rw);
+      let result = state.result;
+      if (result) {
+        // Rename the node-voltage vector so the plot updates without a re-run.
+        const variables = result.variables.map((v) => rw(v));
+        const data: Record<string, Float64Array> = {};
+        for (const [k, val] of Object.entries(result.data)) data[rw(k)] = val;
+        result = { ...result, variables, data };
+      }
+      return { selectedVariables, pendingProbes, result };
+    });
+  },
   reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "" }),
 }));

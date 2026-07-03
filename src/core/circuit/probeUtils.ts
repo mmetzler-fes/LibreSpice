@@ -114,6 +114,16 @@ export function getVoltageDiffExpression(component: SpiceComponent, circuit: Cir
   return null;
 }
 
+/**
+ * Rewrite voltage references to a renamed net inside a probe/expression string,
+ * e.g. `V(net1)-V(gnd)` with net1→vin becomes `V(vin)-V(gnd)`. Only voltage
+ * refs carry a net name (currents reference devices), so `I(...)` is untouched.
+ */
+export function renameNetInProbe(trace: string, oldLabel: string, newLabel: string): string {
+  const esc = oldLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return trace.replace(new RegExp(`([vV])\\(\\s*${esc}\\s*\\)`, "g"), (_m, fn) => `${fn}(${newLabel})`);
+}
+
 /** Build voltage probe candidates for a specific port net. */
 export function getVoltageProbeForNet(circuit: Circuit, netId: string | null): string[] {
   const name = netLabel(circuit, netId);

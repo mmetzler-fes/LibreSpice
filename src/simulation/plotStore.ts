@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 
 /**
  * Colour palette offered in the legend colour picker. The first entries double
@@ -70,6 +71,8 @@ interface PlotActions {
   removeExpression: (expr: string) => void;
   toggleSyncX: () => void;
   importSettings: (settings: PlotSettings) => void;
+  /** Follow a net rename in traces/expressions/colours/panel assignments. */
+  renameTraceNet: (oldLabel: string, newLabel: string) => void;
 }
 
 let panelCounter = 1;
@@ -186,6 +189,18 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       colors: settings.colors ?? {},
       expressions: settings.expressions ?? [],
       syncX: !!settings.syncX,
+    });
+  },
+
+  renameTraceNet: (oldLabel, newLabel) => {
+    if (oldLabel === newLabel) return;
+    const rw = (s: string) => renameNetInProbe(s, oldLabel, newLabel);
+    set((state) => {
+      const colors: Record<string, string> = {};
+      for (const [k, v] of Object.entries(state.colors)) colors[rw(k)] = v;
+      const traceToPanel: Record<string, string> = {};
+      for (const [k, v] of Object.entries(state.traceToPanel)) traceToPanel[rw(k)] = v;
+      return { expressions: state.expressions.map(rw), colors, traceToPanel };
     });
   },
 }));
