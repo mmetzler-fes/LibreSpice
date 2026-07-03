@@ -103,22 +103,45 @@ export class NetlistGenerator {
   }
 }
 
+/** SPICE-style engineering suffixes (case follows SPICE: `meg`=1e6, `m`=milli). */
+const SPICE_UNITS: { e: number; s: string }[] = [
+  { e: 12, s: "T" }, { e: 9, s: "g" }, { e: 6, s: "meg" }, { e: 3, s: "k" }, { e: 0, s: "" },
+  { e: -3, s: "m" }, { e: -6, s: "u" }, { e: -9, s: "n" }, { e: -12, s: "p" }, { e: -15, s: "f" },
+];
+
+/**
+ * Render a number in engineering notation with a SPICE suffix (e.g. 1e-6 → "1u",
+ * 1e6 → "1meg"). The output is valid SPICE, so it is used both for display and
+ * in the generated directive line.
+ */
+export function formatSpiceNumber(v: number): string {
+  if (!isFinite(v)) return String(v);
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  if (a < 1e-15 || a >= 1e15) return String(v);
+  const group = Math.max(-15, Math.min(12, Math.floor(Math.log10(a) / 3) * 3));
+  const scaled = Number((v / 10 ** group).toPrecision(6));
+  const suffix = SPICE_UNITS.find((u) => u.e === group)?.s ?? "";
+  return `${scaled}${suffix}`;
+}
+
 /** Render a {@link SimulationConfig} as its SPICE analysis directive line. */
 export function formatAnalysisDirective(config: SimulationConfig): string {
+  const f = formatSpiceNumber;
   switch (config.type) {
     case "tran": {
       // Tmax requires Tstart to be present first; use a valid Tstart or 0.
       const hasStart = !!config.startTime && config.startTime > 0 && config.startTime < config.stopTime;
       const hasMax = !!config.maxStep && config.maxStep > 0;
-      const parts = [".tran", `${config.stepTime}`, `${config.stopTime}`];
-      if (hasStart || hasMax) parts.push(`${hasStart ? config.startTime : 0}`);
-      if (hasMax) parts.push(`${config.maxStep}`);
+      const parts = [".tran", f(config.stepTime), f(config.stopTime)];
+      if (hasStart || hasMax) parts.push(f(hasStart ? config.startTime! : 0));
+      if (hasMax) parts.push(f(config.maxStep!));
       return parts.join(" ") + (config.uic ? " uic" : "");
     }
     case "dc":
-      return `.dc ${config.sourceName} ${config.start} ${config.stop} ${config.step}`;
+      return `.dc ${config.sourceName} ${f(config.start)} ${f(config.stop)} ${f(config.step)}`;
     case "ac":
-      return `.ac ${config.variation} ${config.points} ${config.startFreq} ${config.stopFreq}`;
+      return `.ac ${config.variation} ${f(config.points)} ${f(config.startFreq)} ${f(config.stopFreq)}`;
     case "op":
       return ".op";
   }
