@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
-import { matchResultVariable } from "@core/circuit/probeUtils.js";
+import { matchResultVariable, canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
@@ -65,11 +65,13 @@ function fmtTime(t: number): string {
   return s === "0" || s === "—" ? s : `${s}s`;
 }
 
-/** Pretty-print ngspice vector names: `@r1[i]` → `I(R1)`, `@r1[p]` → `P(R1)`. */
+/** Pretty-print ngspice vector names: `@r1[i]`/`i(r1)` → `I(R1)`, `v(out)` → `V(out)`. */
 function displayVar(name: string): string {
-  const m = name.match(/^@(.+)\[(\w)\]$/i);
+  const c = canonicalProbe(name);
+  if (c) return c.display;
+  const m = name.match(/^@(.+)\[(\w)\]$/i); // other @dev[x] vectors (e.g. [p])
   if (!m) return name;
-  const fn = m[2].toLowerCase() === "i" ? "I" : m[2].toLowerCase() === "p" ? "P" : m[2].toUpperCase();
+  const fn = m[2].toUpperCase();
   return `${fn}(${m[1].toUpperCase()})`;
 }
 
@@ -338,21 +340,21 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         </div>
 
         <div style={{ padding: 6, display: "flex", flexDirection: "column", gap: 2, flex: 1, overflow: "auto" }}>
-          {result.variables.map((name) => {
-            const active = selectedVariables.includes(name);
-            const color = colorFor(name);
+          {dedupeProbes(result.variables).map(({ raw, display }) => {
+            const active = selectedVariables.includes(raw);
+            const color = colorFor(raw);
             return (
               <ProbeRow
-                key={name}
-                label={displayVar(name)}
+                key={raw}
+                label={display}
                 color={color}
                 active={active}
                 draggable={active}
-                onToggle={() => toggleVariable(name)}
-                onDragStart={(e) => e.dataTransfer.setData(DND_MIME, name)}
-                onSwatch={() => setColorPickerFor(colorPickerFor === name ? null : name)}
-                showPicker={colorPickerFor === name}
-                onPick={(c) => { setColor(name, c); setColorPickerFor(null); }}
+                onToggle={() => toggleVariable(raw)}
+                onDragStart={(e) => e.dataTransfer.setData(DND_MIME, raw)}
+                onSwatch={() => setColorPickerFor(colorPickerFor === raw ? null : raw)}
+                showPicker={colorPickerFor === raw}
+                onPick={(c) => { setColor(raw, c); setColorPickerFor(null); }}
               />
             );
           })}

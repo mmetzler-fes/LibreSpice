@@ -34,7 +34,8 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
 import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
-import { getProbeCandidates, getCurrentProbeCandidates } from "@core/circuit/probeUtils.js";
+import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
+import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
 const NODE_TYPES = { component: ComponentNode };
@@ -69,6 +70,10 @@ function CanvasInner() {
   } = useUIStore();
 
   const { result, addProbeCandidates } = useSimulationStore();
+  const addExpression = usePlotStore((s) => s.addExpression);
+
+  /** Right-click menu on a component: probe current / voltage in the scope. */
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number } | null>(null);
 
   // Only auto-fit when the canvas already has content at mount. On an empty
   // canvas fitView would stay pending and first fire when the first node is
@@ -233,6 +238,34 @@ function CanvasInner() {
     [circuit, addProbeCandidates, setDockTab],
   );
 
+  // Right-click a component → menu to view its current / voltage in the scope.
+  const onNodeContextMenu: NodeMouseHandler = useCallback(
+    (event, node) => {
+      event.preventDefault();
+      const comp = circuit.components.get(node.id);
+      if (!comp || comp.id.startsWith("ground")) return;
+      setSelectedComponentId(node.id);
+      const e = event as React.MouseEvent;
+      setNodeMenu({ id: node.id, label: comp.label, x: e.clientX, y: e.clientY });
+    },
+    [circuit, setSelectedComponentId],
+  );
+
+  const probeCurrentInScope = () => {
+    const comp = nodeMenu && circuit.components.get(nodeMenu.id);
+    if (comp) { addProbeCandidates(getCurrentProbeCandidates(comp.label)); setDockTab("waveform"); }
+    setNodeMenu(null);
+  };
+
+  const probeVoltageInScope = () => {
+    const comp = nodeMenu && circuit.components.get(nodeMenu.id);
+    if (comp) {
+      const expr = getVoltageDiffExpression(comp, circuit);
+      if (expr) { addExpression(expr); setDockTab("waveform"); }
+    }
+    setNodeMenu(null);
+  };
+
   // Screen → flow using the wrapper's *live* rect and the current viewport, so
   // placement matches the ghost even on the very first click (ReactFlow's own
   // cached container rect can still be stale then, landing the node offset).
@@ -332,6 +365,7 @@ function CanvasInner() {
             onConnect={onConnect}
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
+            onNodeContextMenu={onNodeContextMenu}
             onPaneClick={onPaneClick}
             snapToGrid
             snapGrid={[GRID_SIZE, GRID_SIZE]}
@@ -371,9 +405,35 @@ function CanvasInner() {
         )}
       </div>
       <DockPanel />
+
+      {/* Component right-click menu: view current / voltage in the scope */}
+      {nodeMenu && (
+        <>
+          <div
+            onClick={() => setNodeMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setNodeMenu(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 3000 }}
+          />
+          <div style={{
+            position: "fixed", left: nodeMenu.x, top: nodeMenu.y, zIndex: 3001,
+            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+            padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 170,
+          }}>
+            <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
+            <button style={nodeMenuItem} onClick={probeCurrentInScope}>View I({nodeMenu.label}) in scope</button>
+            <button style={nodeMenuItem} onClick={probeVoltageInScope}>View U({nodeMenu.label}) in scope</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
+
+const nodeMenuItem: React.CSSProperties = {
+  display: "block", width: "100%", padding: "5px 10px", textAlign: "left",
+  border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer",
+  fontSize: 12, borderRadius: 4, whiteSpace: "nowrap",
+};
 
 export function SchematicCanvas() {
   return (
