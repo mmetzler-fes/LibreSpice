@@ -25,6 +25,8 @@ export interface PlotPanel {
   yTicks?: number;
   /** Per-unit y-axis overrides, for panels showing several units (V, A, …). */
   yAxes?: Record<string, YAxisOverride>;
+  /** Fixed panel height in px (via the drag handle); unset = share space. */
+  height?: number;
 }
 
 export interface YAxisOverride {

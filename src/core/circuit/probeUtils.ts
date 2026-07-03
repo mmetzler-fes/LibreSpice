@@ -55,14 +55,21 @@ export interface CanonicalProbe {
  * for the time base and anything unrecognised.
  */
 export function canonicalProbe(raw: string): CanonicalProbe | null {
-  let m = raw.match(/^@(.+?)\[i\]$/i);            // @dev[i]  (savecurrents)
-  if (m) { const d = m[1].toUpperCase(); return { key: `I:${d}`, display: `I(${d})`, kind: "I" }; }
-  m = raw.match(/^i\((.+)\)$/i);                  // i(dev) / I(dev)
-  if (m) { const d = m[1].toUpperCase(); return { key: `I:${d}`, display: `I(${d})`, kind: "I" }; }
-  m = raw.match(/^(.+)#branch$/i);               // dev#branch
-  if (m) { const d = m[1].toUpperCase(); return { key: `I:${d}`, display: `I(${d})`, kind: "I" }; }
-  m = raw.match(/^v\((.+)\)$/i);                  // v(net) / V(net)
-  if (m) { const n = m[1]; return { key: `V:${n.toUpperCase()}`, display: `V(${n})`, kind: "V" }; }
+  const s = raw.trim();
+  // Node voltage: v(net) / V(net).
+  const vm = s.match(/^v\((.+)\)$/i);
+  if (vm) { const n = vm[1]; return { key: `V:${n.toUpperCase()}`, display: `V(${n})`, kind: "V" }; }
+
+  // Branch current — strip an optional i(...) wrapper first so nested engine
+  // forms like i(@l1[i]) collapse onto @l1[i] / i(l1) / l1#branch.
+  const outer = s.match(/^i\((.+)\)$/i);
+  const body = outer ? outer[1].trim() : s;
+  const cur = (d: string): CanonicalProbe => ({ key: `I:${d.toUpperCase()}`, display: `I(${d.toUpperCase()})`, kind: "I" });
+  let m = body.match(/^@(.+?)\[i\w*\]$/i);        // @dev[i]  (savecurrents)
+  if (m) return cur(m[1]);
+  m = body.match(/^(.+)#branch$/i);              // dev#branch
+  if (m) return cur(m[1]);
+  if (outer && /^[a-z_][\w.]*$/i.test(body)) return cur(body); // i(dev)
   return null;
 }
 

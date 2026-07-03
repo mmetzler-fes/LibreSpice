@@ -570,6 +570,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
     onUpdate({ yAxes: { ...panel.yAxes, [unit]: { ...panel.yAxes?.[unit], ...patch } } });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: compact ? 180 : 260 });
   const [showAxis, setShowAxis] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -705,10 +706,24 @@ function PlotPanelView(props: PlotPanelViewProps) {
     window.addEventListener("mouseup", up);
   };
 
+  // Drag the bottom edge to set this panel's height (independent of the others).
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startH = panelRef.current?.getBoundingClientRect().height ?? dims.h;
+    const move = (ev: MouseEvent) => onUpdate({ height: Math.max(120, startH + (ev.clientY - startY)) });
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   return (
     <div
+      ref={panelRef}
       style={{
-        flex: "1 0 auto", minHeight: compact ? 150 : 200, display: "flex", flexDirection: "column",
+        flex: panel.height ? "0 0 auto" : "1 0 auto",
+        height: panel.height, minHeight: compact ? 150 : 200, display: "flex", flexDirection: "column",
         borderBottom: "1px solid #1e293b",
         outline: dragOver ? "2px dashed #22d3ee" : "none", outlineOffset: -2,
       }}
@@ -970,12 +985,23 @@ function PlotPanelView(props: PlotPanelViewProps) {
               </>
             )}
             <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
+            {panel.height && (
+              <button style={menuItem} onClick={() => { onUpdate({ height: undefined }); setPaneMenu(null); }}>Reset height (auto)</button>
+            )}
+            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
             <button style={menuItem} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
             <button style={menuItem} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
             <button style={menuItem} onClick={() => { handleExportSvg(); setPaneMenu(null); }}>Export Diagram (.svg)</button>
           </div>
         </>
       )}
+
+      {/* Resize handle: drag the bottom edge to set this plot's height */}
+      <div
+        onMouseDown={startResize}
+        title="Drag to resize this plot"
+        style={{ height: 7, flexShrink: 0, cursor: "ns-resize", background: "#0b1120", borderTop: "1px solid #1e293b" }}
+      />
     </div>
   );
 }

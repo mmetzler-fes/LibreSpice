@@ -47,13 +47,16 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   setResult: (result) => {
     const { pendingProbes, selectedVariables } = get();
     if (result && result.variables.length > 0) {
+      // The sweep/time base is never a meaningful trace (it is the x-axis).
+      const isAxis = (v: string) => v === "time" || v === "frequency";
       // Keep the probes the user already had (so their panel assignment and
       // colours survive a re-run), plus any pending ones; only fall back to
-      // the first variable when nothing carries over.
-      const kept = selectedVariables.filter((v) => result.variables.includes(v));
-      const pending = pendingProbes.filter((p) => result.variables.includes(p));
+      // the first real signal when nothing carries over.
+      const kept = selectedVariables.filter((v) => result.variables.includes(v) && !isAxis(v));
+      const pending = pendingProbes.filter((p) => result.variables.includes(p) && !isAxis(p));
       const merged = [...new Set([...kept, ...pending])];
-      const next = merged.length > 0 ? merged : [result.variables[0]];
+      const firstReal = result.variables.find((v) => !isAxis(v));
+      const next = merged.length > 0 ? merged : (firstReal ? [firstReal] : []);
       set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [] });
     } else {
       set({ result, status: "done", errorMessage: null });
