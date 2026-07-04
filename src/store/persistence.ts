@@ -1,6 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
+import type { DataFlag } from "@core/circuit/dataExpr.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
 export const URL_HASH_PREFIX = "c=";
@@ -16,6 +17,8 @@ export interface CircuitSnapshot {
   /** component id → property key → value */
   componentProps: Record<string, Record<string, string | number>>;
   netLabels: Record<string, string>;
+  /** Positioned data-point annotations (LTSpice DATAFLAGs). */
+  dataFlags?: DataFlag[];
 }
 
 export function createSnapshot(state: {

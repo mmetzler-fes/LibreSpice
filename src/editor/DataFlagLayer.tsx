@@ -1,0 +1,95 @@
+import { useRef } from "react";
+import { useViewport } from "@xyflow/react";
+import { useCircuitStore } from "@store/circuitStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
+import { formatDataFlag, analysisKind, type DataFlag } from "@core/circuit/dataExpr.js";
+
+/**
+ * Renders the schematic's data-point annotations (LTSpice DATAFLAGs) at their
+ * flow coordinates, showing each expression's value from the current result —
+ * the operating point for `.op`, the RMS (Effektivwert) for a transient run.
+ * Each badge has a grip handle to drag it anywhere on the sheet.
+ */
+export function DataFlagLayer() {
+  const vp = useViewport();
+  const dataFlags = useCircuitStore((s) => s.dataFlags);
+  const removeDataFlag = useCircuitStore((s) => s.removeDataFlag);
+  const moveDataFlag = useCircuitStore((s) => s.moveDataFlag);
+  const result = useSimulationStore((s) => s.result);
+  // Re-render when net labels change so V(net) expressions stay resolvable.
+  useCircuitStore((s) => s.netVersion);
+
+  const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; zoom: number } | null>(null);
+
+  const startDrag = (e: React.MouseEvent, df: DataFlag) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { id: df.id, sx: e.clientX, sy: e.clientY, ox: df.x, oy: df.y, zoom: vp.zoom };
+    const move = (ev: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      moveDataFlag(d.id, d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
+    };
+    const up = () => {
+      drag.current = null;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  if (dataFlags.length === 0) return null;
+  const rms = result ? analysisKind(result) === "rms" : false;
+
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
+      {dataFlags.map((df) => {
+        const left = vp.x + df.x * vp.zoom;
+        const top = vp.y + df.y * vp.zoom;
+        const value = result ? formatDataFlag(df.expr, result) : null;
+        return (
+          <div
+            key={df.id}
+            style={{
+              position: "absolute", left, top, transform: "translate(-50%, -50%)",
+              pointerEvents: "auto", display: "flex", alignItems: "stretch", gap: 2,
+              padding: "2px 4px 2px 2px", fontFamily: "monospace", fontSize: 11, lineHeight: "14px",
+              color: "#0f172a", background: "rgba(255,255,255,0.92)",
+              border: "1px solid #93c5fd", borderRadius: 4, whiteSpace: "nowrap",
+              boxShadow: "0 1px 3px #0000001f",
+            }}
+          >
+            <span
+              onMouseDown={(e) => startDrag(e, df)}
+              title="Datenpunkt verschieben"
+              style={{
+                display: "flex", alignItems: "center", padding: "0 3px", marginRight: 1,
+                color: "#94a3b8", cursor: "move", userSelect: "none",
+                borderRight: "1px solid #e2e8f0", letterSpacing: -1,
+              }}
+            >
+              ⠿
+            </span>
+            <span style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontWeight: 600, color: value == null ? "#94a3b8" : "#1d4ed8" }}>
+                {value ?? "?"}{value != null && rms ? " (eff.)" : ""}
+              </span>
+              <span style={{ fontSize: 9, color: "#64748b" }}>{df.expr}</span>
+            </span>
+            <button
+              onClick={() => removeDataFlag(df.id)}
+              title="Datenpunkt entfernen"
+              style={{
+                border: "none", background: "transparent", color: "#94a3b8", cursor: "pointer",
+                fontSize: 13, lineHeight: "13px", padding: "0 1px",
+              }}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

@@ -7,7 +7,7 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { getNodePins, type NodePin } from "./pinGeometry.js";
+import { getNodePins, GRID, type NodePin } from "./pinGeometry.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 
@@ -27,7 +27,6 @@ export interface WireData {
   [key: string]: unknown;
 }
 
-const GRID = 20;
 /** Snap distance to a pin, in flow units. */
 const PIN_SNAP = 16;
 /** Snap distance to an existing wire segment, in flow units. */

@@ -7,6 +7,8 @@ import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js"
 export const NODE_SIZE = 80;
 /** Margin used when fitting an .asy symbol into the node box. */
 export const NODE_MARGIN = 14;
+/** Editor grid pitch in px; component pins snap to it so they sit on grid lines. */
+export const GRID = 10;
 
 export function rotatePoint(px: number, py: number, cx: number, cy: number, deg: number): [number, number] {
   const rad = (deg * Math.PI) / 180;
@@ -95,7 +97,7 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
   const flip = (px: number) => (mirrored ? NODE_SIZE - px : px);
   const sym = symbolForType(data.componentType, norm);
   if (sym) {
-    const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN);
+    const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN, GRID);
     const c = NODE_SIZE / 2;
     const rotation = data.rotation ?? 0;
     return mapping.pins.map((pin) => {

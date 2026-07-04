@@ -227,6 +227,23 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     [traceToPanel, panels],
   );
 
+  // Unassigned traces default to the first pane (panels[0]). Inserting a pane
+  // above the top pane would make the new empty pane become panels[0] and steal
+  // those traces, so it looks like the pane was added below. Pin the defaulting
+  // traces to their current pane first so they stay put.
+  const addRelative = useCallback(
+    (refId: string, pos: "above" | "below") => {
+      const firstId = panels[0]?.id;
+      if (firstId) {
+        for (const t of allTraces) {
+          if (traceToPanel[t] == null) setTracePanel(t, firstId);
+        }
+      }
+      addPanelRelative(refId, pos);
+    },
+    [panels, allTraces, traceToPanel, setTracePanel, addPanelRelative],
+  );
+
   const handleAddExpression = () => {
     const expr = exprInput.trim();
     if (!expr) return;
@@ -426,7 +443,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               onDropTrace={(trace) => setTracePanel(trace, panel.id)}
               onRemoveTrace={(trace) =>
                 expressions.includes(trace) ? removeExpression(trace) : toggleVariable(trace)}
-              onAddRelative={(pos) => addPanelRelative(panel.id, pos)}
+              onAddRelative={(pos) => addRelative(panel.id, pos)}
               onMove={(dir) => movePanel(panel.id, dir)}
               onRemovePanel={() => removePanel(panel.id)}
               onFit={() => fitPanel(panel.id)}

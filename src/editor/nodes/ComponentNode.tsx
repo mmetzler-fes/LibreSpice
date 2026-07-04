@@ -20,7 +20,7 @@ import {
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
-import { NODE_SIZE, NODE_MARGIN, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
+import { NODE_SIZE, NODE_MARGIN, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 
 export type ComponentType =
   | "resistor"
@@ -387,7 +387,7 @@ function AsyComponentNode({
 }) {
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
-  const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN);
+  const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN, GRID);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
   const bounds = symbolBounds(sym);

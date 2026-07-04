@@ -7,6 +7,8 @@ import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
+import { renameNetInProbe } from "@core/circuit/probeUtils.js";
+import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { useSimulationStore } from "./simulationStore.js";
 import { usePlotStore } from "@simulation/plotStore.js";
@@ -27,6 +29,8 @@ interface CircuitState {
   spiceDirectives: string;
   /** User-facing diagram/circuit name; default file name for .asc and .plt. */
   circuitName: string;
+  /** Positioned data-point annotations (LTSpice DATAFLAGs). */
+  dataFlags: DataFlag[];
   propertyVersion: number;
   netVersion: number;
   fileHandle: any | null;
@@ -49,6 +53,9 @@ interface CircuitActions {
   setSpiceDirectives: (text: string) => void;
   setCircuitName: (name: string) => void;
   renameNet: (netId: string, label: string) => void;
+  addDataFlag: (x: number, y: number, expr: string) => void;
+  removeDataFlag: (id: string) => void;
+  moveDataFlag: (id: string, x: number, y: number) => void;
   loadFromAsc: (ascContent: string) => void;
   clearCircuit: () => void;
   setFileHandle: (handle: any | null, name: string | null) => void;
@@ -79,6 +86,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   simulationConfig: DEFAULT_CONFIG,
   spiceDirectives: "",
   circuitName: "Untitled",
+  dataFlags: [],
   propertyVersion: 0,
   netVersion: 0,
   fileHandle: null,
@@ -176,7 +184,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const newLabel = label.trim() || netId;
     if (oldLabel === newLabel) return;
     net.nodeLabel = newLabel;
-    set((state) => ({ netVersion: state.netVersion + 1 }));
+    set((state) => ({
+      netVersion: state.netVersion + 1,
+      // Keep data-point expressions pointing at the renamed net.
+      dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
+    }));
     get().regenerateNetlist();
     // Carry the rename into the waveform so plotted traces follow the new name
     // (both immediately and after a re-run), instead of keeping the old label.
@@ -184,25 +196,44 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     usePlotStore.getState().renameTraceNet(oldLabel, newLabel);
   },
 
+  addDataFlag: (x, y, expr) =>
+    set((state) => ({
+      dataFlags: [...state.dataFlags, { id: `df_${Date.now()}_${state.dataFlags.length}`, x, y, expr }],
+    })),
+
+  removeDataFlag: (id) => set((state) => ({ dataFlags: state.dataFlags.filter((d) => d.id !== id) })),
+
+  moveDataFlag: (id, x, y) =>
+    set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
+
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, netNames } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
-    
+
     const newCircuit = new Circuit();
     for (const comp of components) {
       newCircuit.addComponent(comp);
     }
-    
+
     set((state) => ({
       circuit: newCircuit,
       nodes,
       edges,
       spiceDirectives: directives,
+      dataFlags,
       selectedComponentId: null,
       _history: [...state._history, snap],
       _future: [],
     }));
-    setTimeout(() => get().rebuildConnections(), 0);
+    setTimeout(() => {
+      get().rebuildConnections();
+      // Apply LTSpice net labels (named FLAGs) so imported DATAFLAG expressions
+      // like V(U1) resolve. Skip GND — it is always net "0".
+      for (const { compId, handle, name } of netNames) {
+        const port = get().circuit.components.get(compId)?.ports.find((p) => p.id === `${compId}-${handle}`);
+        if (port?.netId && port.netId !== "0") get().renameNet(port.netId, name);
+      }
+    }, 0);
   },
 
   setFileHandle: (handle, name) => set({ fileHandle: handle, fileName: name }),
@@ -217,6 +248,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       selectedComponentId: null,
       netlist: "",
       circuitName: "Untitled",
+      dataFlags: [],
       fileHandle: null,
       fileName: null,
       _history: [...state._history, snap],
@@ -370,7 +402,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   exportSnapshot: () => {
-    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName } = get();
+    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags } = get();
     const componentProps: Record<string, Record<string, string | number>> = {};
     for (const [id, comp] of circuit.components) {
       const props: Record<string, string | number> = {};
@@ -381,7 +413,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     for (const [id, net] of circuit.nets) {
       if (id !== "0" && net.nodeLabel !== id) netLabels[id] = net.nodeLabel;
     }
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels };
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, dataFlags };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -413,6 +445,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuitName: snapshot.circuitName ?? "Untitled",
       spiceDirectives: snapshot.spiceDirectives,
       simulationConfig: snapshot.simulationConfig,
+      dataFlags: snapshot.dataFlags ?? [],
       selectedComponentId: null,
       fileHandle: null,
       fileName: null,

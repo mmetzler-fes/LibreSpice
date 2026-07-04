@@ -21,8 +21,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
 import { WireEdge, WireOverlay, type WireData } from "./WireTool.js";
+import { DataFlagLayer } from "./DataFlagLayer.js";
 import { PlacementGhost } from "./PlacementGhost.js";
-import { NODE_SIZE } from "./pinGeometry.js";
+import { NODE_SIZE, GRID } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
@@ -35,12 +36,13 @@ import type { ComponentDefinition } from "./componentDefinitions.js";
 import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
+import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
 import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
-const GRID_SIZE = 20;
+const GRID_SIZE = GRID;
 let componentCounter = 1;
 let wireCounter = 1;
 
@@ -59,7 +61,7 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit,
+    circuit, addDataFlag,
   } = useCircuitStore();
 
   const {
@@ -73,7 +75,9 @@ function CanvasInner() {
   const addExpression = usePlotStore((s) => s.addExpression);
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number } | null>(null);
+  /** Right-click menu on a wire: annotate the net's potential / current. */
+  const [wireMenu, setWireMenu] = useState<{ netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
   // Only auto-fit when the canvas already has content at mount. On an empty
   // canvas fitView would stay pending and first fire when the first node is
@@ -246,10 +250,53 @@ function CanvasInner() {
       if (!comp || comp.id.startsWith("ground")) return;
       setSelectedComponentId(node.id);
       const e = event as React.MouseEvent;
-      setNodeMenu({ id: node.id, label: comp.label, x: e.clientX, y: e.clientY });
+      const f = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setWireMenu(null);
+      setNodeMenu({ id: node.id, label: comp.label, x: e.clientX, y: e.clientY, fx: f.x, fy: f.y });
     },
-    [circuit, setSelectedComponentId],
+    [circuit, setSelectedComponentId, reactFlowInstance],
   );
+
+  // Right-click a wire → menu to annotate the net's potential / current.
+  const onEdgeContextMenu = useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
+      const netId = port?.netId ?? null;
+      const f = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      setNodeMenu(null);
+      setWireMenu({
+        netId,
+        vExpr: netVoltageExpr(circuit, netId),
+        iExpr: netCurrentExpr(circuit, netId),
+        x: event.clientX, y: event.clientY, fx: f.x, fy: f.y,
+      });
+    },
+    [circuit, reactFlowInstance],
+  );
+
+  /** Add a component data-point (voltage across / current through). Placed just
+   *  to the right of the component so it never covers the symbol; U and I sit
+   *  slightly apart so both are readable. */
+  const addComponentDataFlag = (kind: "V" | "I") => {
+    const m = nodeMenu;
+    const comp = m && circuit.components.get(m.id);
+    const node = m && nodes.find((n) => n.id === m.id);
+    if (m && comp && node) {
+      const expr = kind === "V" ? compVoltageExpr(circuit, comp) : compCurrentExpr(comp);
+      if (expr) {
+        const x = node.position.x + NODE_SIZE + 30;
+        const y = node.position.y + NODE_SIZE / 2 + (kind === "V" ? -22 : 22);
+        addDataFlag(x, y, expr);
+      }
+    }
+    setNodeMenu(null);
+  };
+
+  const addWireDataFlag = (expr: string) => {
+    if (wireMenu) addDataFlag(wireMenu.fx, wireMenu.fy, expr);
+    setWireMenu(null);
+  };
 
   const probeCurrentInScope = () => {
     const comp = nodeMenu && circuit.components.get(nodeMenu.id);
@@ -366,6 +413,7 @@ function CanvasInner() {
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeContextMenu={onNodeContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
             onPaneClick={onPaneClick}
             snapToGrid
             snapGrid={[GRID_SIZE, GRID_SIZE]}
@@ -384,9 +432,11 @@ function CanvasInner() {
             }}
           >
             <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color="#cbd5e1" />
-            <Controls position="bottom-right" />
+            <Controls position="bottom-right" fitViewOptions={{ padding: 0.3 }} />
             <MiniMap position="bottom-left" pannable zoomable nodeStrokeWidth={3} />
           </ReactFlow>
+
+          <DataFlagLayer />
 
           {editorMode === "wire" && (
             <WireOverlay wrapperRef={wrapperRef} nodes={nodes} edges={edges} onCreateWire={onCreateWire} />
@@ -420,8 +470,35 @@ function CanvasInner() {
             padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 170,
           }}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
+            <button style={nodeMenuItem} onClick={() => addComponentDataFlag("V")}>Datenpunkt: Spannung U</button>
+            <button style={nodeMenuItem} onClick={() => addComponentDataFlag("I")}>Datenpunkt: Strom I</button>
+            <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
             <button style={nodeMenuItem} onClick={probeCurrentInScope}>View I({nodeMenu.label}) in scope</button>
             <button style={nodeMenuItem} onClick={probeVoltageInScope}>View U({nodeMenu.label}) in scope</button>
+          </div>
+        </>
+      )}
+
+      {/* Wire right-click menu: annotate the net's potential / current */}
+      {wireMenu && (
+        <>
+          <div
+            onClick={() => setWireMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setWireMenu(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 3000 }}
+          />
+          <div style={{
+            position: "fixed", left: wireMenu.x, top: wireMenu.y, zIndex: 3001,
+            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+            padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 190,
+          }}>
+            <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>Leitung</div>
+            {wireMenu.vExpr
+              ? <button style={nodeMenuItem} onClick={() => addWireDataFlag(wireMenu.vExpr!)}>Datenpunkt: Potential {wireMenu.vExpr}</button>
+              : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Kein Potential verfügbar</div>}
+            {wireMenu.iExpr
+              ? <button style={nodeMenuItem} onClick={() => addWireDataFlag(wireMenu.iExpr!)}>Datenpunkt: Strom {wireMenu.iExpr}</button>
+              : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Strom nur bei Reihenschaltung</div>}
           </div>
         </>
       )}

@@ -18,7 +18,7 @@ export interface SymbolMapping {
  * Computes the transform that fits a symbol's geometry (and pins) into a square
  * pixel box of `size`, centered, leaving `margin` px on every side.
  */
-export function mapSymbol(sym: AsySymbol, size: number, margin = 8): SymbolMapping {
+export function mapSymbol(sym: AsySymbol, size: number, margin = 8, snap = 0): SymbolMapping {
   const b = symbolBounds(sym);
   const span = Math.max(b.width, b.height, 1);
   const scale = (size - 2 * margin) / span;
@@ -26,9 +26,14 @@ export function mapSymbol(sym: AsySymbol, size: number, margin = 8): SymbolMappi
     size / 2 + (x - b.cx) * scale,
     size / 2 + (y - b.cy) * scale,
   ];
+  // Snap pins to the editor grid so every terminal sits on a grid line (the
+  // node box origin is grid-aligned, so a node-local multiple of the grid is a
+  // grid line). Geometry stays unsnapped; the handle marker covers the small
+  // offset. `snap = 0` leaves pins exactly on the symbol (previews).
+  const q = (v: number) => (snap > 0 ? Math.round(v / snap) * snap : v);
   const pins = sym.pins.map((p) => {
     const [px, py] = map(p.x, p.y);
-    return { ...p, px, py };
+    return { ...p, px: q(px), py: q(py) };
   });
   return { size, scale, map, pins };
 }
