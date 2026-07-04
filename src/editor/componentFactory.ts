@@ -18,6 +18,7 @@ export function createSpiceComponent(
   switch (type) {
     case "resistor":    return new Resistor(id, label, pos);
     case "capacitor":   return new Capacitor(id, label, pos);
+    case "capacitor_polarized": return new Capacitor(id, label, pos);
     case "inductor":    return new Inductor(id, label, pos);
     case "diode":       return new Diode(id, label, pos);
     case "led":         return new LED(id, label, pos);
@@ -56,7 +57,7 @@ export function createSubcircuitComponent(
 }
 
 const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
-  resistor: "R", capacitor: "C", inductor: "L", diode: "D", led: "D",
+  resistor: "R", capacitor: "C", capacitor_polarized: "C", inductor: "L", diode: "D", led: "D",
   zener: "D", schottky: "D", opamp: "U",
   bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
@@ -109,7 +110,8 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
       const r = component as unknown as { resistance: number };
       return fmtSI(r.resistance, "Ω");
     }
-    case "capacitor": {
+    case "capacitor":
+    case "capacitor_polarized": {
       const c = component as unknown as { capacitance: number };
       return fmtSI(c.capacitance, "F");
     }

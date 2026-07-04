@@ -129,7 +129,22 @@ export function symbolBounds(sym: AsySymbol): SymbolBounds {
   for (const l of sym.lines) { acc(l.x1, l.y1); acc(l.x2, l.y2); }
   for (const r of sym.rects) { acc(r.x1, r.y1); acc(r.x2, r.y2); }
   for (const c of sym.circles) { acc(c.x1, c.y1); acc(c.x2, c.y2); }
-  for (const a of sym.arcs) { acc(a.x1, a.y1); acc(a.x2, a.y2); }
+  // Sample the swept arc, not its ellipse bounding box — a shallow arc (e.g. an
+  // electrolytic cap's plate) would otherwise inflate the bounds far past the
+  // visible curve and shrink the whole symbol.
+  for (const a of sym.arcs) {
+    const cx = (a.x1 + a.x2) / 2, cy = (a.y1 + a.y2) / 2;
+    const rx = Math.abs(a.x2 - a.x1) / 2 || 0.001;
+    const ry = Math.abs(a.y2 - a.y1) / 2 || 0.001;
+    const a0 = Math.atan2((a.sy - cy) / ry, (a.sx - cx) / rx);
+    let a1 = Math.atan2((a.ey - cy) / ry, (a.ex - cx) / rx);
+    while (a1 > a0) a1 -= Math.PI * 2;
+    const steps = Math.max(2, Math.ceil(Math.abs(a0 - a1) / (Math.PI / 16)));
+    for (let i = 0; i <= steps; i++) {
+      const ang = a0 + ((a1 - a0) * i) / steps;
+      acc(cx + rx * Math.cos(ang), cy + ry * Math.sin(ang));
+    }
+  }
   for (const p of sym.pins) acc(p.x, p.y);
   if (!isFinite(minX)) { minX = -10; minY = -10; maxX = 10; maxY = 10; }
   return {
@@ -170,6 +185,7 @@ export type SymbolNorm = "default" | "ansi" | "en";
 const TYPE_TO_SYMBOL: Partial<Record<ComponentType, string>> = {
   resistor: "res",
   capacitor: "cap",
+  capacitor_polarized: "polcap",
   inductor: "ind",
   diode: "diode",
   led: "LED",

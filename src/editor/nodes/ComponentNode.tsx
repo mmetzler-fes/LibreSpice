@@ -25,6 +25,7 @@ import { NODE_SIZE, NODE_MARGIN, GRID, rotatePoint, handleForOrder, getLocalPins
 export type ComponentType =
   | "resistor"
   | "capacitor"
+  | "capacitor_polarized"
   | "inductor"
   | "diode"
   | "led"
@@ -161,6 +162,7 @@ function MovableLabel({
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   resistor: ResistorSymbol,
   capacitor: CapacitorSymbol,
+  capacitor_polarized: CapacitorSymbol, // unused: always has the polcap .asy
   inductor: InductorSymbol,
   diode: DiodeSymbol,
   led: LEDSymbol,
@@ -189,7 +191,7 @@ const HANDLE_STYLE = {
 };
 
 const TWO_PORT_TYPES: ComponentType[] = [
-  "resistor", "capacitor", "inductor", "diode", "led",
+  "resistor", "capacitor", "capacitor_polarized", "inductor", "diode", "led",
   "vsource", "isource", "sinesource", "pulsesource",
 ];
 const THREE_PORT_TYPES: ComponentType[] = ["bjt_npn", "bjt_pnp", "mosfet_n", "mosfet_p"];

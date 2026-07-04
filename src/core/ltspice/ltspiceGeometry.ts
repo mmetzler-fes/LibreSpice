@@ -10,7 +10,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 export const CENTER = 40;
 
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
-  res: "resistor", cap: "capacitor", polcap: "capacitor", ind: "inductor",
+  res: "resistor", cap: "capacitor", polcap: "capacitor_polarized", ind: "inductor",
   diode: "diode", LED: "led",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
@@ -18,7 +18,7 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
 };
 
 export const TYPE_TO_SYMBOL: Record<string, string> = {
-  resistor: "res", capacitor: "cap", inductor: "ind",
+  resistor: "res", capacitor: "cap", capacitor_polarized: "polcap", inductor: "ind",
   diode: "diode", led: "LED",
   bjt_npn: "npn", bjt_pnp: "pnp",
   mosfet_n: "nmos", mosfet_p: "pmos",
@@ -37,6 +37,7 @@ export interface PinOffset { handle: string; dx: number; dy: number }
 export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   resistor: [{ handle: "p", dx: 16, dy: 16 }, { handle: "n", dx: 16, dy: 96 }],
   capacitor: [{ handle: "p", dx: 16, dy: 0 }, { handle: "n", dx: 16, dy: 64 }],
+  capacitor_polarized: [{ handle: "p", dx: 16, dy: 0 }, { handle: "n", dx: 16, dy: 64 }],
   inductor: [{ handle: "p", dx: 16, dy: 16 }, { handle: "n", dx: 16, dy: 96 }],
   diode: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   led: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],

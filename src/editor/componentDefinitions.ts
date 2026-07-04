@@ -11,6 +11,7 @@ export interface ComponentDefinition {
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "resistor", label: "Resistor", category: "Passives", defaultLabel: "R1", description: "Resistor (R)" },
   { type: "capacitor", label: "Capacitor", category: "Passives", defaultLabel: "C1", description: "Capacitor (C)" },
+  { type: "capacitor_polarized", label: "Cap. (polarized)", category: "Passives", defaultLabel: "C1", description: "Polarized / electrolytic capacitor (C)" },
   { type: "inductor", label: "Inductor", category: "Passives", defaultLabel: "L1", description: "Inductor (L)" },
   { type: "diode", label: "Diode", category: "Semiconductors", defaultLabel: "D1", description: "Diode (D)" },
   { type: "led", label: "LED", category: "Semiconductors", defaultLabel: "D2", description: "Light Emitting Diode" },
