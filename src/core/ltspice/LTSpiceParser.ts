@@ -3,7 +3,7 @@ import { createSpiceComponent } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { SYMBOL_TO_TYPE, CENTER, rotDeg, rotatedOffsets, symbolToNode } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode } from "./ltspiceGeometry.js";
 
 // Must match LTSpiceExporter / ComponentNode so WINDOW ↔ offset round-trips.
 const LABEL_DEFAULT = { left: 8, top: 30 };
@@ -291,7 +291,7 @@ export class LTSpiceParser {
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
-    let cType = SYMBOL_TO_TYPE[sym.name] || "resistor";
+    let cType = symbolToType(sym.name) || "resistor";
     const label = sym.attrs["InstName"] || sym.name;
     const valueStr = sym.attrs["Value"] || "";
 

@@ -11,11 +11,26 @@ export const CENTER = 40;
 
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   res: "resistor", cap: "capacitor", polcap: "capacitor_polarized", ind: "inductor",
+  europeanpolcap: "capacitor_polarized",
   diode: "diode", LED: "led",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
   voltage: "vsource", current: "isource",
 };
+
+const SYMBOL_TO_TYPE_LC: Record<string, ComponentType> = Object.fromEntries(
+  Object.entries(SYMBOL_TO_TYPE).map(([k, v]) => [k.toLowerCase(), v]),
+);
+
+/**
+ * Resolve an LTSpice SYMBOL name to a component type. Strips any library
+ * subdirectory (`Misc\EuropeanPolcap` → `EuropeanPolcap`) and matches
+ * case-insensitively, so path-qualified and mixed-case names still map.
+ */
+export function symbolToType(symName: string): ComponentType | undefined {
+  const base = symName.split(/[\\/]/).pop() ?? symName;
+  return SYMBOL_TO_TYPE_LC[base.toLowerCase()];
+}
 
 export const TYPE_TO_SYMBOL: Record<string, string> = {
   resistor: "res", capacitor: "cap", capacitor_polarized: "polcap", inductor: "ind",
