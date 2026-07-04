@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "@store/uiStore.js";
 import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -17,6 +17,16 @@ export function ModelImportModal() {
   const { addEntries } = useLibraryStore();
   const [text, setText] = useState("");
   const [scope, setScope] = useState<LibraryScope>("local");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    // Append to any existing text so several .lib files can be loaded together.
+    const content = await file.text();
+    setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
+  };
 
   useEffect(() => {
     if (showLibraryImport) {
@@ -75,6 +85,26 @@ export function ModelImportModal() {
 
         {/* Editor */}
         <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".lib,.mod,.txt,.cir,.sub,.model,.inc"
+              onChange={handleFile}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "6px 12px", fontSize: 12, fontWeight: 600, borderRadius: 4,
+                border: "1px solid #475569", background: "#0f172a", color: "#bfdbfe", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              📂 Load .lib file…
+            </button>
+            <span style={{ fontSize: 11, color: "#64748b" }}>or paste below</span>
+          </div>
           <SpiceHighlight value={text} onChange={setText} placeholder={EXAMPLE} minHeight={200}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleImport(); }} />
 
