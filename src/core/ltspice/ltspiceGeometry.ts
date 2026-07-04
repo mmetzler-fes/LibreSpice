@@ -10,7 +10,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 export const CENTER = 40;
 
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
-  res: "resistor", cap: "capacitor", ind: "inductor",
+  res: "resistor", cap: "capacitor", polcap: "capacitor", ind: "inductor",
   diode: "diode", LED: "led",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
