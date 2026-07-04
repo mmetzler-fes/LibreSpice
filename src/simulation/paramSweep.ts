@@ -12,29 +12,52 @@ export interface StepSpec {
   values: number[];
 }
 
-/** Parse a `.step param NAME start stop incr` or `.step param NAME list …`. */
+/** Cap total runs so a broad sweep can't launch thousands of simulations. */
+const MAX_STEPS = 512;
+
+/**
+ * Parse a `.step` sweep. Supported forms (LTSpice syntax):
+ *   `.step [lin] param NAME start stop incr`   linear (default)
+ *   `.step dec  param NAME start stop N`        N points per decade (log)
+ *   `.step oct  param NAME start stop N`        N points per octave (log)
+ *   `.step      param NAME list v1 v2 …`        explicit list
+ */
 export function parseStepDirective(netlist: string): StepSpec | null {
   for (const raw of netlist.split(/\r?\n/)) {
-    const m = raw.trim().match(/^\.step\s+param\s+(\S+)\s+(.*)$/i);
+    const m = raw.trim().match(/^\.step\s+(?:(lin|oct|dec)\s+)?param\s+(\S+)\s+(.*)$/i);
     if (!m) continue;
-    const name = m[1];
-    const rest = m[2].trim();
+    const kind = (m[1] || "lin").toLowerCase();
+    const name = m[2];
+    const rest = m[3].trim();
 
     const list = rest.match(/^list\s+(.*)$/i);
     if (list) {
       const values = list[1].split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-      return values.length ? { name, values } : null;
+      return values.length ? { name, values: values.slice(0, MAX_STEPS) } : null;
     }
 
     const nums = rest.split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-    if (nums.length >= 3 && nums[2] !== 0) {
-      const [start, stop, incr] = nums;
-      const values: number[] = [];
-      const steps = Math.floor((stop - start) / incr + 1e-9);
-      for (let i = 0; i <= steps; i++) values.push(Number((start + i * incr).toPrecision(12)));
-      return values.length ? { name, values } : null;
+    if (nums.length < 3) return null;
+    const [start, stop, third] = nums;
+    const values: number[] = [];
+
+    if (kind === "lin") {
+      if (third === 0) return null;
+      const steps = Math.floor((stop - start) / third + 1e-9);
+      for (let i = 0; i <= steps && values.length < MAX_STEPS; i++) {
+        values.push(Number((start + i * third).toPrecision(12)));
+      }
+    } else {
+      // dec / oct: `third` is points per decade / octave (logarithmic sweep).
+      if (start <= 0 || stop <= 0 || third <= 0) return null;
+      const decades = kind === "dec" ? Math.log10(stop / start) : Math.log2(stop / start);
+      const ratio = kind === "dec" ? Math.pow(10, 1 / third) : Math.pow(2, 1 / third);
+      const total = Math.max(0, Math.round(third * decades));
+      for (let i = 0; i <= total && values.length < MAX_STEPS; i++) {
+        values.push(Number((start * Math.pow(ratio, i)).toPrecision(12)));
+      }
     }
-    return null;
+    return values.length ? { name, values } : null;
   }
   return null;
 }
