@@ -61,8 +61,16 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit, addDataFlag,
+    circuit, addDataFlag, viewFitNonce,
   } = useCircuitStore();
+
+  // After a full load (import / snapshot) the content may sit off-screen (e.g.
+  // LTSpice sheets with negative coordinates), so re-fit the view to it.
+  useEffect(() => {
+    if (viewFitNonce === 0) return;
+    const id = setTimeout(() => reactFlowInstance.fitView({ padding: 0.3 }), 80);
+    return () => clearTimeout(id);
+  }, [viewFitNonce, reactFlowInstance]);
 
   const {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,

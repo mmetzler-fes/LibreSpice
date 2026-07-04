@@ -33,6 +33,8 @@ interface CircuitState {
   dataFlags: DataFlag[];
   propertyVersion: number;
   netVersion: number;
+  /** Bumped after a full load (import / snapshot) so the canvas re-fits the view. */
+  viewFitNonce: number;
   fileHandle: any | null;
   fileName: string | null;
   _history: HistoryEntry[];
@@ -89,6 +91,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   dataFlags: [],
   propertyVersion: 0,
   netVersion: 0,
+  viewFitNonce: 0,
   fileHandle: null,
   fileName: null,
   _history: [],
@@ -222,6 +225,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: directives,
       dataFlags,
       selectedComponentId: null,
+      viewFitNonce: state.viewFitNonce + 1,
       _history: [...state._history, snap],
       _future: [],
     }));
@@ -447,6 +451,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       simulationConfig: snapshot.simulationConfig,
       dataFlags: snapshot.dataFlags ?? [],
       selectedComponentId: null,
+      viewFitNonce: get().viewFitNonce + 1,
       fileHandle: null,
       fileName: null,
       _history: [],
