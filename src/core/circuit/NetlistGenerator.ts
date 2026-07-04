@@ -99,9 +99,9 @@ export class NetlistGenerator {
       lines.push(this._analysisLine(config));
     }
 
-    // Append custom directive lines
+    // Append custom directive lines (normalising LTSpice-style `.tran Tstop`).
     for (const dl of directiveLines) {
-      lines.push(dl);
+      lines.push(normalizeTranDirective(dl));
     }
 
     lines.push(".end");
@@ -167,6 +167,39 @@ export function formatAnalysisDirective(config: SimulationConfig): string {
     case "op":
       return ".op";
   }
+}
+
+/**
+ * Normalise an LTSpice-style `.tran` directive for ngspice. LTSpice accepts a
+ * lone stop time (`.tran 40ms`), but ngspice needs `.tran Tstep Tstop` and
+ * rejects a zero/absent Tstep ("TSTOP is invalid"). When the step is missing or
+ * zero, insert Tstop/1000 while preserving any Tstart/Tmax and modifiers (uic).
+ */
+export function normalizeTranDirective(line: string): string {
+  const head = line.match(/^(\s*\.tran)\b\s*(.*)$/i);
+  if (!head) return line;
+  const tokens = head[2].trim().split(/\s+/).filter(Boolean);
+  const isNum = (t: string) => /^[-+]?[.\d]/.test(t);
+  const nums = tokens.filter(isNum);
+  if (nums.length === 0) return line;
+
+  // Single value → it is Tstop (LTSpice shorthand).
+  if (nums.length === 1) {
+    const tstop = parseSpiceNumber(nums[0]) ?? 0;
+    if (tstop <= 0) return line;
+    return `.tran ${formatSpiceNumber(tstop / 1000)} ${tokens.join(" ")}`;
+  }
+
+  // Two+ values with a zero/invalid Tstep → replace the first numeric token.
+  if ((parseSpiceNumber(nums[0]) ?? 0) <= 0) {
+    const tstop = parseSpiceNumber(nums[1]) ?? 0;
+    if (tstop <= 0) return line;
+    const step = formatSpiceNumber(tstop / 1000);
+    let replaced = false;
+    const out = tokens.map((t) => (!replaced && isNum(t) ? ((replaced = true), step) : t));
+    return `.tran ${out.join(" ")}`;
+  }
+  return line;
 }
 
 /** Parse a SPICE value token with an optional SI suffix (1u, 10m, 1meg, 1k). */
