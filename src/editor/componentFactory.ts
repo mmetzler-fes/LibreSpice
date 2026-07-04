@@ -105,6 +105,8 @@ function fmtSI(v: number, unit: string): string {
 }
 
 export function getValueLabel(component: SpiceComponent, type: ComponentType): string {
+  // A parametric value (e.g. "{Cvar}") is shown verbatim.
+  if (component.valueExpr) return component.valueExpr;
   switch (type) {
     case "resistor":  {
       const r = component as unknown as { resistance: number };

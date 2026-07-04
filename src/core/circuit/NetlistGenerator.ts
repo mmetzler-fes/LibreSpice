@@ -99,9 +99,9 @@ export class NetlistGenerator {
       lines.push(this._analysisLine(config));
     }
 
-    // Append custom directive lines (normalising LTSpice-style `.tran Tstop`).
+    // Append custom directive lines, normalising LTSpice syntax for ngspice.
     for (const dl of directiveLines) {
-      lines.push(normalizeTranDirective(dl));
+      lines.push(normalizeMeasDirective(normalizeTranDirective(dl)));
     }
 
     lines.push(".end");
@@ -200,6 +200,16 @@ export function normalizeTranDirective(line: string): string {
     return `.tran ${out.join(" ")}`;
   }
   return line;
+}
+
+/**
+ * Normalise an LTSpice `.meas` directive for ngspice: LTSpice writes the window
+ * as `FROM 20ms TO 40ms`, ngspice needs `from=20ms to=40ms`. TRIG/TARG clauses
+ * are left untouched.
+ */
+export function normalizeMeasDirective(line: string): string {
+  if (!/^\s*\.meas\b/i.test(line)) return line;
+  return line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`);
 }
 
 /** Parse a SPICE value token with an optional SI suffix (1u, 10m, 1meg, 1k). */

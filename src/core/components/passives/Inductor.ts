@@ -19,24 +19,30 @@ export class Inductor extends SpiceComponent {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} ${this.inductance}`;
+    return `${this.label} ${p} ${n} ${this.fmtVal(this.inductance)}`;
   }
 
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "inductance", label: "Inductance", value: this.inductance, unit: "H", type: "number" },
+      this.valueExpr
+        ? { key: "inductance", label: "Inductance", value: this.valueExpr, type: "string" }
+        : { key: "inductance", label: "Inductance", value: this.inductance, unit: "H", type: "number" },
     ];
   }
 
   setProperty(key: string, value: string | number): void {
     if (key === "label") this.label = String(value);
-    if (key === "inductance") this.inductance = Number(value);
+    if (key === "inductance") {
+      if (typeof value === "string" && value.includes("{")) this.valueExpr = value;
+      else { this.valueExpr = undefined; this.inductance = Number(value); }
+    }
   }
 
   clone(): Inductor {
     const l = new Inductor(this.id, this.label, { ...this.position }, this.inductance);
     l.rotation = this.rotation;
+    l.valueExpr = this.valueExpr;
     return l;
   }
 }

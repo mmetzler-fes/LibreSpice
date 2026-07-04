@@ -19,24 +19,30 @@ export class Capacitor extends SpiceComponent {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} ${this.capacitance}`;
+    return `${this.label} ${p} ${n} ${this.fmtVal(this.capacitance)}`;
   }
 
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "capacitance", label: "Capacitance", value: this.capacitance, unit: "F", type: "number" },
+      this.valueExpr
+        ? { key: "capacitance", label: "Capacitance", value: this.valueExpr, type: "string" }
+        : { key: "capacitance", label: "Capacitance", value: this.capacitance, unit: "F", type: "number" },
     ];
   }
 
   setProperty(key: string, value: string | number): void {
     if (key === "label") this.label = String(value);
-    if (key === "capacitance") this.capacitance = Number(value);
+    if (key === "capacitance") {
+      if (typeof value === "string" && value.includes("{")) this.valueExpr = value;
+      else { this.valueExpr = undefined; this.capacitance = Number(value); }
+    }
   }
 
   clone(): Capacitor {
     const c = new Capacitor(this.id, this.label, { ...this.position }, this.capacitance);
     c.rotation = this.rotation;
+    c.valueExpr = this.valueExpr;
     return c;
   }
 }

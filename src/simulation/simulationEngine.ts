@@ -1,6 +1,10 @@
 import { Simulation, type ResultType } from "eecircuit-engine";
 import type { SimulationResult } from "@store/simulationStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
+import { formatSpiceNumber } from "@core/circuit/NetlistGenerator.js";
+import {
+  parseStepDirective, stripStepDirectives, withParam, parseMeasurements, type Measurement,
+} from "./paramSweep.js";
 
 let sim: Simulation | null = null;
 
@@ -12,9 +16,8 @@ async function getSimulation(): Promise<Simulation> {
   return sim;
 }
 
-/** Read the ngspice stdout/stderr log from the engine and push it to the store. */
-function captureLog(engine: Simulation, netlist: string): void {
-  const parts: string[] = [];
+/** ngspice stdout/stderr for the last run. */
+function engineLog(engine: Simulation): string {
   const tryGet = (fn: () => string | string[]): string => {
     try {
       const v = fn();
@@ -23,24 +26,65 @@ function captureLog(engine: Simulation, netlist: string): void {
       return "";
     }
   };
-  parts.push("===== Netlist =====", netlist.trim());
   const info = tryGet(() => engine.getInfo());
   const errors = tryGet(() => engine.getError());
+  const parts: string[] = [];
   if (info.trim()) parts.push("===== ngspice output =====", info.trim());
   if (errors.trim()) parts.push("===== Errors / warnings =====", errors.trim());
-  useSimulationStore.getState().setLog(parts.join("\n\n"));
+  return parts.join("\n\n");
+}
+
+/** Run a single netlist and return its result plus the raw engine log. */
+async function runOnce(netlist: string): Promise<{ result: SimulationResult; log: string }> {
+  const engine = await getSimulation();
+  engine.setNetList(netlist);
+  const result: ResultType = await engine.runSim();
+  return { result: convertResult(result), log: engineLog(engine) };
 }
 
 export async function runSimulation(netlist: string): Promise<SimulationResult> {
-  let engine: Simulation | undefined;
+  const setLog = useSimulationStore.getState().setLog;
+  const step = parseStepDirective(netlist);
   try {
-    engine = await getSimulation();
-    engine.setNetList(netlist);
-    const result: ResultType = await engine.runSim();
-    captureLog(engine, netlist);
-    return convertResult(result);
+    if (!step || step.values.length === 0) {
+      // Strip any (unparseable) `.step` too — ngspice can't execute it.
+      const nl = stripStepDirectives(netlist);
+      const { result, log } = await runOnce(nl);
+      setLog(`===== Netlist =====\n${nl.trim()}\n\n${log}`);
+      return result;
+    }
+
+    // Parameter sweep: run once per value, merge the traces (suffixing each
+    // signal with the step value) so the existing plot shows one curve per run.
+    const base = stripStepDirectives(netlist);
+    const merged: SimulationResult = { variables: [], data: {}, time: undefined };
+    const measRows: string[] = [];
+    let lastLog = "";
+    for (const value of step.values) {
+      const nl = withParam(base, step.name, value);
+      const { result, log } = await runOnce(nl);
+      lastLog = log;
+      const tag = `${step.name}=${formatSpiceNumber(value)}`;
+      if (!merged.time && result.time) {
+        merged.time = result.time;
+        merged.data["time"] = result.time;
+        merged.variables.push("time");
+      }
+      for (const v of result.variables) {
+        if (v === "time" || v === "frequency") continue;
+        const key = `${v} @${tag}`;
+        merged.data[key] = result.data[v];
+        merged.variables.push(key);
+      }
+      const meas: Measurement[] = parseMeasurements(log);
+      if (meas.length) measRows.push(`${tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
+    }
+
+    const measBlock = measRows.length ? `===== Measurements (.step ${step.name}) =====\n${measRows.join("\n")}\n\n` : "";
+    setLog(`${measBlock}===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`);
+    return merged;
   } catch (e) {
-    if (engine) captureLog(engine, netlist);
+    try { if (sim) setLog(engineLog(sim)); } catch { /* ignore */ }
     sim = null;
     throw new Error(`Simulation failed: ${e instanceof Error ? e.message : String(e)}`);
   }

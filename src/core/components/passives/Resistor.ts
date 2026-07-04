@@ -19,24 +19,30 @@ export class Resistor extends SpiceComponent {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} ${this.resistance}`;
+    return `${this.label} ${p} ${n} ${this.fmtVal(this.resistance)}`;
   }
 
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "resistance", label: "Resistance", value: this.resistance, unit: "Ω", type: "number" },
+      this.valueExpr
+        ? { key: "resistance", label: "Resistance", value: this.valueExpr, type: "string" }
+        : { key: "resistance", label: "Resistance", value: this.resistance, unit: "Ω", type: "number" },
     ];
   }
 
   setProperty(key: string, value: string | number): void {
     if (key === "label") this.label = String(value);
-    if (key === "resistance") this.resistance = Number(value);
+    if (key === "resistance") {
+      if (typeof value === "string" && value.includes("{")) this.valueExpr = value;
+      else { this.valueExpr = undefined; this.resistance = Number(value); }
+    }
   }
 
   clone(): Resistor {
     const r = new Resistor(this.id, this.label, { ...this.position }, this.resistance);
     r.rotation = this.rotation;
+    r.valueExpr = this.valueExpr;
     return r;
   }
 }

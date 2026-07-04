@@ -77,7 +77,9 @@ export class LTSpiceExporter {
 
       let val = data.valueLabel || "";
       const comp = circuit.components.get(node.id);
-      if (comp) {
+      if (comp?.valueExpr) {
+        val = comp.valueExpr;
+      } else if (comp) {
         if (data.componentType === "sinesource") {
           val = `SINE(${comp.offset || 0} ${comp.amplitude || 1} ${comp.frequency || 1000})`;
         } else if (data.componentType === "pulsesource") {

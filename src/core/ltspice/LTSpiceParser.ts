@@ -338,6 +338,10 @@ export class LTSpiceParser {
     } else if (valueStr && comp.hasOwnProperty("model")) {
       // Semiconductors carry a model name (e.g. a diode's `1N4148`), not a value.
       (comp as any).model = valueStr;
+    } else if (valueStr && valueStr.includes("{")) {
+      // Parametric value (e.g. `{Cvar}`) — keep verbatim for the netlist so
+      // .param/.step can drive it.
+      comp.valueExpr = valueStr;
     } else if (valueStr && !valueStr.includes("(")) {
       const num = parseSI(valueStr);
       if (comp.hasOwnProperty("resistance")) (comp as any).resistance = num;

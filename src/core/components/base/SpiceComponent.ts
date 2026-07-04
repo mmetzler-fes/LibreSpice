@@ -8,6 +8,12 @@ export abstract class SpiceComponent {
   position: Point;
   rotation: Rotation;
   readonly ports: Port[];
+  /**
+   * Raw value expression (e.g. `{Cvar}` or `2*Cbase`) that overrides the numeric
+   * value in the netlist, enabling `.param`/`.step` sweeps. Undefined = use the
+   * component's numeric field.
+   */
+  valueExpr?: string;
 
   constructor(id: string, label: string, position: Point = { x: 0, y: 0 }) {
     this.id = id;
@@ -51,5 +57,10 @@ export abstract class SpiceComponent {
 
   protected nodeOrGnd(netId: string | null): string {
     return netId ?? "0";
+  }
+
+  /** Netlist value token: the raw expression if set, else the numeric value. */
+  protected fmtVal(numeric: number | string): string {
+    return this.valueExpr ?? String(numeric);
   }
 }
