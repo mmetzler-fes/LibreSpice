@@ -59,6 +59,28 @@ export class NetlistGenerator {
       .filter((l) => l.trim().length > 0 && !l.trim().startsWith("*"));
     for (const ll of libLines) lines.push(ll);
 
+    // Fallback device models: emit a generic `.model` for any semiconductor
+    // whose model name isn't already provided by the library or a user
+    // directive, so a bare diode/BJT/MOSFET simulates instead of aborting
+    // ngspice with "could not find a valid modelname".
+    const defined = new Set<string>();
+    const collectDefs = (text: string) => {
+      const re = /^\s*\.(?:model|subckt)\s+(\S+)/gim;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text))) defined.add(m[1].toLowerCase());
+    };
+    collectDefs(libLines.join("\n"));
+    collectDefs(directives);
+    const emittedModels = new Set<string>();
+    for (const component of circuit.components.values()) {
+      const md = component.getModelDirective();
+      const name = md?.match(/^\.model\s+(\S+)/i)?.[1].toLowerCase();
+      if (md && name && !defined.has(name) && !emittedModels.has(name)) {
+        lines.push(md);
+        emittedModels.add(name);
+      }
+    }
+
     // Compute branch currents for every device (R, C, L, sources, …) so they can
     // be plotted as @dev[i]. Skip if the user already set the option themselves.
     if (!/savecurrents/i.test(directives)) {

@@ -21,6 +21,16 @@ export abstract class SpiceComponent {
 
   abstract getNetlistLine(): string;
 
+  /**
+   * A fallback `.model` directive so the device simulates even when no library
+   * model is imported. Emitted by the netlist generator only if nothing else
+   * (an imported library or a user directive) already defines the model name.
+   * Returns `null` for components that don't reference a model.
+   */
+  getModelDirective(): string | null {
+    return null;
+  }
+
   abstract getProperties(): Property[];
 
   abstract setProperty(key: string, value: string | number): void;

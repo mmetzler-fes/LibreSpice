@@ -28,6 +28,11 @@ export class Diode extends Semiconductor {
     return `${this.label} ${a} ${k} ${this.model}`;
   }
 
+  /** Generic silicon-diode fallback (1N4148-like) so a bare diode simulates. */
+  getModelDirective(): string | null {
+    return `.model ${this.model} D(Is=2.52n Rs=0.568 N=1.752 Cjo=4p M=0.4 Tt=20n Bv=100 Ibv=100u)`;
+  }
+
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
@@ -132,6 +137,13 @@ export class BJT extends Semiconductor {
     return `${this.label} ${c} ${b} ${e} ${this.model}`;
   }
 
+  /** Generic BJT fallback matching the selected polarity. */
+  getModelDirective(): string | null {
+    return this.type === "PNP"
+      ? `.model ${this.model} PNP(Bf=200 Is=1f Vaf=100)`
+      : `.model ${this.model} NPN(Bf=200 Is=1f Vaf=100)`;
+  }
+
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
@@ -178,6 +190,13 @@ export class MOSFET extends Semiconductor {
     const s = this.nodeOrGnd(this.ports[2].netId);
     const b = this.nodeOrGnd(this.ports[3].netId);
     return `${this.label} ${d} ${g} ${s} ${b} ${this.model}`;
+  }
+
+  /** Generic MOSFET fallback matching the selected polarity. */
+  getModelDirective(): string | null {
+    return this.type === "PMOS"
+      ? `.model ${this.model} PMOS(Vto=-2 Kp=20u)`
+      : `.model ${this.model} NMOS(Vto=2 Kp=20u)`;
   }
 
   getProperties(): Property[] {

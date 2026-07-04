@@ -335,6 +335,9 @@ export class LTSpiceParser {
          if (pVals[5] !== undefined) (comp as any).pulseWidth = pVals[5];
          if (pVals[6] !== undefined) (comp as any).period = pVals[6];
        }
+    } else if (valueStr && comp.hasOwnProperty("model")) {
+      // Semiconductors carry a model name (e.g. a diode's `1N4148`), not a value.
+      (comp as any).model = valueStr;
     } else if (valueStr && !valueStr.includes("(")) {
       const num = parseSI(valueStr);
       if (comp.hasOwnProperty("resistance")) (comp as any).resistance = num;

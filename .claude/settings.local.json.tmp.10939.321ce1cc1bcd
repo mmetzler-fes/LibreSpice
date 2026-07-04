@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node_modules/esbuild/bin/esbuild --version)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"=== EXIT $? ===\")",
+      "Bash(npx vite *)",
+      "Bash(npx eslint *)",
+      "Bash(node_modules/.bin/esbuild src/core/circuit/Circuit.ts --bundle --format=esm --outfile=/tmp/claude-1000/-home-mmetzler-Documents-Informatik-git-LibreSpice/e856cf48-245b-450b-88fc-4bed40fdc80a/scratchpad/circuit.mjs --log-level=error)",
+      "Bash(git push *)",
+      "Bash(node -e \"import\\('eecircuit-engine'\\).then\\(m=>console.log\\('exports:', Object.keys\\(m\\)\\)\\).catch\\(e=>console.log\\('ERR', e.message\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
