@@ -57,7 +57,7 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
     // Parameter sweep: run once per value, merge the traces (suffixing each
     // signal with the step value) so the existing plot shows one curve per run.
     const base = stripStepDirectives(netlist);
-    const merged: SimulationResult = { variables: [], data: {}, time: undefined };
+    const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: step.name, values: [] } };
     const measRows: string[] = [];
     let lastLog = "";
     for (const value of step.values) {
@@ -65,6 +65,7 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
       const { result, log } = await runOnce(nl);
       lastLog = log;
       const tag = `${step.name}=${formatSpiceNumber(value)}`;
+      merged.step!.values.push(tag);
       if (!merged.time && result.time) {
         merged.time = result.time;
         merged.data["time"] = result.time;

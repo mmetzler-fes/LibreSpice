@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { useSimulationStore } from "@store/simulationStore.js";
+import { useSimulationStore, type SimulationResult } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { matchResultVariable, canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
@@ -132,11 +132,17 @@ interface ViewRange { xMin: number; xMax: number; yMin: number; yMax: number }
 /** A set of traces sharing one unit, with its own fitted y-range. */
 interface UnitGroup { unit: string; traces: string[]; yMin: number; yMax: number }
 
+/** Strip a `.step` tag suffix (" @Cvar=1m") to recover the base trace name. */
+function stripStepTag(name: string): string {
+  const i = name.lastIndexOf(" @");
+  return i >= 0 ? name.slice(0, i) : name;
+}
+
 /** Group a panel's traces by physical unit (V, A, Ω, …) for separate y-axes. */
 function groupByUnit(traces: string[], seriesMap: Record<string, Float64Array | null>): UnitGroup[] {
   const byUnit = new Map<string, string[]>();
   for (const t of traces) {
-    const u = inferUnit(t);
+    const u = inferUnit(stripStepTag(t));
     const arr = byUnit.get(u) ?? [];
     arr.push(t);
     byUnit.set(u, arr);
@@ -185,45 +191,94 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const [exprInput, setExprInput] = useState("");
   const [exprError, setExprError] = useState<string | null>(null);
 
-  // Every trace we can draw: selected raw probes + persisted arithmetic traces.
-  const allTraces = useMemo(
-    () => [...new Set([...selectedVariables, ...expressions])],
-    [selectedVariables, expressions],
-  );
+  const stepTags = result?.step?.values ?? null;
+
+  // Every trace we can draw: selected raw probes + arithmetic expressions. For a
+  // .step sweep, expressions expand to one trace per parameter value so a
+  // function like V(a)-V(b) is drawn for every step.
+  const allTraces = useMemo(() => {
+    const exprTraces = stepTags ? expressions.flatMap((e) => stepTags.map((t) => `${e} @${t}`)) : expressions;
+    return [...new Set([...selectedVariables, ...exprTraces])];
+  }, [selectedVariables, expressions, stepTags]);
 
   // Resolve each trace to a data series (raw variable or evaluated expression).
   const seriesMap = useMemo(() => {
     const map: Record<string, Float64Array | null> = {};
     const errors: Record<string, string> = {};
     if (result) {
+      // A single-step data view (base variable names) for per-step expressions.
+      const stepView = (tag: string): SimulationResult => {
+        const suffix = ` @${tag}`;
+        const data: Record<string, Float64Array> = {};
+        for (const k of Object.keys(result.data)) if (k.endsWith(suffix)) data[k.slice(0, -suffix.length)] = result.data[k];
+        return { variables: Object.keys(data), data, time: result.time };
+      };
       for (const trace of allTraces) {
-        if (expressions.includes(trace)) {
-          const r = evalExpression(result, trace);
+        if (result.data[trace]) { map[trace] = result.data[trace]; continue; }
+        const at = trace.lastIndexOf(" @");
+        const tag = at >= 0 && stepTags?.includes(trace.slice(at + 2)) ? trace.slice(at + 2) : null;
+        const base = tag ? trace.slice(0, at) : trace;
+        if (expressions.includes(base)) {
+          const r = evalExpression(tag ? stepView(tag) : result, base);
           map[trace] = r.values ?? null;
-          if (r.error) errors[trace] = r.error;
+          if (r.error) errors[base] = r.error;
         } else {
           map[trace] = resolveSeries(result, trace);
         }
       }
     }
     return { map, errors };
-  }, [result, allTraces, expressions]);
+  }, [result, allTraces, expressions, stepTags]);
+
+  // For a .step sweep, group each signal's per-step traces under one collapsible
+  // topic so the probe list stays readable.
+  const probeGroups = useMemo(() => {
+    if (!result || !stepTags) return null;
+    const groups = new Map<string, { display: string; members: { raw: string; tag: string }[] }>();
+    for (const v of result.variables) {
+      if (v === "time" || v === "frequency") continue;
+      const at = v.lastIndexOf(" @");
+      if (at < 0 || !stepTags.includes(v.slice(at + 2))) continue;
+      const baseRaw = v.slice(0, at);
+      const display = canonicalProbe(baseRaw)?.display ?? baseRaw;
+      if (!groups.has(baseRaw)) groups.set(baseRaw, { display, members: [] });
+      groups.get(baseRaw)!.members.push({ raw: v, tag: v.slice(at + 2) });
+    }
+    return [...groups.values()];
+  }, [result, stepTags]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroupOpen = (key: string) =>
+    setExpandedGroups((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const toggleGroupAll = (members: { raw: string }[]) => {
+    const raws = members.map((m) => m.raw);
+    const allSel = raws.every((r) => selectedVariables.includes(r));
+    setSelectedVariables(allSel
+      ? selectedVariables.filter((v) => !raws.includes(v))
+      : [...new Set([...selectedVariables, ...raws])]);
+  };
 
   // Stable default colour per trace; explicit overrides win.
   const colorFor = useCallback(
     (trace: string): string => {
       if (colors[trace]) return colors[trace];
       const rawIdx = result?.variables.indexOf(trace) ?? -1;
-      const idx = rawIdx >= 0
-        ? rawIdx
-        : (result?.variables.length ?? 0) + Math.max(0, expressions.indexOf(trace));
+      let idx: number;
+      if (rawIdx >= 0) idx = rawIdx; // raw signals (incl. per-step) keep distinct colours
+      else if (expressions.indexOf(trace) >= 0) idx = (result?.variables.length ?? 0) + expressions.indexOf(trace);
+      else {
+        // Per-step expression render ("E @tag"): stable hash so each step differs.
+        let h = 0;
+        for (let i = 0; i < trace.length; i++) h = (h * 31 + trace.charCodeAt(i)) | 0;
+        idx = Math.abs(h);
+      }
       return PLOT_PALETTE[idx % PLOT_PALETTE.length];
     },
     [colors, result, expressions],
   );
 
   const panelForTrace = useCallback(
-    (trace: string) => traceToPanel[trace] ?? panels[0]?.id,
+    (trace: string) => traceToPanel[trace] ?? traceToPanel[stripStepTag(trace)] ?? panels[0]?.id,
     [traceToPanel, panels],
   );
 
@@ -300,7 +355,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       doc.panes.forEach((pane, i) => {
         const id = `panel-${i}`;
         // Map each Y[k] tuple to its unit group (same order as the traces).
-        const units = [...new Set(pane.traces.map((t) => inferUnit(resolveName(t))))];
+        const units = [...new Set(pane.traces.map((t) => inferUnit(stripStepTag(resolveName(t)))))];
         const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
         units.forEach((u, k) => {
           const ax = pane.y[k];
@@ -357,24 +412,61 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         </div>
 
         <div style={{ padding: 6, display: "flex", flexDirection: "column", gap: 2, flex: 1, overflow: "auto" }}>
-          {dedupeProbes(result.variables).map(({ raw, display }) => {
-            const active = selectedVariables.includes(raw);
-            const color = colorFor(raw);
-            return (
-              <ProbeRow
-                key={raw}
-                label={display}
-                color={color}
-                active={active}
-                draggable={active}
-                onToggle={() => toggleVariable(raw)}
-                onDragStart={(e) => e.dataTransfer.setData(DND_MIME, raw)}
-                onSwatch={() => setColorPickerFor(colorPickerFor === raw ? null : raw)}
-                showPicker={colorPickerFor === raw}
-                onPick={(c) => { setColor(raw, c); setColorPickerFor(null); }}
-              />
-            );
-          })}
+          {probeGroups
+            ? probeGroups.map((g) => {
+                const key = g.members[0].raw;
+                const open = expandedGroups.has(key);
+                const selCount = g.members.filter((m) => selectedVariables.includes(m.raw)).length;
+                return (
+                  <div key={key} style={{ display: "flex", flexDirection: "column" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", fontSize: 11, color: "#cbd5e1" }}>
+                      <button onClick={() => toggleGroupOpen(key)} title={open ? "Collapse" : "Expand"}
+                        style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", width: 12, padding: 0, fontSize: 10 }}>
+                        {open ? "▾" : "▸"}
+                      </button>
+                      <input type="checkbox" style={{ cursor: "pointer" }}
+                        checked={selCount === g.members.length}
+                        ref={(el) => { if (el) el.indeterminate = selCount > 0 && selCount < g.members.length; }}
+                        onChange={() => toggleGroupAll(g.members)} />
+                      <span style={{ flex: 1, cursor: "pointer", fontWeight: 600 }} onClick={() => toggleGroupOpen(key)}>{g.display}</span>
+                      <span style={{ fontSize: 9, color: "#64748b" }}>{selCount}/{g.members.length}</span>
+                    </div>
+                    {open && g.members.map((m) => (
+                      <div key={m.raw} style={{ marginLeft: 14 }}>
+                        <ProbeRow
+                          label={m.tag}
+                          color={colorFor(m.raw)}
+                          active={selectedVariables.includes(m.raw)}
+                          draggable={selectedVariables.includes(m.raw)}
+                          onToggle={() => toggleVariable(m.raw)}
+                          onDragStart={(e) => e.dataTransfer.setData(DND_MIME, m.raw)}
+                          onSwatch={() => setColorPickerFor(colorPickerFor === m.raw ? null : m.raw)}
+                          showPicker={colorPickerFor === m.raw}
+                          onPick={(c) => { setColor(m.raw, c); setColorPickerFor(null); }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                );
+              })
+            : dedupeProbes(result.variables).map(({ raw, display }) => {
+                const active = selectedVariables.includes(raw);
+                const color = colorFor(raw);
+                return (
+                  <ProbeRow
+                    key={raw}
+                    label={display}
+                    color={color}
+                    active={active}
+                    draggable={active}
+                    onToggle={() => toggleVariable(raw)}
+                    onDragStart={(e) => e.dataTransfer.setData(DND_MIME, raw)}
+                    onSwatch={() => setColorPickerFor(colorPickerFor === raw ? null : raw)}
+                    showPicker={colorPickerFor === raw}
+                    onPick={(c) => { setColor(raw, c); setColorPickerFor(null); }}
+                  />
+                );
+              })}
 
           {expressions.length > 0 && (
             <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: "#64748b", textTransform: "uppercase", padding: "2px 6px" }}>

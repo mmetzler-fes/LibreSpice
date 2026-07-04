@@ -7,6 +7,12 @@ export interface SimulationResult {
   variables: string[];
   data: Record<string, Float64Array>;
   time?: Float64Array;
+  /**
+   * Present for a `.step` sweep. Each swept signal appears in `data` as
+   * `"<base> @<tag>"` (one entry per value); `param` is the swept name and
+   * `values` are the tags in order, so the UI can group them.
+   */
+  step?: { param: string; values: string[] };
 }
 
 interface SimulationState {
