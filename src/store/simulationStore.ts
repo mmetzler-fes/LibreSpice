@@ -13,6 +13,12 @@ export interface SimulationResult {
    * `values` are the tags in order, so the UI can group them.
    */
   step?: { param: string; values: string[] };
+  /**
+   * When set, the x-axis is a swept parameter (e.g. an `.op` run stepped over a
+   * `.param`), not time — `time` then holds the parameter values. Used to label
+   * and format the x-axis appropriately.
+   */
+  xLabel?: string;
 }
 
 interface SimulationState {

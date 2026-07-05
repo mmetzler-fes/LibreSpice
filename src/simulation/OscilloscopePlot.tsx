@@ -543,6 +543,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               traces={traces}
               seriesMap={seriesMap.map}
               time={result.time!}
+              xLabel={result.xLabel}
               colorFor={colorFor}
               compact={compact}
               index={i}
@@ -662,6 +663,8 @@ interface PlotPanelViewProps {
   traces: string[];
   seriesMap: Record<string, Float64Array | null>;
   time: Float64Array;
+  /** When set, the x-axis is a swept parameter (not time) — used for labels. */
+  xLabel?: string;
   colorFor: (trace: string) => string;
   compact: boolean;
   index: number;
@@ -686,9 +689,12 @@ const PLOT_THEME = {
 };
 
 function PlotPanelView(props: PlotPanelViewProps) {
-  const { panel, traces, seriesMap, time, colorFor, compact, index, count, syncX,
+  const { panel, traces, seriesMap, time, xLabel, colorFor, compact, index, count, syncX,
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
+  // The x-axis is time by default; for a parameter sweep (`.op` + `.step`) it is
+  // the swept param, so format the ticks as a plain SI value instead of seconds.
+  const fmtX = (t: number) => (xLabel ? fmtVal(t) : fmtTime(t));
   const canRemove = count > 1;
   const circuitName = useCircuitStore((s) => s.circuitName);
   const svgLight = usePlotStore((s) => s.svgLight);
@@ -1019,9 +1025,12 @@ function PlotPanelView(props: PlotPanelViewProps) {
             {xTicks.map((t) => (
               <g key={t}>
                 <line x1={toSx(t)} y1={0} x2={toSx(t)} y2={plotH} stroke={th.grid} strokeWidth={1} />
-                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill={th.axis}>{fmtTime(t)}</text>
+                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill={th.axis}>{fmtX(t)}</text>
               </g>
             ))}
+            {xLabel && (
+              <text x={plotW / 2} y={plotH + 26} textAnchor="middle" fontSize={9} fontWeight={600} fill={th.axis}>{xLabel}</text>
+            )}
             {/* Left y-axis (first unit group) with horizontal grid */}
             {yTicks.map((v) => (
               <g key={v}>
@@ -1112,7 +1121,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <div style={{ color: cursorInfo.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(cursor!.trace)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>x</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtTime(cursorInfo.sampleT)}</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtX(cursorInfo.sampleT)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>y</span>
@@ -1143,7 +1152,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <div style={{ color: s.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(s.trace)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>x</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtTime(s.sampleT)}</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtX(s.sampleT)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>y</span>

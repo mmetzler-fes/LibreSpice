@@ -56,19 +56,36 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
 
     // Parameter sweep: run once per combination of all `.step` params (LTSpice
     // runs the full nested product), injecting every param so none is left as an
-    // unresolved `{name}` — that would otherwise stall/abort ngspice. Traces are
-    // merged, each suffixed with the combination so the plot shows one curve per
-    // run.
+    // unresolved `{name}` — that would otherwise stall/abort ngspice.
     const base = stripStepDirectives(netlist);
     const combos = stepCombinations(steps, formatSpiceNumber);
-    const paramName = steps.map((s) => s.name).join(", ");
-    const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: paramName, values: [] } };
+    const runs: { combo: (typeof combos)[number]; result: SimulationResult; log: string }[] = [];
     const measRows: string[] = [];
-    let lastLog = "";
     for (const combo of combos) {
       const nl = combo.assignments.reduce((acc, a) => withParam(acc, a.name, a.value), base);
       const { result, log } = await runOnce(nl);
-      lastLog = log;
+      runs.push({ combo, result, log });
+      const meas: Measurement[] = parseMeasurements(log);
+      if (meas.length) measRows.push(`${combo.tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
+    }
+    const lastLog = runs[runs.length - 1]?.log ?? "";
+    const paramName = steps.map((s) => s.name).join(", ");
+    const measBlock = measRows.length ? `===== Measurements (.step ${paramName}) =====\n${measRows.join("\n")}\n\n` : "";
+    setLog(`${measBlock}===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`);
+
+    // An `.op` run yields a single value per signal (no time/frequency axis). For
+    // such a sweep the natural plot is the swept parameter on the x-axis and the
+    // signal on the y-axis, so build ONE curve over the first `.step` param, with
+    // any further `.step` params producing separate curves (grouped by tag).
+    const hasXAxis = (runs[0]?.result.time?.length ?? 0) > 1;
+    if (!hasXAxis && runs.length > 0) {
+      return buildParamSweep(runs, steps);
+    }
+
+    // Time/frequency analyses: keep each combination as its own curve over the
+    // shared x-axis, suffixing every signal with the combination tag.
+    const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: paramName, values: [] } };
+    for (const { combo, result } of runs) {
       merged.step!.values.push(combo.tag);
       if (!merged.time && result.time) {
         merged.time = result.time;
@@ -81,18 +98,52 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
         merged.data[key] = result.data[v];
         merged.variables.push(key);
       }
-      const meas: Measurement[] = parseMeasurements(log);
-      if (meas.length) measRows.push(`${combo.tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
     }
-
-    const measBlock = measRows.length ? `===== Measurements (.step ${paramName}) =====\n${measRows.join("\n")}\n\n` : "";
-    setLog(`${measBlock}===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`);
     return merged;
   } catch (e) {
     try { if (sim) setLog(engineLog(sim)); } catch { /* ignore */ }
     sim = null;
     throw new Error(`Simulation failed: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/**
+ * Turn per-point (`.op`) runs over `.step` params into an x/y plot: the first
+ * step param becomes the x-axis, and each combination of the remaining params is
+ * a separate curve (tagged so the plot groups them).
+ */
+function buildParamSweep(
+  runs: { combo: { assignments: { name: string; value: number }[] }; result: SimulationResult }[],
+  steps: { name: string; values: number[] }[],
+): SimulationResult {
+  const first = steps[0];
+  const idxOf = new Map(first.values.map((v, i) => [v, i] as const));
+  const traceData = new Map<string, Float64Array>();
+  const outerTags: string[] = [];
+  for (const { combo, result } of runs) {
+    const fv = combo.assignments.find((a) => a.name === first.name)?.value;
+    const i = fv != null ? idxOf.get(fv) : undefined;
+    if (i == null) continue;
+    const outerTag = combo.assignments
+      .filter((a) => a.name !== first.name)
+      .map((a) => `${a.name}=${formatSpiceNumber(a.value)}`)
+      .join(" ");
+    if (outerTag && !outerTags.includes(outerTag)) outerTags.push(outerTag);
+    for (const v of result.variables) {
+      if (v === "time" || v === "frequency") continue;
+      const key = outerTag ? `${v} @${outerTag}` : v;
+      let arr = traceData.get(key);
+      if (!arr) { arr = new Float64Array(first.values.length).fill(NaN); traceData.set(key, arr); }
+      arr[i] = result.data[v]?.[0] ?? NaN;
+    }
+  }
+  const time = Float64Array.from(first.values);
+  const out: SimulationResult = { variables: ["time"], data: { time }, time, xLabel: first.name };
+  for (const [k, arr] of traceData) { out.data[k] = arr; out.variables.push(k); }
+  if (outerTags.length > 0) {
+    out.step = { param: steps.slice(1).map((s) => s.name).join(", "), values: outerTags };
+  }
+  return out;
 }
 
 function convertResult(result: ResultType): SimulationResult {
