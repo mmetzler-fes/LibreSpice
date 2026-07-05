@@ -4,6 +4,7 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import { formatSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import {
   parseStepDirectives, stepCombinations, stripStepDirectives, withParam, parseMeasurements, type Measurement,
+  parseDcSweep, withDcSource, type DcSweep,
 } from "./paramSweep.js";
 
 let sim: Simulation | null = null;
@@ -46,6 +47,11 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
   const setLog = useSimulationStore.getState().setLog;
   const steps = parseStepDirectives(netlist);
   try {
+    // A `.dc` with a `list` (or nested) second source can't run in ngspice, so
+    // sweep it app-side: one `.dc <primary>` per secondary value, one curve each.
+    const dc = parseDcSweep(netlist);
+    if (dc) return await runDcSweep(netlist, dc, setLog);
+
     if (steps.length === 0 || steps.every((s) => s.values.length === 0)) {
       // Strip any (unparseable) `.step` too — ngspice can't execute it.
       const nl = stripStepDirectives(netlist);
@@ -144,6 +150,44 @@ function buildParamSweep(
     out.step = { param: steps.slice(1).map((s) => s.name).join(", "), values: outerTags };
   }
   return out;
+}
+
+/**
+ * Nested `.dc` sweep: run `.dc <primary>` once per secondary-source value, with
+ * that source pinned to the value. The primary sweep is the shared x-axis; each
+ * secondary value becomes one tagged curve (so e.g. Ic vs V1 is drawn per I1).
+ */
+async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => void): Promise<SimulationResult> {
+  const base = netlist
+    .split(/\r?\n/)
+    .map((l) => (/^\s*\.dc\b/i.test(l) ? `.dc ${dc.primary}` : l))
+    .join("\n");
+  const merged: SimulationResult = {
+    variables: [], data: {}, time: undefined, xLabel: dc.primaryName,
+    step: { param: dc.secondary.name, values: [] },
+  };
+  let lastLog = "";
+  for (const value of dc.secondary.values) {
+    const nl = withDcSource(base, dc.secondary.name, value);
+    const { result, log } = await runOnce(nl);
+    lastLog = log;
+    const tag = `${dc.secondary.name}=${formatSpiceNumber(value)}`;
+    merged.step!.values.push(tag);
+    const xVar = result.variables[0]; // the `.dc` sweep vector (x-axis)
+    if (!merged.time && result.time) {
+      merged.time = result.time;
+      merged.data["time"] = result.time;
+      merged.variables.push("time");
+    }
+    for (const v of result.variables) {
+      if (v === xVar || v === "time" || v === "frequency") continue;
+      const key = `${v} @${tag}`;
+      merged.data[key] = result.data[v];
+      merged.variables.push(key);
+    }
+  }
+  setLog(`===== Netlist (last ${dc.secondary.name}) =====\n${base.trim()}\n\n${lastLog}`);
+  return merged;
 }
 
 function convertResult(result: ResultType): SimulationResult {

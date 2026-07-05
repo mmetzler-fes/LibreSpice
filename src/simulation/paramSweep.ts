@@ -108,6 +108,59 @@ export function stripStepDirectives(netlist: string): string {
   return netlist.split(/\r?\n/).filter((l) => !/^\s*\.step\b/i.test(l)).join("\n");
 }
 
+/** A `.dc` analysis with a nested secondary source sweep. */
+export interface DcSweep {
+  /** Primary sweep tokens as written, e.g. `V1 0V 20V 100mV`. */
+  primary: string;
+  /** Primary source name (x-axis), e.g. `V1`. */
+  primaryName: string;
+  /** Secondary source stepped app-side (ngspice can't `list` a 2nd source). */
+  secondary: { name: string; values: number[] };
+}
+
+/**
+ * Parse a nested `.dc` directive whose SECOND source is a `list` (or start/stop/
+ * incr). ngspice can't run a `list` second source, so the app sweeps it: one
+ * `.dc <primary>` run per secondary value. Returns null if there's no such 2nd
+ * source (a plain single-source `.dc` runs directly in ngspice).
+ */
+export function parseDcSweep(netlist: string): DcSweep | null {
+  for (const raw of netlist.split(/\r?\n/)) {
+    const m = raw.trim().match(/^\.dc\s+(.+)$/i);
+    if (!m) continue;
+    const t = m[1].trim().split(/\s+/);
+    if (t.length < 4) return null;
+    const primary = t.slice(0, 4);
+    const rest = t.slice(4);
+    if (rest.length < 2) return null; // no secondary source
+    const name = rest[0];
+    let values: number[] = [];
+    if (/^list$/i.test(rest[1])) {
+      values = rest.slice(2).map(parseSpiceNumber).filter((v): v is number => v != null);
+    } else if (rest.length >= 4) {
+      const [s, e, inc] = rest.slice(1, 4).map(parseSpiceNumber);
+      if (s != null && e != null && inc) {
+        for (let v = s; v <= e + Math.abs(inc) * 1e-9 && values.length < MAX_STEPS; v += inc) {
+          values.push(Number(v.toPrecision(12)));
+        }
+      }
+    }
+    if (values.length === 0) return null;
+    return { primary: primary.join(" "), primaryName: primary[0], secondary: { name, values: values.slice(0, MAX_STEPS) } };
+  }
+  return null;
+}
+
+/** Set a source's value to a fixed DC level, keeping its two node names. */
+export function withDcSource(netlist: string, name: string, value: number): string {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^\\s*${esc}\\s+(\\S+)\\s+(\\S+)\\b`, "i");
+  return netlist
+    .split(/\r?\n/)
+    .map((l) => { const m = l.match(re); return m ? `${name} ${m[1]} ${m[2]} DC ${value}` : l; })
+    .join("\n");
+}
+
 /** Inject `.param NAME=value`, replacing any existing definition of NAME. */
 export function withParam(netlist: string, name: string, value: number): string {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
