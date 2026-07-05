@@ -48,6 +48,7 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   mosfet_p: ["d", "g", "s"],
   opamp: ["inp", "inn", "vcc", "vee", "out"],
   ground: ["gnd"],
+  netlabel: ["t"],
 };
 
 /** Handle id for a given component type and 1-based SPICE pin order. */
@@ -72,6 +73,7 @@ const SOURCE_PINS: LocalPin[] = [
 
 const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
   ground: [{ handleId: "gnd", order: 1, px: NODE_SIZE / 2, py: 20 }],
+  netlabel: [{ handleId: "t", order: 1, px: NODE_SIZE / 2, py: NODE_SIZE / 2 }],
   vsource: SOURCE_PINS,
   sinesource: SOURCE_PINS,
   pulsesource: SOURCE_PINS,

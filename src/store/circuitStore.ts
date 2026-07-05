@@ -162,6 +162,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   regenerateNetlist: () => {
     const { circuit, simulationConfig, spiceDirectives } = get();
+    // Apply net-label terminals: each imposes its name on its connected net, so
+    // nets sharing a name collapse to one node (connecting distant parts).
+    for (const comp of circuit.components.values()) {
+      const name = comp.getNetLabel();
+      const netId = comp.ports[0]?.netId;
+      if (name && netId && netId !== "0") {
+        const net = circuit.nets.get(netId);
+        if (net) net.nodeLabel = name;
+      }
+    }
     const generator = new NetlistGenerator();
     const libraryBlocks = useLibraryStore.getState().getDefinitionBlocks();
     const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryBlocks);

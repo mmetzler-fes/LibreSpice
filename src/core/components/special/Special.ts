@@ -28,6 +28,45 @@ export class Ground extends SpiceComponent {
 }
 
 /**
+ * Net-label terminal (LTSpice `FLAG name`): a single-pin connector that names
+ * the net it touches. It emits no device line — its only effect is to label its
+ * net, so any two terminals with the same name become one node (connecting
+ * distant parts) and the potential there can be probed by that name.
+ */
+export class NetLabel extends SpiceComponent {
+  constructor(id: string, label: string, position?: Point) {
+    super(id, label || "NET", position);
+  }
+
+  protected createPorts(): Port[] {
+    return [new Port(`${this.id}-t`, "t", { x: 0, y: 0 })];
+  }
+
+  getNetlistLine(): string {
+    return "";
+  }
+
+  getNetLabel(): string | null {
+    const name = this.label.trim();
+    return name ? name : null;
+  }
+
+  getProperties(): Property[] {
+    return [{ key: "label", label: "Net name", value: this.label, type: "string" }];
+  }
+
+  setProperty(key: string, value: string | number): void {
+    if (key === "label") this.label = String(value);
+  }
+
+  clone(): NetLabel {
+    const n = new NetLabel(this.id, this.label, { ...this.position });
+    n.rotation = this.rotation;
+    return n;
+  }
+}
+
+/**
  * Five-terminal operational amplifier backed by the LTSpice UniversalOpAmp2
  * symbol. Emits an `X` subcircuit call; the referenced model must be available
  * (e.g. imported via the library) for the circuit to simulate.

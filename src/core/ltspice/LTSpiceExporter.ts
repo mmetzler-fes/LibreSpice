@@ -57,6 +57,15 @@ export class LTSpiceExporter {
         continue;
       }
 
+      // Net-label terminal → LTSpice `FLAG x y name` at its single pin.
+      if (data.componentType === "netlabel") {
+        const fx = Math.round(node.position.x + CENTER);
+        const fy = Math.round(node.position.y + CENTER);
+        flagLines.push(`FLAG ${fx} ${fy} ${String(data.label ?? "NET").trim() || "NET"}`);
+        pinCoord.set(`${node.id}-t`, { x: fx, y: fy });
+        continue;
+      }
+
       const deg = data.rotation ?? 0;
       const rotated = rotatedOffsets(data.componentType, deg);
       const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));

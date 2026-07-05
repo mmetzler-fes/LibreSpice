@@ -61,7 +61,7 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit, addDataFlag, viewFitNonce,
+    circuit, addDataFlag, renameNet, viewFitNonce,
   } = useCircuitStore();
 
   // After a full load (import / snapshot) the content may sit off-screen (e.g.
@@ -307,6 +307,21 @@ function CanvasInner() {
     setWireMenu(null);
   };
 
+  // Name the clicked wire's net (LTSpice-style). Two nets sharing a name become
+  // one node in the netlist, so this connects distant parts and gives a stable
+  // label to probe the potential.
+  const nameWireNet = () => {
+    const netId = wireMenu?.netId;
+    if (!netId) { setWireMenu(null); return; }
+    const cur = circuit.nets.get(netId)?.nodeLabel;
+    const name = window.prompt(
+      "Netzname (gleiche Namen werden elektrisch verbunden):",
+      cur && cur !== netId ? cur : "",
+    );
+    if (name != null && name.trim()) renameNet(netId, name.trim());
+    setWireMenu(null);
+  };
+
   const probeCurrentInScope = () => {
     const comp = nodeMenu && circuit.components.get(nodeMenu.id);
     if (comp) { addProbeCandidates(getCurrentProbeCandidates(comp.label)); setDockTab("waveform"); }
@@ -502,6 +517,7 @@ function CanvasInner() {
             padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 190,
           }}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>Leitung</div>
+            <button style={nodeMenuItem} onClick={nameWireNet}>🏷 Netz benennen…</button>
             {wireMenu.vExpr
               ? <button style={nodeMenuItem} onClick={() => addWireDataFlag(wireMenu.vExpr!)}>Datenpunkt: Potential {wireMenu.vExpr}</button>
               : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Kein Potential verfügbar</div>}

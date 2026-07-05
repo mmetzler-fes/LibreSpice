@@ -41,6 +41,7 @@ export type ComponentType =
   | "sinesource"
   | "pulsesource"
   | "ground"
+  | "netlabel"
   | "subcircuit";
 
 export interface ComponentNodeData {
@@ -180,6 +181,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   sinesource: SineSourceSymbol,
   pulsesource: PulseSourceSymbol,
   ground: GroundSymbol,
+  netlabel: GroundSymbol, // unused: net-label nodes render their own tag
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
 };
 
@@ -526,9 +528,41 @@ function AsyComponentNode({
   );
 }
 
+/**
+ * Net-label terminal (LTSpice `FLAG name`): a single connection point with the
+ * net name in a tag. Placing two with the same name connects those nets.
+ */
+function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: boolean }) {
+  const c = NODE_SIZE / 2;
+  const name = data.label || "NET";
+  const color = selected ? "#2563eb" : "#334155";
+  return (
+    <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
+      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
+      <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
+        <line x1={c} y1={c} x2={c} y2={c - 13} stroke={color} strokeWidth={1.4} />
+        <circle cx={c} cy={c} r={2.6} fill={color} />
+      </svg>
+      <div
+        style={{
+          position: "absolute", left: c, top: c - 15, transform: "translate(-50%, -100%)",
+          padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
+          userSelect: "none", background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
+          border: `1px solid ${selected ? "#2563eb" : "#94a3b8"}`,
+        }}
+      >
+        {name}
+      </div>
+    </div>
+  );
+}
+
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const nodeData = data as ComponentNodeData;
+  if (nodeData.componentType === "netlabel") {
+    return <NetLabelNode data={nodeData} selected={selected} />;
+  }
   if (nodeData.componentType === "subcircuit") {
     const libSym = nodeData.symbolName ? symbolByName(nodeData.symbolName, symbolNorm) : undefined;
     if (libSym) {

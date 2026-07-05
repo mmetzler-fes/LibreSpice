@@ -37,6 +37,15 @@ export abstract class SpiceComponent {
     return null;
   }
 
+  /**
+   * The net name this component forces onto its connected net (a net-label /
+   * terminal). Nets that share a name become one node in the netlist, which is
+   * how distant parts connect by name. Returns `null` for normal components.
+   */
+  getNetLabel(): string | null {
+    return null;
+  }
+
   abstract getProperties(): Property[];
 
   abstract setProperty(key: string, value: string | number): void;
