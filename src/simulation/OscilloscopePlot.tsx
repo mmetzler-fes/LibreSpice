@@ -657,12 +657,21 @@ interface PlotPanelViewProps {
   onUpdate: (patch: Partial<PlotPanel>) => void;
 }
 
+/** Diagram colours for the on-screen (dark) and print/beamer (light) looks. */
+const PLOT_THEME = {
+  dark:  { bg: "#0f172a", plot: "#0b1120", grid: "#1e293b", axis: "#475569", line: "#334155", dot: "#0f172a", frame: "#334155" },
+  light: { bg: "#ffffff", plot: "#ffffff", grid: "#e2e8f0", axis: "#475569", line: "#94a3b8", dot: "#ffffff", frame: "#cbd5e1" },
+};
+
 function PlotPanelView(props: PlotPanelViewProps) {
   const { panel, traces, seriesMap, time, colorFor, compact, index, count, syncX,
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   const canRemove = count > 1;
   const circuitName = useCircuitStore((s) => s.circuitName);
+  const svgLight = usePlotStore((s) => s.svgLight);
+  const toggleSvgLight = usePlotStore((s) => s.toggleSvgLight);
+  const th = svgLight ? PLOT_THEME.light : PLOT_THEME.dark;
 
   // Serialise this panel's SVG to a downloadable standalone file.
   const handleExportSvg = () => {
@@ -874,6 +883,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             </span>
           ))}
         </div>
+        <button onClick={toggleSvgLight} title={svgLight ? "Diagram: light — switch to dark" : "Diagram: dark — switch to light (print/beamer, white background)"} style={ctrlBtn}>{svgLight ? "☀" : "🌙"}</button>
         <button onClick={() => setShowAxis((s) => !s)} title="Axis settings" style={ctrlBtn}>⚙</button>
         <button onClick={onFit} title="Fit view" style={ctrlBtn}>Fit</button>
         <button onClick={(e) => setPaneMenu({ x: e.clientX, y: e.clientY })} title="Pane menu" style={ctrlBtn}>⋯</button>
@@ -922,28 +932,28 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <rect x={0} y={0} width={plotW} height={plotH} />
             </clipPath>
           </defs>
-          <rect width={dims.w} height={dims.h} fill="#0f172a" />
-          <rect x={margin.left} y={margin.top} width={plotW} height={plotH} fill="#0b1120" rx={2} />
+          <rect width={dims.w} height={dims.h} fill={th.bg} />
+          <rect x={margin.left} y={margin.top} width={plotW} height={plotH} fill={th.plot} rx={2} />
           <g transform={`translate(${margin.left},${margin.top})`}>
             {xTicks.map((t) => (
               <g key={t}>
-                <line x1={toSx(t)} y1={0} x2={toSx(t)} y2={plotH} stroke="#1e293b" strokeWidth={1} />
-                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill="#475569">{fmtTime(t)}</text>
+                <line x1={toSx(t)} y1={0} x2={toSx(t)} y2={plotH} stroke={th.grid} strokeWidth={1} />
+                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill={th.axis}>{fmtTime(t)}</text>
               </g>
             ))}
             {/* Left y-axis (first unit group) with horizontal grid */}
             {yTicks.map((v) => (
               <g key={v}>
-                <line x1={0} y1={toSy(v)} x2={plotW} y2={toSy(v)} stroke="#1e293b" strokeWidth={1} />
+                <line x1={0} y1={toSy(v)} x2={plotW} y2={toSy(v)} stroke={th.grid} strokeWidth={1} />
                 <text x={-4} y={toSy(v) + 3} textAnchor="end" fontSize={9}
-                  fill={yGroups.length > 1 ? colorFor(y0.traces[0]) : "#475569"}>{fmtVal(v)}</text>
+                  fill={yGroups.length > 1 ? colorFor(y0.traces[0]) : th.axis}>{fmtVal(v)}</text>
               </g>
             ))}
             {y0.unit && yGroups.length > 1 && (
               <text x={-4} y={-4} textAnchor="end" fontSize={9} fill={colorFor(y0.traces[0])}>{y0.unit}</text>
             )}
             {vr.yMin < 0 && vr.yMax > 0 && (
-              <line x1={0} y1={toSy(0)} x2={plotW} y2={toSy(0)} stroke="#334155" strokeWidth={1} strokeDasharray="4 3" />
+              <line x1={0} y1={toSy(0)} x2={plotW} y2={toSy(0)} stroke={th.line} strokeWidth={1} strokeDasharray="4 3" />
             )}
 
             {/* Additional y-axes (further unit groups), stacked to the right */}
@@ -953,7 +963,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               const col = colorFor(g.traces[0]);
               return (
                 <g key={g.unit || r}>
-                  <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke="#334155" strokeWidth={1} />
+                  <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke={th.line} strokeWidth={1} />
                   {ticksFor(g.yMin, g.yMax, g.ticks, autoYCount).map((v) => (
                     <g key={v}>
                       <line x1={xLine} y1={sy(v)} x2={xLine + 3} y2={sy(v)} stroke={col} strokeWidth={1} />
@@ -975,7 +985,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             {stampInfos.map((s) => isFinite(s.sx) ? (
               <g key={`stamp-${s.i}`} style={{ pointerEvents: "none" }}>
                 <line x1={s.sx} y1={0} x2={s.sx} y2={plotH} stroke={s.color} strokeWidth={1} strokeDasharray="2 3" opacity={0.75} />
-                {isFinite(s.value) && <circle cx={s.sx} cy={s.sy} r={3} fill={s.color} stroke="#0f172a" strokeWidth={1} />}
+                {isFinite(s.value) && <circle cx={s.sx} cy={s.sy} r={3} fill={s.color} stroke={th.dot} strokeWidth={1} />}
                 <text x={Math.min(plotW - 2, s.sx + 4)} y={12 + (s.i % 3) * 11} fontSize={8} fontFamily="monospace"
                   textAnchor={s.sx > plotW - 60 ? "end" : "start"} fill={s.color}>
                   {fmtTime(s.sampleT)}, {fmtVal(s.value)}
@@ -986,14 +996,14 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <g>
                 <line x1={cursorInfo.sx} y1={0} x2={cursorInfo.sx} y2={plotH} stroke={cursorInfo.color} strokeWidth={1} strokeDasharray="4 3" />
                 {isFinite(cursorInfo.value) && (
-                  <circle cx={cursorInfo.sx} cy={mkToSy(groupOf(cursor!.trace))(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke="#0f172a" strokeWidth={1} style={{ pointerEvents: "none" }} />
+                  <circle cx={cursorInfo.sx} cy={mkToSy(groupOf(cursor!.trace))(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke={th.dot} strokeWidth={1} style={{ pointerEvents: "none" }} />
                 )}
                 {/* Draggable handle + hit area */}
                 <rect x={cursorInfo.sx - 5} y={0} width={10} height={plotH} fill="transparent" style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
                 <rect x={cursorInfo.sx - 4} y={2} width={8} height={9} rx={2} fill={cursorInfo.color} style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
               </g>
             )}
-            <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke="#334155" strokeWidth={1} />
+            <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke={th.frame} strokeWidth={1} />
           </g>
         </svg>
         {cursorInfo && isFinite(cursorInfo.sx) && (

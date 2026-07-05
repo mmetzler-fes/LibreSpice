@@ -46,6 +46,8 @@ interface PlotState {
   expressions: string[];
   /** LTSpice "Sync. Horiz. Axes": all panels share one x-axis range. */
   syncX: boolean;
+  /** Render the diagram (and its .svg export) on a white background. */
+  svgLight: boolean;
 }
 
 /** Serialisable plot configuration, saved to / loaded from `.plt` files. */
@@ -70,6 +72,8 @@ interface PlotActions {
   addExpression: (expr: string) => void;
   removeExpression: (expr: string) => void;
   toggleSyncX: () => void;
+  /** Toggle the diagram between the dark (screen) and light (print/beamer) look. */
+  toggleSvgLight: () => void;
   importSettings: (settings: PlotSettings) => void;
   /** Follow a net rename in traces/expressions/colours/panel assignments. */
   renameTraceNet: (oldLabel: string, newLabel: string) => void;
@@ -87,6 +91,7 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
   colors: {},
   expressions: [],
   syncX: false,
+  svgLight: false,
 
   addPanel: () => set((s) => ({ panels: [...s.panels, { id: newPanelId() }] })),
 
@@ -173,6 +178,8 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       }
       return { syncX };
     }),
+
+  toggleSvgLight: () => set((s) => ({ svgLight: !s.svgLight })),
 
   importSettings: (settings) => {
     if (!settings || settings.version !== 1 || !Array.isArray(settings.panels) || settings.panels.length === 0) {
