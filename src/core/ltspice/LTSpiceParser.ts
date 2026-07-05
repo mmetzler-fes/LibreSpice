@@ -316,6 +316,14 @@ export class LTSpiceParser {
 
     const comp = createSpiceComponent(cType, sym.id, label, nodeX, nodeY);
 
+    // Preserve LTSpice waveform specs verbatim (PULSE/SINE/PWL/EXP/SFFM) so
+    // `{param}` expressions and unit suffixes survive to the netlist. ngspice
+    // uses SIN, not LTSpice's SINE. This takes precedence over the best-effort
+    // numeric parsing below (which still fills the UI fields where it can).
+    if (/^\s*(sine|sin|pulse|pwl|exp|sffm)\b/i.test(valueStr)) {
+      (comp as any).rawSpec = valueStr.replace(/^(\s*)sine(?=\s*\()/i, "$1SIN");
+    }
+
     // Parse values
     if (cType === "sinesource") {
       const match = valueStr.match(/SINE\(([^)]+)\)/i);

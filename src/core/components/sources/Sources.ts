@@ -35,13 +35,30 @@ export class VoltageSource extends Source {
   sOffset = 0; sAmpl = 1; sFreq = 1000; sTd = 0; sTheta = 0; sPhi = 0; sNcycles = 0;
   // Parasitics (shared by all source types)
   seriesR = 0; parallelC = 0; showParasitics: "yes" | "no" = "no";
+  /**
+   * Verbatim SPICE source spec (e.g. an imported `PULSE(0 10 0 1n 1n {ti} {T})`).
+   * When set it overrides the structured fields so imported waveforms — including
+   * `{param}` expressions and unit suffixes — round-trip to the netlist exactly.
+   * Cleared as soon as the user edits any waveform field in the UI.
+   */
+  rawSpec = "";
 
   constructor(id: string, label: string, position?: Point, dcValue = 5) {
     super(id, label, position, dcValue);
   }
 
+  /**
+   * SPICE reference designator. ngspice derives the device type from the first
+   * letter, so a source the user named e.g. `UB1` must still be emitted as a
+   * voltage source (`VUB1`).
+   */
+  protected vref(): string {
+    return /^v/i.test(this.label) ? this.label : `V${this.label}`;
+  }
+
   /** The SPICE source specification (after the node names). */
   protected spec(): string {
+    if (this.rawSpec) return this.rawSpec;
     switch (this.sourceType) {
       case "Sine":
         return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
@@ -63,7 +80,7 @@ export class VoltageSource extends Source {
       lines.push(`R${this.label}_ser ${pNode} ${mid} ${this.seriesR}`);
       srcPos = mid;
     }
-    lines.push(`${this.label} ${srcPos} ${nNode} ${this.spec()}`);
+    lines.push(`${this.vref()} ${srcPos} ${nNode} ${this.spec()}`);
     if (this.parallelC > 0) lines.push(`C${this.label}_par ${pNode} ${nNode} ${this.parallelC}`);
     return lines.join("\n");
   }
@@ -110,6 +127,11 @@ export class VoltageSource extends Source {
 
   setProperty(key: string, value: string | number): void {
     const num = Number(value);
+    // Editing a waveform field abandons any verbatim imported spec so the UI
+    // values take effect (parasitics don't affect the spec, so they're exempt).
+    if (key !== "label" && key !== "seriesR" && key !== "parallelC" && key !== "showParasitics") {
+      this.rawSpec = "";
+    }
     switch (key) {
       case "label": this.label = String(value); break;
       case "sourceType": this.sourceType = String(value) as VSourceType; break;
@@ -143,7 +165,7 @@ export class VoltageSource extends Source {
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
-      rotation: this.rotation,
+      rawSpec: this.rawSpec, rotation: this.rotation,
     });
     return v;
   }
@@ -157,7 +179,9 @@ export class CurrentSource extends Source {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} DC ${this.dcValue} AC ${this.acAmplitude}`;
+    // ngspice keys the device type off the first letter (see VoltageSource.vref).
+    const ref = /^i/i.test(this.label) ? this.label : `I${this.label}`;
+    return `${ref} ${p} ${n} DC ${this.dcValue} AC ${this.acAmplitude}`;
   }
 
   getProperties(): Property[] {
@@ -197,7 +221,8 @@ export class SineSource extends VoltageSource {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} SIN(${this.offset} ${this.amplitude} ${this.frequency})`;
+    const spec = this.rawSpec || `SIN(${this.offset} ${this.amplitude} ${this.frequency})`;
+    return `${this.vref()} ${p} ${n} ${spec}`;
   }
 
   getProperties(): Property[] {
@@ -210,6 +235,7 @@ export class SineSource extends VoltageSource {
   }
 
   setProperty(key: string, value: string | number): void {
+    if (key !== "label") this.rawSpec = ""; // user edit overrides imported spec
     if (key === "label") this.label = String(value);
     if (key === "amplitude") this.amplitude = Number(value);
     if (key === "frequency") this.frequency = Number(value);
@@ -218,6 +244,7 @@ export class SineSource extends VoltageSource {
 
   clone(): SineSource {
     const s = new SineSource(this.id, this.label, { ...this.position }, this.amplitude, this.frequency, this.offset);
+    s.rawSpec = this.rawSpec;
     s.rotation = this.rotation;
     return s;
   }
@@ -253,10 +280,11 @@ export class PulseSource extends VoltageSource {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return (
-      `${this.label} ${p} ${n} PULSE(${this.initialValue} ${this.pulsedValue} ` +
-      `${this.delay} ${this.riseTime} ${this.fallTime} ${this.pulseWidth} ${this.period})`
-    );
+    const spec =
+      this.rawSpec ||
+      `PULSE(${this.initialValue} ${this.pulsedValue} ` +
+        `${this.delay} ${this.riseTime} ${this.fallTime} ${this.pulseWidth} ${this.period})`;
+    return `${this.vref()} ${p} ${n} ${spec}`;
   }
 
   getProperties(): Property[] {
@@ -273,6 +301,7 @@ export class PulseSource extends VoltageSource {
   }
 
   setProperty(key: string, value: string | number): void {
+    if (key !== "label") this.rawSpec = ""; // user edit overrides imported spec
     if (key === "label") this.label = String(value);
     const num = Number(value);
     if (key === "initialValue") this.initialValue = num;
@@ -290,6 +319,7 @@ export class PulseSource extends VoltageSource {
     ps.riseTime = this.riseTime;
     ps.fallTime = this.fallTime;
     ps.pulseWidth = this.pulseWidth;
+    ps.rawSpec = this.rawSpec;
     ps.rotation = this.rotation;
     return ps;
   }
