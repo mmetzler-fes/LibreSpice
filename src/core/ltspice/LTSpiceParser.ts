@@ -38,6 +38,9 @@ export class LTSpiceParser {
     const wires: Wire[] = [];
     const pins: Pin[] = [];
     const dataFlags: DataFlag[] = [];
+    // Named-flag positions, so we can also anchor the net name on a real
+    // component pin (robust even if the terminal's edge is dropped at runtime).
+    const namedFlags: { name: string; x: number; y: number }[] = [];
     let directives = "";
     
     let currentSymbol: any = null;
@@ -96,6 +99,7 @@ export class LTSpiceParser {
           components.push(comp);
           nodes.push({ id, type: "component", position: { x: x - CENTER, y: y - CENTER }, data: { componentType: "netlabel", label: flagName } });
           pins.push({ compId: id, handle: "t", x, y });
+          namedFlags.push({ name: flagName, x, y });
         }
       } else if (cmd === "WIRE") {
         wires.push({
@@ -177,10 +181,22 @@ export class LTSpiceParser {
       p.netId = bestNetId || nextNetId++;
     }
 
-    // Named FLAGs are now imported as NetLabel terminals (see the FLAG handler),
-    // which impose their name on the connected net themselves — so nothing needs
-    // to be applied separately here.
+    // Named FLAGs are imported as NetLabel terminals (see the FLAG handler). As a
+    // robust backup, also resolve each flag to a *real* component pin on its net,
+    // so the store can label that net directly — this keeps the naming correct
+    // even if the terminal's single edge doesn't survive the initial render.
     const netNames: { compId: string; handle: string; name: string }[] = [];
+    for (const nf of namedFlags) {
+      let wireNet: number | undefined, best = PIN_TOL;
+      for (const w of wires) {
+        const d = distToSegment(nf.x, nf.y, w);
+        if (d <= best) { best = d; wireNet = w.netId; }
+      }
+      const rep = pins.find(
+        (p) => p.netId !== undefined && p.netId === wireNet && !p.compId.startsWith("netlabel_") && !p.compId.startsWith("ground_"),
+      );
+      if (rep) netNames.push({ compId: rep.compId, handle: rep.handle, name: nf.name });
+    }
 
     // ── Faithful wire routing ──────────────────────────────────────────────
     // Reconstruct the original LTSpice wire paths so imported wires follow the
