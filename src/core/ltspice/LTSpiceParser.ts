@@ -5,11 +5,6 @@ import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 
-// Must match LTSpiceExporter / ComponentNode so WINDOW ↔ offset round-trips.
-const LABEL_DEFAULT = { left: 8, top: 30 };
-const VALUE_DEFAULT = { left: 8, top: 48 };
-const winToOffset = (def: { left: number; top: number }, w?: { x: number; y: number }) =>
-  w ? { x: w.x - (def.left - CENTER), y: w.y - (def.top - CENTER) } : undefined;
 
 function parseSI(val: string): number {
   if (!val) return 0;
@@ -374,10 +369,12 @@ export class LTSpiceParser {
 
     components.push(comp);
 
-    const windows = (sym.windows ?? {}) as Record<number, { x: number; y: number }>;
-    const labelOffset = winToOffset(LABEL_DEFAULT, windows[0]);
-    const valueOffset = winToOffset(VALUE_DEFAULT, windows[3]);
-
+    // Note: LTSpice WINDOW positions are intentionally NOT imported as caption
+    // offsets. Their coordinate frame doesn't line up with our native-scale
+    // symbol rendering, which pushed labels/values far off the part. Loaded
+    // components use the same sensible default caption placement (label above /
+    // value below when horizontal, both to the left when vertical) as freshly
+    // inserted ones; the user can still drag a caption to reposition it.
     nodes.push({
       id: sym.id,
       type: "component",
@@ -387,8 +384,6 @@ export class LTSpiceParser {
         label,
         valueLabel: valueStr,
         rotation: deg,
-        ...(labelOffset && { labelOffset }),
-        ...(valueOffset && { valueOffset }),
       }
     });
   }
