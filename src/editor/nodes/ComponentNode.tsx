@@ -540,11 +540,12 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
       <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
+        <line x1={c} y1={c} x2={c + 13} y2={c} stroke={color} strokeWidth={1.4} />
         <circle cx={c} cy={c} r={2.6} fill={color} />
       </svg>
       <div
         style={{
-          position: "absolute", left: c + 7, top: c, transform: "translate(0, -50%)",
+          position: "absolute", left: c + 15, top: c, transform: "translate(0, -50%)",
           padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
           userSelect: "none", background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
           border: `1px solid ${selected ? "#2563eb" : "#94a3b8"}`,
