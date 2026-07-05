@@ -191,6 +191,10 @@ const TYPE_TO_SYMBOL: Partial<Record<ComponentType, string>> = {
   led: "LED",
   zener: "zener",
   schottky: "schottky",
+  bjt_npn: "npn",
+  bjt_pnp: "pnp",
+  mosfet_n: "nmos",
+  mosfet_p: "pmos",
   // Voltage sources render via the hand-drawn symbols (chosen by sourceType),
   // so they are intentionally NOT mapped to an .asy symbol here.
   isource: "current",

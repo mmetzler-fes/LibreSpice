@@ -59,13 +59,17 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   diode: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   led: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   vsource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
-  isource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
+  // LTSpice's current.asy puts "+" (SpiceOrder 1) at the bottom, "-" at the top.
+  isource: [{ handle: "p", dx: 0, dy: 80 }, { handle: "n", dx: 0, dy: 0 }],
   sinesource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
   pulsesource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
-  bjt_npn: [{ handle: "c", dx: 16, dy: -16 }, { handle: "b", dx: -16, dy: 0 }, { handle: "e", dx: 16, dy: 16 }],
-  bjt_pnp: [{ handle: "c", dx: 16, dy: -16 }, { handle: "b", dx: -16, dy: 0 }, { handle: "e", dx: 16, dy: 16 }],
-  mosfet_n: [{ handle: "d", dx: 16, dy: -16 }, { handle: "g", dx: -16, dy: 0 }, { handle: "s", dx: 16, dy: 16 }],
-  mosfet_p: [{ handle: "d", dx: 16, dy: -16 }, { handle: "g", dx: -16, dy: 0 }, { handle: "s", dx: 16, dy: 16 }],
+  // BJT/MOSFET terminals as in LTSpice's npn/pnp/nmos/pmos symbols (origin at
+  // top-left): base/gate on the left, collector/drain top-right, emitter/source
+  // bottom-right.
+  bjt_npn: [{ handle: "c", dx: 64, dy: 0 }, { handle: "b", dx: 0, dy: 48 }, { handle: "e", dx: 64, dy: 96 }],
+  bjt_pnp: [{ handle: "c", dx: 64, dy: 0 }, { handle: "b", dx: 0, dy: 48 }, { handle: "e", dx: 64, dy: 96 }],
+  mosfet_n: [{ handle: "d", dx: 48, dy: 0 }, { handle: "g", dx: 0, dy: 80 }, { handle: "s", dx: 48, dy: 96 }],
+  mosfet_p: [{ handle: "d", dx: 48, dy: 0 }, { handle: "g", dx: 0, dy: 80 }, { handle: "s", dx: 48, dy: 96 }],
   // UniversalOpAmp2 terminals (LTSpice symbol-local, origin at the centre):
   //   In+ (-32,16)  In- (-32,-16)  V+ (0,-32)  V- (0,32)  OUT (32,0)
   opamp: [
@@ -116,7 +120,10 @@ export type Centering = "mean" | "bbox";
 
 /** Which centring an editor component type uses (see {@link Centering}). */
 export function centeringFor(type: string): Centering {
-  return type === "opamp" ? "bbox" : "mean";
+  // Multi-pin, asymmetric .asy symbols (op-amp, transistors) centre on the pin
+  // bounding box to match mapSymbol's native-scale rendering; 2-pin parts have
+  // mean == bbox so the default is fine.
+  return type === "opamp" || type.startsWith("bjt_") || type.startsWith("mosfet_") ? "bbox" : "mean";
 }
 
 function centre(offsets: PinOffset[], mode: Centering): { mx: number; my: number } {
