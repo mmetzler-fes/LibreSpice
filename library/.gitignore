@@ -1,8 +1,8 @@
 # Keep the library folder structure, but don't track user-provided library
 # data (dropped-in or imported .lib/.asy/.json files).
-/lib/*
+/sub/*
 /sym/*
 /cmp/*
-!/lib/.gitkeep
+!/sub/.gitkeep
 !/sym/.gitkeep
 !/cmp/.gitkeep

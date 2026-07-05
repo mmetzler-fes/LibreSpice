@@ -17,7 +17,7 @@ const STORAGE_KEY = "librespice.localLibrary.v1";
 /** Payload for persisting an imported entry into the server library. */
 export interface SaveEntryPayload {
   name: string;
-  /** `.model` / `.subckt` SPICE text → `lib/<name>.lib`. */
+  /** `.model` / `.subckt` SPICE text → `sub/<name>.lib`. */
   modelText?: string;
   /** `.asy` symbol source → `sym/<symbol>.asy`. */
   asyText?: string;

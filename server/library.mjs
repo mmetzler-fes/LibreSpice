@@ -2,9 +2,11 @@
  * File-backed component library, mirroring LTSpice's on-disk layout.
  *
  *   LIB_DIR/
- *     lib/   *.lib | *.sub | *.mod   – .model / .subckt SPICE text (auto-included)
+ *     sub/   *.lib | *.sub | *.mod   – .model / .subckt SPICE text (auto-included)
  *     sym/   *.asy                   – graphical symbols
  *     cmp/   *.json                  – component descriptors (symbol ↔ model ↔ pins)
+ *
+ * The sub/sym/cmp split mirrors LTSpice's `lib/{sub,sym,cmp}` layout.
  *
  * The directory is meant to be a mounted Docker volume so files dropped in by
  * the operator are picked up automatically, and imports from the UI are written
@@ -17,7 +19,7 @@ import path from "node:path";
 const LIB_DIR = process.env.LIBRESPICE_LIB_DIR || "/data/lib";
 
 const SUBDIRS = {
-  lib: path.join(LIB_DIR, "lib"),
+  sub: path.join(LIB_DIR, "sub"),
   sym: path.join(LIB_DIR, "sym"),
   cmp: path.join(LIB_DIR, "cmp"),
 };
@@ -47,9 +49,9 @@ async function listFiles(dir) {
  */
 export async function readLibrary() {
   const models = [];
-  for (const file of await listFiles(SUBDIRS.lib)) {
+  for (const file of await listFiles(SUBDIRS.sub)) {
     if (!MODEL_EXT.has(path.extname(file).toLowerCase())) continue;
-    models.push(await fs.readFile(path.join(SUBDIRS.lib, file), "utf8"));
+    models.push(await fs.readFile(path.join(SUBDIRS.sub, file), "utf8"));
   }
 
   const symbols = [];
@@ -89,7 +91,7 @@ function safeBaseName(name) {
  * Writes an imported entry to disk. Payload:
  *   {
  *     name:        string,          // component / model name (required)
- *     modelText?:  string,          // .model / .subckt SPICE text → lib/<name>.lib
+ *     modelText?:  string,          // .model / .subckt SPICE text → sub/<name>.lib
  *     asyText?:    string,          // .asy symbol source        → sym/<symbol>.asy
  *     descriptor?: { symbol, prefix, model?, pins? }  // → cmp/<name>.json
  *   }
@@ -100,7 +102,7 @@ export async function writeEntry(payload) {
   const name = safeBaseName(payload?.name);
 
   if (typeof payload.modelText === "string" && payload.modelText.trim()) {
-    await fs.writeFile(path.join(SUBDIRS.lib, `${name}.lib`), payload.modelText, "utf8");
+    await fs.writeFile(path.join(SUBDIRS.sub, `${name}.lib`), payload.modelText, "utf8");
   }
 
   if (typeof payload.asyText === "string" && payload.asyText.trim()) {

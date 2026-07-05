@@ -10,7 +10,7 @@ services:
       - "8080:8080"
     volumes:
       # Component library on the host: drop .lib/.asy/.json files into
-      # ./library/{lib,sym,cmp} and they are picked up automatically.
+      # ./library/{sub,sym,cmp} and they are picked up automatically.
       - ./library:/data/lib
     environment:
       LIBRESPICE_LIB_DIR: /data/lib
