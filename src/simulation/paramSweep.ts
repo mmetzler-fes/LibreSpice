@@ -10,6 +10,8 @@ import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 export interface StepSpec {
   name: string;
   values: number[];
+  /** `.step V1 …` (a source's value) rather than `.step param NAME …`. */
+  isSource?: boolean;
 }
 
 /** Cap total runs so a broad sweep can't launch thousands of simulations. */
@@ -21,19 +23,29 @@ const MAX_STEPS = 512;
  *   `.step dec  param NAME start stop N`        N points per decade (log)
  *   `.step oct  param NAME start stop N`        N points per octave (log)
  *   `.step      param NAME list v1 v2 …`        explicit list
+ *   `.step      V1 start stop incr`             sweep a source's value directly
+ *   `.step      I1 list v1 v2 …`                (no `param` keyword)
  */
-/** Parse a single `.step param …` line into its swept values, or null. */
+/** Parse a single `.step …` line into its swept values, or null. */
 function parseStepLine(raw: string): StepSpec | null {
-  const m = raw.trim().match(/^\.step\s+(?:(lin|oct|dec)\s+)?param\s+(\S+)\s+(.*)$/i);
-  if (!m) return null;
-  const kind = (m[1] || "lin").toLowerCase();
-  const name = m[2];
-  const rest = m[3].trim();
+  const head = raw.trim().match(/^\.step\s+(?:(lin|oct|dec)\s+)?(.*)$/i);
+  if (!head) return null;
+  const kind = (head[1] || "lin").toLowerCase();
+  let body = head[2].trim();
+  // `.step [mode] param NAME …` sweeps a parameter; otherwise the first token is
+  // a source (`.step V1 …` / `.step I1 list …`) whose value is swept.
+  const pm = body.match(/^param\s+(.*)$/i);
+  const isSource = !pm;
+  if (pm) body = pm[1].trim();
+  const nm = body.match(/^(\S+)\s+(.*)$/);
+  if (!nm) return null;
+  const name = nm[1];
+  const rest = nm[2].trim();
 
   const list = rest.match(/^list\s+(.*)$/i);
   if (list) {
     const values = list[1].split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-    return values.length ? { name, values: values.slice(0, MAX_STEPS) } : null;
+    return values.length ? { name, values: values.slice(0, MAX_STEPS), isSource } : null;
   }
 
   const nums = rest.split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
@@ -57,7 +69,7 @@ function parseStepLine(raw: string): StepSpec | null {
       values.push(Number((start * Math.pow(ratio, i)).toPrecision(12)));
     }
   }
-  return values.length ? { name, values } : null;
+  return values.length ? { name, values, isSource } : null;
 }
 
 /** All `.step param` sweeps in the netlist (LTSpice allows several, nested). */

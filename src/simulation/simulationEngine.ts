@@ -65,10 +65,15 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
     // unresolved `{name}` — that would otherwise stall/abort ngspice.
     const base = stripStepDirectives(netlist);
     const combos = stepCombinations(steps, formatSpiceNumber);
+    // `.step V1 …` sweeps a source's value; `.step param NAME …` sweeps a param.
+    const isSource = new Map(steps.map((s) => [s.name, !!s.isSource]));
     const runs: { combo: (typeof combos)[number]; result: SimulationResult; log: string }[] = [];
     const measRows: string[] = [];
     for (const combo of combos) {
-      const nl = combo.assignments.reduce((acc, a) => withParam(acc, a.name, a.value), base);
+      const nl = combo.assignments.reduce(
+        (acc, a) => (isSource.get(a.name) ? withDcSource(acc, a.name, a.value) : withParam(acc, a.name, a.value)),
+        base,
+      );
       const { result, log } = await runOnce(nl);
       runs.push({ combo, result, log });
       const meas: Measurement[] = parseMeasurements(log);

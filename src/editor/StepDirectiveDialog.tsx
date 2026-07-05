@@ -4,8 +4,13 @@ import { formatSpiceNumber, parseSpiceNumber } from "@core/circuit/NetlistGenera
 /** Sweep kind of a `.step` directive. */
 export type StepMode = "lin" | "dec" | "oct" | "list";
 
-/** Editable form of a `.step param …` directive. */
+/** Whether the sweep targets a `.param` or a source (`.step V1 …`). */
+export type StepTarget = "param" | "source";
+
+/** Editable form of a `.step …` directive. */
 export interface StepForm {
+  /** `param` sweeps a parameter; `source` sweeps a source's value directly. */
+  target: StepTarget;
   name: string;
   mode: StepMode;
   start: number;
@@ -17,34 +22,41 @@ export interface StepForm {
 }
 
 export function defaultStepForm(): StepForm {
-  return { name: "R", mode: "lin", start: 1, stop: 10, incr: 1, list: "1 2 5 10" };
+  return { target: "param", name: "R", mode: "lin", start: 1, stop: 10, incr: 1, list: "1 2 5 10" };
 }
 
 /** Render a {@link StepForm} as its `.step` SPICE directive. */
 export function formatStepDirective(f: StepForm): string {
   const n = f.name.trim() || "X";
+  const modePrefix = f.mode === "lin" || f.mode === "list" ? "" : `${f.mode} `;
+  const head = `.step ${modePrefix}${f.target === "param" ? `param ${n}` : n}`;
   if (f.mode === "list") {
     const vals = f.list.trim().split(/[\s,]+/).filter(Boolean).join(" ");
-    return `.step param ${n} list ${vals}`;
+    return `${head} list ${vals}`;
   }
   const fmt = (v: number) => formatSpiceNumber(v);
-  if (f.mode === "lin") return `.step param ${n} ${fmt(f.start)} ${fmt(f.stop)} ${fmt(f.incr)}`;
-  return `.step ${f.mode} param ${n} ${fmt(f.start)} ${fmt(f.stop)} ${fmt(f.incr)}`;
+  return `${head} ${fmt(f.start)} ${fmt(f.stop)} ${fmt(f.incr)}`;
 }
 
-/** Parse a `.step param …` line back into a {@link StepForm}, or null. */
+/** Parse a `.step …` line back into a {@link StepForm}, or null. */
 export function parseStepForm(line: string): StepForm | null {
-  const m = line.trim().match(/^\.step\s+(?:(lin|dec|oct)\s+)?param\s+(\S+)\s+(.*)$/i);
-  if (!m) return null;
-  const mode0 = (m[1]?.toLowerCase() as StepMode) || "lin";
-  const name = m[2];
-  const rest = m[3].trim();
+  const head = line.trim().match(/^\.step\s+(?:(lin|dec|oct)\s+)?(.*)$/i);
+  if (!head) return null;
+  const mode0 = (head[1]?.toLowerCase() as StepMode) || "lin";
+  let body = head[2].trim();
+  const pm = body.match(/^param\s+(.*)$/i);
+  const target: StepTarget = pm ? "param" : "source";
+  if (pm) body = pm[1].trim();
+  const nm = body.match(/^(\S+)\s+(.*)$/);
+  if (!nm) return null;
+  const name = nm[1];
+  const rest = nm[2].trim();
   const d = defaultStepForm();
   const list = rest.match(/^list\s+(.*)$/i);
-  if (list) return { ...d, name, mode: "list", list: list[1].trim() };
+  if (list) return { ...d, target, name, mode: "list", list: list[1].trim() };
   const nums = rest.split(/[\s,]+/).map(parseSpiceNumber);
   if (nums.length < 3 || nums.some((x) => x == null)) return null;
-  return { ...d, name, mode: mode0, start: nums[0]!, stop: nums[1]!, incr: nums[2]! };
+  return { ...d, target, name, mode: mode0, start: nums[0]!, stop: nums[1]!, incr: nums[2]! };
 }
 
 interface Props {
@@ -88,8 +100,14 @@ export function StepDirectiveDialog({ open, initial, onApply, onClose }: Props) 
         </div>
 
         <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          <Field label="Parameter name">
-            <input value={f.name} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g. R, Rvar, g" style={inputStyle} />
+          <Field label="Sweep target">
+            <select value={f.target} onChange={(e) => patch({ target: e.target.value as StepTarget })} style={selectStyle}>
+              <option value="param">Parameter (referenced as {"{name}"})</option>
+              <option value="source">Source (a V/I source's value)</option>
+            </select>
+          </Field>
+          <Field label={f.target === "param" ? "Parameter name" : "Source name"}>
+            <input value={f.name} onChange={(e) => patch({ name: e.target.value })} placeholder={f.target === "param" ? "e.g. R, Rvar, g" : "e.g. V1, I1"} style={inputStyle} />
           </Field>
           <Field label="Sweep type">
             <select value={f.mode} onChange={(e) => patch({ mode: e.target.value as StepMode })} style={selectStyle}>
@@ -114,8 +132,10 @@ export function StepDirectiveDialog({ open, initial, onApply, onClose }: Props) 
             <code style={{ color: "#67e8f9", background: "#0f172a", padding: "2px 6px", borderRadius: 3 }}>{formatStepDirective(f)}</code>
           </div>
           <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.5 }}>
-            Reference the parameter in a component value as <code style={{ color: "#93c5fd" }}>{`{${f.name.trim() || "X"}}`}</code>.
-            Add a second <code style={{ color: "#93c5fd" }}>.step</code> for a nested sweep.
+            {f.target === "param"
+              ? <>Reference the parameter in a component value as <code style={{ color: "#93c5fd" }}>{`{${f.name.trim() || "X"}}`}</code>.</>
+              : <>The value of source <code style={{ color: "#93c5fd" }}>{f.name.trim() || "V1"}</code> is swept directly.</>}
+            {" "}Add a second <code style={{ color: "#93c5fd" }}>.step</code> for a nested sweep.
           </div>
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
