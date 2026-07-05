@@ -16,6 +16,7 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
   voltage: "vsource", current: "isource",
+  opamp: "opamp", opamp2: "opamp", universalopamp: "opamp", universalopamp2: "opamp",
 };
 
 const SYMBOL_TO_TYPE_LC: Record<string, ComponentType> = Object.fromEntries(
@@ -64,6 +65,15 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   bjt_pnp: [{ handle: "c", dx: 16, dy: -16 }, { handle: "b", dx: -16, dy: 0 }, { handle: "e", dx: 16, dy: 16 }],
   mosfet_n: [{ handle: "d", dx: 16, dy: -16 }, { handle: "g", dx: -16, dy: 0 }, { handle: "s", dx: 16, dy: 16 }],
   mosfet_p: [{ handle: "d", dx: 16, dy: -16 }, { handle: "g", dx: -16, dy: 0 }, { handle: "s", dx: 16, dy: 16 }],
+  // UniversalOpAmp2 terminals (LTSpice symbol-local, origin at the centre):
+  //   In+ (-32,16)  In- (-32,-16)  V+ (0,-32)  V- (0,32)  OUT (32,0)
+  opamp: [
+    { handle: "inp", dx: -32, dy: 16 },
+    { handle: "inn", dx: -32, dy: -16 },
+    { handle: "vcc", dx: 0, dy: -32 },
+    { handle: "vee", dx: 0, dy: 32 },
+    { handle: "out", dx: 32, dy: 0 },
+  ],
 };
 
 /** Ground's node is offset so its single terminal lands on the FLAG point. */

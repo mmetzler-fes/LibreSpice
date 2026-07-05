@@ -35,7 +35,9 @@ export class Ground extends SpiceComponent {
 export class OpAmp extends SpiceComponent {
   model: string;
 
-  constructor(id: string, label: string, position?: Point, model = "UniversalOpAmp2") {
+  // `level2` is the subcircuit name defined by the shipped UniversalOpAmp2.lib
+  // (matching the LTSpice symbol's `SYMATTR SpiceModel level2`).
+  constructor(id: string, label: string, position?: Point, model = "level2") {
     super(id, label, position);
     this.model = model;
   }
