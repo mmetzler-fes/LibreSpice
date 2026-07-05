@@ -38,7 +38,6 @@ export class LTSpiceParser {
     const wires: Wire[] = [];
     const pins: Pin[] = [];
     const dataFlags: DataFlag[] = [];
-    const namedFlags: { name: string; x: number; y: number }[] = [];
     let directives = "";
     
     let currentSymbol: any = null;
@@ -87,8 +86,16 @@ export class LTSpiceParser {
           nodes.push({ id, type: "component", position: { x: x - 40, y: y - 20 }, data: { componentType: "ground", label: "0" } });
           pins.push({ compId: id, handle: "gnd", x, y });
         } else if (flagName) {
-          // Named net label (e.g. U1); resolved to one of our nets after wiring.
-          namedFlags.push({ name: flagName, x, y });
+          // Named net label (e.g. UB-) → a placeable NetLabel terminal at the
+          // flag point. Its single pin sits on the flag coordinate so the wire
+          // routing connects it (exactly like ground), and its name is imposed
+          // on that net (see SpiceComponent.getNetLabel), so same-named labels
+          // collapse to one node.
+          const id = `netlabel_${compIdCounter++}`;
+          const comp = createSpiceComponent("netlabel", id, flagName, x - CENTER, y - CENTER);
+          components.push(comp);
+          nodes.push({ id, type: "component", position: { x: x - CENTER, y: y - CENTER }, data: { componentType: "netlabel", label: flagName } });
+          pins.push({ compId: id, handle: "t", x, y });
         }
       } else if (cmd === "WIRE") {
         wires.push({
@@ -170,19 +177,10 @@ export class LTSpiceParser {
       p.netId = bestNetId || nextNetId++;
     }
 
-    // Resolve named FLAGs (net labels like U1) to a representative pin on their
-    // net, so the store can label our net after wiring and imported DATAFLAG
-    // expressions such as V(U1) resolve against the result.
+    // Named FLAGs are now imported as NetLabel terminals (see the FLAG handler),
+    // which impose their name on the connected net themselves — so nothing needs
+    // to be applied separately here.
     const netNames: { compId: string; handle: string; name: string }[] = [];
-    for (const nf of namedFlags) {
-      let wireNet: number | undefined, best = PIN_TOL;
-      for (const w of wires) {
-        const d = distToSegment(nf.x, nf.y, w);
-        if (d <= best) { best = d; wireNet = w.netId; }
-      }
-      const rep = pins.find((p) => p.netId !== undefined && p.netId === wireNet);
-      if (rep) netNames.push({ compId: rep.compId, handle: rep.handle, name: nf.name });
-    }
 
     // ── Faithful wire routing ──────────────────────────────────────────────
     // Reconstruct the original LTSpice wire paths so imported wires follow the

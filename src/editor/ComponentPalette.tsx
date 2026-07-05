@@ -13,7 +13,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
   const [search, setSearch] = useState("");
   const [openCategory, setOpenCategory] = useState<string | null>("Passives");
   const { entries, removeEntry, setScope } = useLibraryStore();
-  const { toggleLibraryImport, startPlacingLibrary, pendingLibraryPlacement } = useUIStore();
+  const { toggleLibraryImport, startPlacing, startPlacingLibrary, pendingPlaceType, pendingLibraryPlacement } = useUIStore();
 
   const filtered = COMPONENT_DEFINITIONS.filter(
     (d) =>
@@ -91,7 +91,8 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                     key={def.type}
                     draggable
                     onDragStart={(e) => onDragStart(def, e)}
-                    title={def.description}
+                    onClick={() => startPlacing(def.type)}
+                    title={`${def.description} — click to place, or drag onto the canvas`}
                     style={{
                       padding: "6px 16px",
                       cursor: "grab",
@@ -100,6 +101,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
+                      background: pendingPlaceType === def.type ? "#dbeafe" : "transparent",
                     }}
                   >
                     <SymbolPreview type={def.type} size={30} strokeWidth={1.1} />
