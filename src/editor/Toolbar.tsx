@@ -93,6 +93,7 @@ interface TBtnProps {
   children: React.ReactNode;
 }
 function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
+  const { darkMode } = useUIStore();
   return (
     <button
       title={title}
@@ -107,8 +108,8 @@ function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
         border: "1px solid",
         borderColor: active ? "#2563eb" : "transparent",
         borderRadius: 3,
-        background: active ? "#dbeafe" : "transparent",
-        color: active ? "#1d4ed8" : disabled ? "#94a3b8" : "inherit",
+        background: active ? (darkMode ? "#1e3a5f" : "#dbeafe") : "transparent",
+        color: active ? (darkMode ? "#60a5fa" : "#1d4ed8") : disabled ? "#94a3b8" : "inherit",
         cursor: disabled ? "not-allowed" : "pointer",
         padding: 0,
       }}
@@ -119,8 +120,9 @@ function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
 }
 
 function Divider() {
+  const { darkMode } = useUIStore();
   return (
-    <div style={{ width: 1, height: 24, background: "#cbd5e1", margin: "0 4px", flexShrink: 0 }} />
+    <div style={{ width: 1, height: 24, background: darkMode ? "#334155" : "#cbd5e1", margin: "0 4px", flexShrink: 0 }} />
   );
 }
 
@@ -133,7 +135,7 @@ export function Toolbar() {
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
     circuitName, setCircuitName, dataFlags,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, darkMode } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
@@ -278,8 +280,9 @@ export function Toolbar() {
         height: 36,
         padding: "0 6px",
         gap: 2,
-        background: "#f8fafc",
-        borderBottom: "1px solid #cbd5e1",
+        background: darkMode ? "#1e293b" : "#f8fafc",
+        borderBottom: `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`,
+        color: darkMode ? "#e2e8f0" : "#1e293b",
         flexShrink: 0,
         overflowX: "auto",
         userSelect: "none",
@@ -323,7 +326,10 @@ export function Toolbar() {
         placeholder="Diagram name"
         style={{
           height: 26, width: 140, fontSize: 12, padding: "0 8px",
-          border: "1px solid #cbd5e1", borderRadius: 4, background: "#fff", color: "#334155",
+          border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+          borderRadius: 4,
+          background: darkMode ? "#0f172a" : "#fff",
+          color: darkMode ? "#e2e8f0" : "#334155",
         }}
       />
 
@@ -381,8 +387,12 @@ export function Toolbar() {
         value={symbolNorm}
         onChange={(e) => setSymbolNorm(e.target.value as typeof symbolNorm)}
         style={{
-          height: 28, fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 4,
-          background: "#fff", color: "#334155", padding: "0 4px", cursor: "pointer",
+          height: 28, fontSize: 12,
+          border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+          borderRadius: 4,
+          background: darkMode ? "#0f172a" : "#fff",
+          color: darkMode ? "#e2e8f0" : "#334155",
+          padding: "0 4px", cursor: "pointer",
         }}
       >
         <option value="default">Symbols: EU</option>

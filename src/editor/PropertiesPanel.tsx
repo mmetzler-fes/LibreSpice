@@ -35,22 +35,25 @@ function fmtSIShort(v: number): string {
   return `${+(v * 1e12).toPrecision(4)}p`;
 }
 
-const fieldStyle: React.CSSProperties = {
-  padding: "4px 6px",
-  border: "1px solid #cbd5e1",
-  borderRadius: 4,
-  width: "100%",
-  boxSizing: "border-box",
-};
-
 /** Text input that accepts SI-prefixed values and emits a plain number. */
 function SIInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [text, setText] = useState(() => fmtSIShort(value));
   const [focused, setFocused] = useState(false);
+  const { darkMode } = useUIStore();
   // Reflect external changes while not actively editing.
   useEffect(() => {
     if (!focused) setText(fmtSIShort(value));
   }, [value, focused]);
+
+  const dynFieldStyle: React.CSSProperties = {
+    padding: "4px 6px",
+    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    borderRadius: 4,
+    width: "100%",
+    boxSizing: "border-box",
+    background: darkMode ? "#0f172a" : "#fff",
+    color: darkMode ? "#e2e8f0" : "#1e293b",
+  };
 
   return (
     <input
@@ -64,7 +67,7 @@ function SIInput({ value, onChange }: { value: number; onChange: (v: number) => 
         const n = parseSI(e.target.value);
         if (n !== null) onChange(n);
       }}
-      style={fieldStyle}
+      style={dynFieldStyle}
     />
   );
 }
@@ -72,7 +75,7 @@ function SIInput({ value, onChange }: { value: number; onChange: (v: number) => 
 export function PropertiesPanel() {
   const { circuit, selectedComponentId, updateComponentProperty, propertyVersion } = useCircuitStore();
   const { addProbeCandidates } = useSimulationStore();
-  const { setDockTab } = useUIStore();
+  const { setDockTab, darkMode } = useUIStore();
   void propertyVersion;
 
   const component = selectedComponentId ? circuit.components.get(selectedComponentId) : null;
@@ -82,9 +85,9 @@ export function PropertiesPanel() {
       <aside
         style={{
           width: 220,
-          borderLeft: "1px solid #e2e8f0",
+          borderLeft: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`,
           padding: 16,
-          background: "#fafafa",
+          background: darkMode ? "#1e293b" : "#fafafa",
           fontSize: 12,
           color: "#94a3b8",
           display: "flex",
@@ -99,6 +102,27 @@ export function PropertiesPanel() {
 
   const properties = component.getProperties();
   const isGround = component.id.startsWith("ground_");
+
+  const dynBorder = darkMode ? "#334155" : "#e2e8f0";
+  const dynFieldStyle: React.CSSProperties = {
+    padding: "4px 6px",
+    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    borderRadius: 4,
+    width: "100%",
+    boxSizing: "border-box",
+    background: darkMode ? "#0f172a" : "#fff",
+    color: darkMode ? "#e2e8f0" : "#1e293b",
+  };
+  const dynProbeBtnStyle: React.CSSProperties = {
+    padding: "5px 8px",
+    fontSize: 11,
+    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    borderRadius: 4,
+    background: darkMode ? "#0f172a" : "#fff",
+    color: darkMode ? "#e2e8f0" : "#1e293b",
+    cursor: "pointer",
+    textAlign: "left",
+  };
 
   const handleProbeAll = () => {
     addProbeCandidates(getProbeCandidates(component, circuit));
@@ -123,11 +147,12 @@ export function PropertiesPanel() {
     <aside
       style={{
         width: 220,
-        borderLeft: "1px solid #e2e8f0",
+        borderLeft: `1px solid ${dynBorder}`,
         padding: 16,
-        background: "#fafafa",
+        background: darkMode ? "#1e293b" : "#fafafa",
         overflowY: "auto",
         fontSize: 12,
+        color: darkMode ? "#e2e8f0" : "#1e293b",
       }}
     >
       <h3 style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 600 }}>
@@ -136,7 +161,7 @@ export function PropertiesPanel() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {properties.map((prop) => (
           <label key={prop.key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "#64748b", fontWeight: 500 }}>
+            <span style={{ color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
               {prop.label}
               {prop.unit && <span style={{ color: "#94a3b8" }}> ({prop.unit})</span>}
             </span>
@@ -144,7 +169,13 @@ export function PropertiesPanel() {
               <select
                 value={String(prop.value)}
                 onChange={(e) => updateComponentProperty(component.id, prop.key, e.target.value)}
-                style={{ padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 4 }}
+                style={{
+                  padding: "4px 6px",
+                  border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+                  borderRadius: 4,
+                  background: darkMode ? "#0f172a" : "#fff",
+                  color: darkMode ? "#e2e8f0" : "#1e293b",
+                }}
               >
                 {prop.options.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -160,7 +191,7 @@ export function PropertiesPanel() {
                 type="text"
                 value={String(prop.value)}
                 onChange={(e) => updateComponentProperty(component.id, prop.key, e.target.value)}
-                style={fieldStyle}
+                style={dynFieldStyle}
               />
             )}
           </label>
@@ -168,21 +199,21 @@ export function PropertiesPanel() {
       </div>
 
       {!isGround && (
-        <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
-          <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: "#475569" }}>Probes</strong>
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${dynBorder}` }}>
+          <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: darkMode ? "#94a3b8" : "#475569" }}>Probes</strong>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <button
               type="button"
               onClick={handleProbeAll}
-              style={probeBtnStyle}
+              style={dynProbeBtnStyle}
             >
               Add all probes
             </button>
-            <button type="button" onClick={handleProbeVoltage} style={probeBtnStyle}>
+            <button type="button" onClick={handleProbeVoltage} style={dynProbeBtnStyle}>
               Probe voltage
             </button>
             {component.ports.length >= 2 && (
-              <button type="button" onClick={handleProbeCurrent} style={probeBtnStyle}>
+              <button type="button" onClick={handleProbeCurrent} style={dynProbeBtnStyle}>
                 Probe current I({component.label})
               </button>
             )}
@@ -196,12 +227,3 @@ export function PropertiesPanel() {
   );
 }
 
-const probeBtnStyle: React.CSSProperties = {
-  padding: "5px 8px",
-  fontSize: 11,
-  border: "1px solid #cbd5e1",
-  borderRadius: 4,
-  background: "#fff",
-  cursor: "pointer",
-  textAlign: "left",
-};

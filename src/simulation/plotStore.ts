@@ -4,12 +4,22 @@ import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 /**
  * Colour palette offered in the legend colour picker. The first entries double
  * as the default trace colours (assigned by order when no override is set).
+ * DARK: vivid/bright colours for dark backgrounds.
+ * LIGHT: deeper/darker variants of the same hues for light backgrounds.
  */
 export const PLOT_PALETTE = [
   "#22d3ee", "#a78bfa", "#34d399", "#fb923c",
   "#f472b6", "#facc15", "#60a5fa", "#f87171",
   "#2dd4bf", "#c084fc", "#4ade80", "#f59e0b",
   "#e879f9", "#38bdf8", "#fca5a5", "#a3e635",
+];
+
+/** Same hue families as {@link PLOT_PALETTE} but darker, for light backgrounds. */
+export const PLOT_PALETTE_LIGHT = [
+  "#0891b2", "#7c3aed", "#059669", "#c2410c",
+  "#be185d", "#a16207", "#2563eb", "#dc2626",
+  "#0f766e", "#9333ea", "#16a34a", "#b45309",
+  "#c026d3", "#0369a1", "#e11d48", "#65a30d",
 ];
 
 /** Per-panel axis configuration. Any `undefined` bound means "auto". */

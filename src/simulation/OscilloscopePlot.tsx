@@ -3,7 +3,7 @@ import { useSimulationStore, type SimulationResult } from "@store/simulationStor
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { matchResultVariable, canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
-import { usePlotStore, PLOT_PALETTE, type PlotPanel } from "./plotStore.js";
+import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt, parsePlt, siPrefix, tickStep, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
@@ -35,6 +35,15 @@ function looksLikeExpression(name: string): boolean {
 
 const MARGIN = { top: 16, right: 16, bottom: 36, left: 56 };
 const MARGIN_COMPACT = { top: 8, right: 8, bottom: 28, left: 48 };
+
+/** Approximate dimensions of a cursor / stamp readout box (px). */
+const READOUT_H = 72;
+const READOUT_W = 130;
+
+/** Clamp a readout box top so it stays within the container. */
+function clampTop(top: number, containerH: number): number {
+  return Math.max(4, Math.min(containerH - READOUT_H - 4, top));
+}
 
 const DND_MIME = "application/x-librespice-trace";
 
@@ -182,10 +191,13 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const analysisType = useCircuitStore((s) => s.simulationConfig.type);
   const circuitName = useCircuitStore((s) => s.circuitName);
   const {
-    panels, traceToPanel, colors, expressions, syncX,
+    panels, traceToPanel, colors, expressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
     addExpression, removeExpression, toggleSyncX, importSettings,
   } = usePlotStore();
+  const isDark = !svgLight;
+  // Active palette: bright for dark backgrounds, deep for light backgrounds.
+  const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
 
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const [exprInput, setExprInput] = useState("");
@@ -272,9 +284,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         for (let i = 0; i < trace.length; i++) h = (h * 31 + trace.charCodeAt(i)) | 0;
         idx = Math.abs(h);
       }
-      return PLOT_PALETTE[idx % PLOT_PALETTE.length];
+      return palette[idx % palette.length];
     },
-    [colors, result, expressions],
+    [colors, result, expressions, palette],
   );
 
   const panelForTrace = useCallback(
@@ -384,7 +396,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   // No result, or a result without a usable time base (e.g. failed run, `.op`).
   if (!result || !result.time || result.time.length === 0) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: "#0f172a" }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: isDark ? "#0f172a" : "#f8fafc" }}>
         <p style={{ margin: 0, fontSize: compact ? 12 : 14 }}>No simulation data</p>
         <p style={{ margin: 0, fontSize: 11, color: "#475569" }}>Run simulation — double-click a component to probe</p>
       </div>
@@ -394,17 +406,18 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const sidebarW = compact ? 150 : 210;
 
   return (
-    <div style={{ height: "100%", display: "flex", overflow: "hidden", background: "#0f172a" }}>
+    <div style={{ height: "100%", display: "flex", overflow: "hidden", background: isDark ? "#0f172a" : "#f8fafc" }}>
       {/* ── Sidebar: probes, colours, expressions ── */}
       <div style={{
-        width: sidebarW, flexShrink: 0, borderRight: "1px solid #1e293b",
+        width: sidebarW, flexShrink: 0, borderRight: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+        background: isDark ? undefined : "#fff",
         display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
-        <div style={{ padding: compact ? "6px 8px" : "10px 12px", borderBottom: "1px solid #1e293b" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase" }}>Probes</span>
+        <div style={{ padding: compact ? "6px 8px" : "10px 12px", borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, background: isDark ? undefined : "#fff" }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: isDark ? "#64748b" : "#475569", textTransform: "uppercase" }}>Probes</span>
           <label
             title="Add a component's current to the probes when you click it in the schematic"
-            style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, cursor: "pointer", color: "#94a3b8", fontSize: 10 }}
+            style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, cursor: "pointer", color: isDark ? "#94a3b8" : "#64748b", fontSize: 10 }}
           >
             <input type="checkbox" checked={autoProbeCurrent} onChange={toggleAutoProbeCurrent} style={{ cursor: "pointer" }} />
             Current on click
@@ -469,7 +482,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               })}
 
           {expressions.length > 0 && (
-            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: "#64748b", textTransform: "uppercase", padding: "2px 6px" }}>
+            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase", padding: "2px 6px" }}>
               Functions
             </div>
           )}
@@ -492,8 +505,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         </div>
 
         {/* Expression builder (requirement: arithmetic on probe variables) */}
-        <div style={{ padding: 6, borderTop: "1px solid #1e293b", display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 9, fontWeight: 600, color: "#64748b", textTransform: "uppercase" }}>Add function</div>
+        <div style={{ padding: 6, borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 9, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase" }}>Add function</div>
           <div style={{ display: "flex", gap: 4 }}>
             <input
               value={exprInput}
@@ -502,12 +515,15 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               placeholder="V(a)-V(b)"
               style={{
                 flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
-                background: "#0b1120", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4,
+                background: isDark ? "#0b1120" : "#fff",
+                color: isDark ? "#e2e8f0" : "#1e293b",
+                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                borderRadius: 4,
               }}
             />
             <button
               onClick={handleAddExpression}
-              style={{ padding: "3px 8px", fontSize: 10, background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 4, cursor: "pointer" }}
+              style={{ padding: "3px 8px", fontSize: 10, background: isDark ? "#1e293b" : "#e2e8f0", color: isDark ? "#94a3b8" : "#475569", border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 4, cursor: "pointer" }}
             >
               +
             </button>
@@ -568,6 +584,9 @@ interface ProbeRowProps {
 }
 
 function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStart, onSwatch, showPicker, onPick, onRemove }: ProbeRowProps) {
+  const svgLight = usePlotStore((s) => s.svgLight);
+  const isDark = !svgLight;
+  const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
   return (
     <div style={{ position: "relative" }}>
       <div
@@ -576,7 +595,7 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
         style={{
           display: "flex", alignItems: "center", gap: 6,
           padding: "4px 6px", borderRadius: 4,
-          background: active ? "#1e293b" : "transparent",
+          background: active ? (isDark ? "#1e293b" : "#e2e8f0") : "transparent",
           cursor: draggable ? "grab" : "pointer",
         }}
         title={draggable ? "Drag into a panel" : undefined}
@@ -587,7 +606,7 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
           style={{
             width: 12, height: 12, borderRadius: 3, flexShrink: 0, padding: 0,
             border: "1px solid #00000040", cursor: "pointer",
-            background: active ? color : "#334155",
+            background: active ? color : (isDark ? "#334155" : "#94a3b8"),
           }}
         />
         <button
@@ -617,10 +636,13 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
         <div style={{
           position: "absolute", zIndex: 20, top: 22, left: 6,
           display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4,
-          padding: 6, background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+          padding: 6,
+          background: isDark ? "#1e293b" : "#fff",
+          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+          borderRadius: 6,
           boxShadow: "0 4px 12px #00000060",
         }}>
-          {PLOT_PALETTE.map((c) => (
+          {palette.map((c) => (
             <button
               key={c}
               onClick={() => onPick(c)}
@@ -671,6 +693,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const circuitName = useCircuitStore((s) => s.circuitName);
   const svgLight = usePlotStore((s) => s.svgLight);
   const toggleSvgLight = usePlotStore((s) => s.toggleSvgLight);
+  const isDark = !svgLight;
   const th = svgLight ? PLOT_THEME.light : PLOT_THEME.dark;
 
   // Serialise this panel's SVG to a downloadable standalone file.
@@ -687,6 +710,27 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const setYAxis = (unit: string, patch: { min?: number; max?: number; ticks?: number }) =>
     onUpdate({ yAxes: { ...panel.yAxes, [unit]: { ...panel.yAxes?.[unit], ...patch } } });
 
+  const ctrlBtnStyle: React.CSSProperties = {
+    padding: "2px 8px", fontSize: 10,
+    background: isDark ? "#1e293b" : "#f1f5f9",
+    color: isDark ? "#94a3b8" : "#475569",
+    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+    borderRadius: 4, cursor: "pointer", flexShrink: 0,
+  };
+  const menuItemStyle: React.CSSProperties = {
+    display: "block", width: "100%", padding: "4px 10px", textAlign: "left",
+    border: "none", background: "transparent",
+    color: isDark ? "#e2e8f0" : "#1e293b",
+    cursor: "pointer", fontSize: 11, borderRadius: 4, whiteSpace: "nowrap",
+  };
+  const menuDivider = { height: 1, background: isDark ? "#334155" : "#e2e8f0", margin: "4px 0" };
+  const menuPopup: React.CSSProperties = {
+    position: "fixed", zIndex: 41,
+    background: isDark ? "#1e293b" : "#fff",
+    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+    borderRadius: 6, padding: 4, fontSize: 11,
+    boxShadow: "0 4px 12px #00000070",
+  };
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: compact ? 180 : 260 });
@@ -694,8 +738,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const [dragOver, setDragOver] = useState(false);
   /** Measurement cursor bound to one probe; `t` is a value on the x-axis. */
   const [cursor, setCursor] = useState<{ trace: string; t: number } | null>(null);
-  /** Permanently "stamped" cursor positions (each an x on one probe). */
-  const [stamps, setStamps] = useState<{ trace: string; t: number }[]>([]);
+  /** Permanently "stamped" cursor positions – each carries its computed readout position (px). */
+  const [stamps, setStamps] = useState<{ trace: string; t: number; top: number; left: number | null }[]>([]);
+  /** Manual vertical position for the live cursor readout (px from container top). */
+  const [cursorManualTop, setCursorManualTop] = useState<number | null>(null);
   /** Probe context menu (cursor toggle), at viewport coords. */
   const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
   /** Pane context menu (add/move/delete/sync), at viewport coords. */
@@ -716,6 +762,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
     if (cursor && !traces.includes(cursor.trace)) setCursor(null);
     setStamps((s) => s.filter((st) => traces.includes(st.trace)));
   }, [cursor, traces]);
+
+  // When cursor switches to a new trace, reset the manual top so the box
+  // re-anchors to the new trace's y-value.
+  useEffect(() => { setCursorManualTop(null); }, [cursor?.trace]);
 
   const RIGHT_AXIS_W = compact ? 42 : 50;
 
@@ -784,7 +834,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
         const idx = nearestIndex(cursor.t);
         const sampleT = time[idx];
         const value = seriesMap[cursor.trace]?.[idx] ?? NaN;
-        return { idx, sampleT, value, sx: toSx(sampleT), color: colorFor(cursor.trace) };
+        const sy = mkToSy(groupOf(cursor.trace))(value);
+        return { idx, sampleT, value, sx: toSx(sampleT), sy, color: colorFor(cursor.trace) };
       })()
     : null;
 
@@ -793,13 +844,41 @@ function PlotPanelView(props: PlotPanelViewProps) {
     const idx = nearestIndex(st.t);
     const sampleT = time[idx];
     const value = seriesMap[st.trace]?.[idx] ?? NaN;
-    return { i, trace: st.trace, sampleT, value, sx: toSx(sampleT), sy: mkToSy(groupOf(st.trace))(value), color: colorFor(st.trace) };
+    return { i, trace: st.trace, sampleT, value, sx: toSx(sampleT), sy: mkToSy(groupOf(st.trace))(value), color: colorFor(st.trace), top: st.top, left: st.left };
   });
 
   // Stamp the current cursor position (or the panel centre) for `trace`.
+  // Initial top is positioned at the data value's y-coordinate.
   const stampCursor = (trace: string) => {
     const t = cursor?.trace === trace ? cursor.t : (vr.xMin + vr.xMax) / 2;
-    setStamps((s) => [...s, { trace, t }]);
+    const idx = nearestIndex(t);
+    const value = seriesMap[trace]?.[idx] ?? NaN;
+    const sy = mkToSy(groupOf(trace))(value);
+    const top = clampTop(
+      isFinite(sy) ? margin.top + sy - READOUT_H / 2 : 4,
+      dims.h,
+    );
+    setStamps((prev) => [...prev, { trace, t, top, left: null }]);
+  };
+
+  /** Start dragging a readout box. Calls `onUpdate(newTop, newLeft)` on every mousemove. */
+  const startDragReadout = (
+    e: React.MouseEvent,
+    currentTop: number,
+    currentLeft: number,
+    onUpdate: (top: number, left: number) => void,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const move = (ev: MouseEvent) =>
+      onUpdate(currentTop + ev.clientY - startY, currentLeft + ev.clientX - startX);
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   };
 
   // Drag the cursor horizontally (this is the only mouse interaction; axis
@@ -842,7 +921,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       style={{
         flex: panel.height ? "0 0 auto" : "1 0 auto",
         height: panel.height, minHeight: compact ? 150 : 200, display: "flex", flexDirection: "column",
-        borderBottom: "1px solid #1e293b",
+        borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
         outline: dragOver ? "2px dashed #22d3ee" : "none", outlineOffset: -2,
       }}
       onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); setDragOver(true); } }}
@@ -854,10 +933,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
       }}
     >
       {/* Panel header: legend chips + controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: "#0b1120", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: isDark ? "#0b1120" : "#f1f5f9", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
           {traces.length === 0 && (
-            <span style={{ fontSize: 10, color: "#475569" }}>Drag a probe here…</span>
+            <span style={{ fontSize: 10, color: isDark ? "#475569" : "#94a3b8" }}>Drag a probe here…</span>
           )}
           {traces.map((t) => (
             <span
@@ -869,7 +948,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
               style={{
                 display: "inline-flex", alignItems: "center", gap: 4,
                 padding: "1px 6px", borderRadius: 10,
-                background: cursor?.trace === t ? "#334155" : "#1e293b",
+                background: cursor?.trace === t
+                  ? (isDark ? "#334155" : "#cbd5e1")
+                  : (isDark ? "#1e293b" : "#e2e8f0"),
                 fontSize: 10, fontFamily: "monospace", color: colorFor(t), cursor: "grab",
               }}
             >
@@ -878,20 +959,20 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <button
                 onClick={() => onRemoveTrace(t)}
                 title="Remove from panel"
-                style={{ border: "none", background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}
+                style={{ border: "none", background: "transparent", color: isDark ? "#64748b" : "#94a3b8", cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}
               >×</button>
             </span>
           ))}
         </div>
-        <button onClick={toggleSvgLight} title={svgLight ? "Diagram: light — switch to dark" : "Diagram: dark — switch to light (print/beamer, white background)"} style={ctrlBtn}>{svgLight ? "☀" : "🌙"}</button>
-        <button onClick={() => setShowAxis((s) => !s)} title="Axis settings" style={ctrlBtn}>⚙</button>
-        <button onClick={onFit} title="Fit view" style={ctrlBtn}>Fit</button>
-        <button onClick={(e) => setPaneMenu({ x: e.clientX, y: e.clientY })} title="Pane menu" style={ctrlBtn}>⋯</button>
+        <button onClick={toggleSvgLight} title={svgLight ? "Diagram: light — switch to dark" : "Diagram: dark — switch to light (print/beamer, white background)"} style={ctrlBtnStyle}>{svgLight ? "☀" : "🌙"}</button>
+        <button onClick={() => setShowAxis((s) => !s)} title="Axis settings" style={ctrlBtnStyle}>⚙</button>
+        <button onClick={onFit} title="Fit view" style={ctrlBtnStyle}>Fit</button>
+        <button onClick={(e) => setPaneMenu({ x: e.clientX, y: e.clientY })} title="Pane menu" style={ctrlBtnStyle}>⋯</button>
       </div>
 
       {/* Axis configuration */}
       {showAxis && (
-        <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: "#0b1120", borderTop: "1px solid #1e293b", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, flexWrap: "wrap" }}>
           <AxisFields
             title="x-axis"
             min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={panel.xTicks}
@@ -981,15 +1062,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
                 return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
-            {/* Stamped cursor positions: dashed marker + inline x/y readout */}
+            {/* Stamped cursor positions: dashed marker + dot (readout shown as HTML below SVG) */}
             {stampInfos.map((s) => isFinite(s.sx) ? (
               <g key={`stamp-${s.i}`} style={{ pointerEvents: "none" }}>
                 <line x1={s.sx} y1={0} x2={s.sx} y2={plotH} stroke={s.color} strokeWidth={1} strokeDasharray="2 3" opacity={0.75} />
                 {isFinite(s.value) && <circle cx={s.sx} cy={s.sy} r={3} fill={s.color} stroke={th.dot} strokeWidth={1} />}
-                <text x={Math.min(plotW - 2, s.sx + 4)} y={12 + (s.i % 3) * 11} fontSize={8} fontFamily="monospace"
-                  textAnchor={s.sx > plotW - 60 ? "end" : "start"} fill={s.color}>
-                  {fmtTime(s.sampleT)}, {fmtVal(s.value)}
-                </text>
               </g>
             ) : null)}
             {cursorInfo && isFinite(cursorInfo.sx) && (
@@ -1006,24 +1083,75 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke={th.frame} strokeWidth={1} />
           </g>
         </svg>
-        {cursorInfo && isFinite(cursorInfo.sx) && (
-          <div style={{
-            position: "absolute", top: 4,
-            left: Math.min(dims.w - 130, margin.left + cursorInfo.sx + 8),
-            padding: 6, background: "#1e293be6", border: `1px solid ${cursorInfo.color}`,
-            borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96,
-          }}>
-            <div style={{ color: cursorInfo.color, fontFamily: "monospace", marginBottom: 2 }}>{displayVar(cursor!.trace)}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ color: "#64748b" }}>x</span>
-              <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>{fmtTime(cursorInfo.sampleT)}</span>
+        {cursorInfo && isFinite(cursorInfo.sx) && (() => {
+          // Default: box centred on the data-value y; manual drag overrides.
+          const autoTop = clampTop(
+            isFinite(cursorInfo.sy) ? margin.top + cursorInfo.sy - READOUT_H / 2 : 4,
+            dims.h,
+          );
+          const boxTop = cursorManualTop ?? autoTop;
+          const boxLeft = Math.min(dims.w - READOUT_W, margin.left + cursorInfo.sx + 8);
+          return (
+            <div style={{
+              position: "absolute", top: boxTop, left: boxLeft,
+              padding: 6, background: isDark ? "#1e293be6" : "#ffffffee", border: `1px solid ${cursorInfo.color}`,
+              borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96,
+            }}>
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  const startY = e.clientY, origTop = boxTop;
+                  const move = (ev: MouseEvent) => setCursorManualTop(origTop + ev.clientY - startY);
+                  const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+                  window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+                }}
+                style={{ position: "absolute", top: 2, right: 4, cursor: "ns-resize", fontSize: 11,
+                  color: "#64748b", lineHeight: 1, userSelect: "none", pointerEvents: "auto" }}
+                title="Vertikal verschieben"
+              >⠿</div>
+              <div style={{ color: cursorInfo.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(cursor!.trace)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "#64748b" }}>x</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtTime(cursorInfo.sampleT)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "#64748b" }}>y</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtVal(cursorInfo.value)}</span>
+              </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ color: "#64748b" }}>y</span>
-              <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>{fmtVal(cursorInfo.value)}</span>
+          );
+        })()}
+        {/* Stamp readout boxes – HTML divs at their computed top positions. */}
+        {stampInfos.map((s) => isFinite(s.sx) ? (() => {
+          const sTop = s.top;
+          const sLeft = s.left ?? Math.min(dims.w - READOUT_W, margin.left + s.sx + 8);
+          return (
+            <div key={`readout-${s.i}`} style={{
+              position: "absolute", top: sTop, left: sLeft,
+              padding: 6, background: isDark ? "#1e293be6" : "#ffffffee",
+              border: `1px solid ${s.color}`,
+              borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96, opacity: 0.9,
+            }}>
+              <div
+                onMouseDown={(e) => startDragReadout(e, sTop, sLeft,
+                  (top, left) => setStamps((prev) => prev.map((st, j) =>
+                    j === s.i ? { ...st, top, left } : st)))}
+                style={{ position: "absolute", top: 2, right: 4, cursor: "move", fontSize: 11,
+                  color: "#64748b", lineHeight: 1, userSelect: "none", pointerEvents: "auto" }}
+                title="Verschieben"
+              >⠿</div>
+              <div style={{ color: s.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(s.trace)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "#64748b" }}>x</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtTime(s.sampleT)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "#64748b" }}>y</span>
+                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtVal(s.value)}</span>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })() : null)}
         {/* One × per stamp to remove it individually. */}
         {stampInfos.map((s) => isFinite(s.sx) ? (
           <button
@@ -1036,7 +1164,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               left: Math.min(dims.w - 16, margin.left + s.sx - 6),
               width: 14, height: 14, lineHeight: "12px", padding: 0,
               borderRadius: 3, fontSize: 11, cursor: "pointer",
-              background: "#0f172acc", color: s.color, border: `1px solid ${s.color}`,
+              background: isDark ? "#0f172acc" : "#ffffffdd", color: s.color, border: `1px solid ${s.color}`,
             }}
           >×</button>
         ) : null)}
@@ -1052,21 +1180,20 @@ function PlotPanelView(props: PlotPanelViewProps) {
           />
           <div style={{
             position: "fixed", left: menu.x, top: menu.y, zIndex: 41,
-            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
-            padding: 4, fontSize: 11, boxShadow: "0 4px 12px #00000070",
+            ...menuPopup,
           }}>
             <button
               onClick={() => {
                 setCursor((c) => c?.trace === menu.trace ? null : { trace: menu.trace, t: (vr.xMin + vr.xMax) / 2 });
                 setMenu(null);
               }}
-              style={menuItem}
+              style={menuItemStyle}
             >
               {cursor?.trace === menu.trace ? "Cursor entfernen" : "Cursor anzeigen"}
             </button>
             <button
               onClick={() => { stampCursor(menu.trace); setMenu(null); }}
-              style={menuItem}
+              style={menuItemStyle}
               title="Aktuelle Cursorposition dauerhaft auf das Diagramm drucken"
             >
               Position abdrucken
@@ -1085,32 +1212,37 @@ function PlotPanelView(props: PlotPanelViewProps) {
           />
           <div style={{
             position: "fixed", left: paneMenu.x, top: paneMenu.y, zIndex: 41,
-            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
-            padding: 4, fontSize: 11, boxShadow: "0 4px 12px #00000070", minWidth: 180,
+            ...menuPopup, minWidth: 180,
           }}>
-            <button style={menuItem} onClick={() => { onAddRelative("above"); setPaneMenu(null); }}>Add Plot Pane Above</button>
-            <button style={menuItem} onClick={() => { onAddRelative("below"); setPaneMenu(null); }}>Add Plot Pane Below</button>
-            <button style={menuItemMaybe(index > 0)} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
-            <button style={menuItemMaybe(index < count - 1)} disabled={index === count - 1} onClick={() => { onMove("down"); setPaneMenu(null); }}>Move Plot Pane Down</button>
-            <button style={menuItemMaybe(canRemove, "#f87171")} disabled={!canRemove} onClick={() => { onRemovePanel(); setPaneMenu(null); }}>Delete this Pane</button>
-            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
-            <button style={menuItem} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
+            <button style={menuItemStyle} onClick={() => { onAddRelative("above"); setPaneMenu(null); }}>Add Plot Pane Above</button>
+            <button style={menuItemStyle} onClick={() => { onAddRelative("below"); setPaneMenu(null); }}>Add Plot Pane Below</button>
+            <button style={{ ...menuItemStyle, color: index > 0 ? (isDark ? "#e2e8f0" : "#1e293b") : "#475569", cursor: index > 0 ? "pointer" : "default" }} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
+            <button style={{ ...menuItemStyle, color: index < count - 1 ? (isDark ? "#e2e8f0" : "#1e293b") : "#475569", cursor: index < count - 1 ? "pointer" : "default" }} disabled={index === count - 1} onClick={() => { onMove("down"); setPaneMenu(null); }}>Move Plot Pane Down</button>
+            <button style={{ ...menuItemStyle, color: canRemove ? "#f87171" : "#475569", cursor: canRemove ? "pointer" : "default" }} disabled={!canRemove} onClick={() => { onRemovePanel(); setPaneMenu(null); }}>Delete this Pane</button>
+            <div style={menuDivider} />
+            <button style={menuItemStyle} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
               {syncX ? "☑" : "☐"} Sync. Horiz. Axes
             </button>
-            {stamps.length > 0 && (
+            {cursor && (
               <>
-                <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
-                <button style={menuItem} onClick={() => { setStamps([]); setPaneMenu(null); }}>Alle Abdrücke entfernen</button>
+                <div style={menuDivider} />
+                <button style={menuItemStyle} onClick={() => { stampCursor(cursor.trace); setPaneMenu(null); }}>Position abdrucken</button>
               </>
             )}
-            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
-            {panel.height && (
-              <button style={menuItem} onClick={() => { onUpdate({ height: undefined }); setPaneMenu(null); }}>Reset height (auto)</button>
+            {stamps.length > 0 && (
+              <>
+                <div style={menuDivider} />
+                <button style={menuItemStyle} onClick={() => { setStamps([]); setCursorManualTop(null); setPaneMenu(null); }}>Alle Abdrücke entfernen</button>
+              </>
             )}
-            <div style={{ height: 1, background: "#334155", margin: "4px 0" }} />
-            <button style={menuItem} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
-            <button style={menuItem} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
-            <button style={menuItem} onClick={() => { handleExportSvg(); setPaneMenu(null); }}>Export Diagram (.svg)</button>
+            <div style={menuDivider} />
+            {panel.height && (
+              <button style={menuItemStyle} onClick={() => { onUpdate({ height: undefined }); setPaneMenu(null); }}>Reset height (auto)</button>
+            )}
+            <div style={menuDivider} />
+            <button style={menuItemStyle} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
+            <button style={menuItemStyle} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
+            <button style={menuItemStyle} onClick={() => { handleExportSvg(); setPaneMenu(null); }}>Export Diagram (.svg)</button>
           </div>
         </>
       )}
@@ -1119,36 +1251,16 @@ function PlotPanelView(props: PlotPanelViewProps) {
       <div
         onMouseDown={startResize}
         title="Drag to resize this plot"
-        style={{ height: 7, flexShrink: 0, cursor: "ns-resize", background: "#0b1120", borderTop: "1px solid #1e293b" }}
+        style={{ height: 7, flexShrink: 0, cursor: "ns-resize", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}
       />
     </div>
   );
-}
-
-const menuItem: React.CSSProperties = {
-  display: "block", width: "100%", padding: "4px 10px", textAlign: "left",
-  border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer", fontSize: 11,
-  borderRadius: 4, whiteSpace: "nowrap",
-};
-
-/** Menu item that is greyed out and non-interactive when `enabled` is false. */
-function menuItemMaybe(enabled: boolean, color = "#e2e8f0"): React.CSSProperties {
-  return {
-    ...menuItem,
-    color: enabled ? color : "#475569",
-    cursor: enabled ? "pointer" : "default",
-  };
 }
 
 /** Round for display so auto axis bounds don't show float noise. */
 function round6(n: number): number {
   return isFinite(n) ? Number(n.toPrecision(6)) : n;
 }
-
-const ctrlBtn: React.CSSProperties = {
-  padding: "2px 8px", fontSize: 10, background: "#1e293b", color: "#94a3b8",
-  border: "1px solid #334155", borderRadius: 4, cursor: "pointer", flexShrink: 0,
-};
 
 /* ─────────────────── Axis min/tick/max input group ─────────────────── */
 
