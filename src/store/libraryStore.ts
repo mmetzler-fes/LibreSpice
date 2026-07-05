@@ -47,6 +47,12 @@ interface LibraryActions {
   clearTemp: () => void;
   /** Concatenated raw SPICE text of every registered model/subckt definition. */
   getDefinitionsText: () => string;
+  /**
+   * Every model/subckt definition as a named block, so the netlist generator can
+   * emit only the ones actually referenced (a curated library can hold far more
+   * than any single circuit uses).
+   */
+  getDefinitionBlocks: () => { name: string; raw: string }[];
   findByName: (name: string) => StoredEntry | undefined;
   /** Fetches the file-backed library from the backend and merges it in. */
   fetchServerLibrary: () => Promise<void>;
@@ -113,6 +119,9 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
       .entries.map((e) => e.entry.raw)
       .join("\n"),
 
+  getDefinitionBlocks: () =>
+    get().entries.map((e) => ({ name: e.entry.name, raw: e.entry.raw })),
+
   findByName: (name) => get().entries.find((e) => e.entry.name.toLowerCase() === name.toLowerCase()),
 
   fetchServerLibrary: async () => {
@@ -128,9 +137,11 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
     }
 
     // Register symbols so library components can render their own graphics.
-    for (const sym of data.symbols ?? []) {
+    // Keep the parsed symbols around to auto-derive placeable descriptors below.
+    const parsedSymbols: { name: string; sym: ReturnType<typeof registerSymbol> }[] = [];
+    for (const s of data.symbols ?? []) {
       try {
-        registerSymbol(sym.name, sym.raw);
+        parsedSymbols.push({ name: s.name, sym: registerSymbol(s.name, s.raw) });
       } catch {
         /* skip a malformed .asy without failing the whole load */
       }
@@ -151,9 +162,24 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
       ...serverEntries,
     ];
 
+    // Auto-derive a placeable descriptor from each symbol that declares a SPICE
+    // prefix + pins and references a model/subckt we actually have. This makes a
+    // dropped-in `.asy` (plus its `.lib`) usable without hand-writing cmp JSON.
+    const available = new Set(merged.map((e) => e.entry.name.toLowerCase()));
+    const explicit = new Set((data.components ?? []).map((d) => d.name.toLowerCase()));
+    const autoDescriptors: ComponentDescriptor[] = [];
+    for (const { name, sym } of parsedSymbols) {
+      if (explicit.has(name.toLowerCase()) || sym.pins.length === 0) continue;
+      const prefix = sym.attrs["Prefix"];
+      const model = sym.attrs["SpiceModel"] || sym.attrs["Value"] || sym.attrs["Value2"];
+      if (!prefix || !model || !available.has(model.toLowerCase())) continue;
+      const pins = [...sym.pins].sort((a, b) => a.order - b.order).map((p) => p.name);
+      autoDescriptors.push({ name, symbol: name, prefix, model, pins });
+    }
+
     set({
       entries: merged,
-      descriptors: data.components ?? [],
+      descriptors: [...(data.components ?? []), ...autoDescriptors],
       serverAvailable: true,
     });
   },

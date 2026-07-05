@@ -163,8 +163,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   regenerateNetlist: () => {
     const { circuit, simulationConfig, spiceDirectives } = get();
     const generator = new NetlistGenerator();
-    const libraryDefs = useLibraryStore.getState().getDefinitionsText();
-    const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryDefs);
+    const libraryBlocks = useLibraryStore.getState().getDefinitionBlocks();
+    const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryBlocks);
     set({ netlist });
   },
 

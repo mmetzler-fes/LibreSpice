@@ -33,14 +33,26 @@ export async function ensureLibraryDirs() {
   }
 }
 
-/** Lists files in a directory, tolerating a missing directory. */
-async function listFiles(dir) {
+/**
+ * Recursively lists files under a directory (returns paths relative to it),
+ * tolerating a missing directory. Mirrors LTSpice, whose sym/sub folders nest
+ * parts into subdirectories (e.g. sym/OpAmps/…).
+ */
+async function listFiles(dir, base = dir) {
+  let entries;
   try {
-    return await fs.readdir(dir);
+    entries = await fs.readdir(dir, { withFileTypes: true });
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
   }
+  const out = [];
+  for (const ent of entries) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...(await listFiles(full, base)));
+    else out.push(path.relative(base, full));
+  }
+  return out;
 }
 
 /**
@@ -58,7 +70,8 @@ export async function readLibrary() {
   for (const file of await listFiles(SUBDIRS.sym)) {
     if (path.extname(file).toLowerCase() !== ".asy") continue;
     symbols.push({
-      name: file.replace(/\.asy$/i, ""),
+      // Registered by bare filename (LTSpice references symbols by name, not path).
+      name: path.basename(file).replace(/\.asy$/i, ""),
       raw: await fs.readFile(path.join(SUBDIRS.sym, file), "utf8"),
     });
   }

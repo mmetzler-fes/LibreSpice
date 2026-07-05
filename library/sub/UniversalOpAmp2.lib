@@ -1,0 +1,34 @@
+* ngspice-compatible replacement for LTSpice's UniversalOpAmp2.
+*
+* The original Analog Devices model (.subckt level2) relies on LTSpice-only
+* primitives (the A-device / OTA, extended SW & D model parameters) that the
+* eecircuit-engine (ngspice) cannot simulate. This is a functionally equivalent
+* single-pole op-amp macromodel built from standard SPICE elements only.
+*
+* Pins (matching the UniversalOpAmp2 symbol, SpiceOrder 1..5):
+*   1 = In+   2 = In-   3 = V+   4 = V-   5 = OUT
+*
+* Behaviour: DC open-loop gain Avol, one dominant pole so the gain-bandwidth
+* product equals GBW, and a finite output resistance Rout. The supply pins are
+* accepted but not used (ideal rails), so the model also works if V+/V- are
+* left unconnected.
+.subckt level2 1 2 3 4 5
+.param Avol=1Meg
+.param GBW=10Meg
+.param Gm=1m
+.param Rout=100
+.param Rgain={Avol/Gm}
+.param Cpole={Gm/(2*3.141592653589793*GBW)}
+* Give the (unused) supply pins a DC path so an unconnected rail can't float.
+Rvp 3 0 1G
+Rvn 4 0 1G
+* High-impedance differential input, converted to a current by the transconductor.
+Rin 1 2 1G
+G1 0 ng 1 2 {Gm}
+* Dominant-pole gain node: DC gain = Gm*Rgain = Avol, pole at GBW/Avol.
+R1 ng 0 {Rgain}
+C1 ng 0 {Cpole}
+* Unity-gain output buffer with series output resistance.
+E1 no 0 ng 0 1
+Ro no 5 {Rout}
+.ends level2

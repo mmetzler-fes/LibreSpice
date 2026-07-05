@@ -43,7 +43,7 @@ export class NetlistGenerator {
     config: SimulationConfig,
     directives = "",
     title = "LibreSpice Netlist",
-    libraryDefs = "",
+    libraryDefs: string | { name: string; raw: string }[] = "",
   ): string {
     const lines: string[] = [`* ${title}`];
 
@@ -51,13 +51,50 @@ export class NetlistGenerator {
       const line = component.getNetlistLine();
       if (line) lines.push(line);
     }
+    const instanceLines = lines.slice(1).join("\n"); // component lines only
 
-    // Imported .model / .subckt definitions from the component library.
-    const libLines = libraryDefs
-      .split("\n")
-      .map((l) => l.trimEnd())
-      .filter((l) => l.trim().length > 0 && !l.trim().startsWith("*"));
-    for (const ll of libLines) lines.push(ll);
+    // Library definitions as named blocks. A plain string (legacy callers) is
+    // treated as a single anonymous block that is always emitted.
+    const blocks: { name: string; raw: string }[] =
+      typeof libraryDefs === "string"
+        ? libraryDefs.trim()
+          ? [{ name: "", raw: libraryDefs }]
+          : []
+        : libraryDefs;
+
+    // Emit only the definitions the circuit actually references (plus their
+    // transitive dependencies): a curated library can hold far more parts than
+    // any single schematic uses, and dumping all of them bloats the netlist and
+    // risks aborting ngspice on an unrelated (possibly incompatible) model.
+    const defByName = new Map<string, string>();
+    let alwaysOn = "";
+    for (const b of blocks) {
+      if (b.name) defByName.set(b.name.toLowerCase(), b.raw);
+      else alwaysOn += `\n${b.raw}`; // unnamed legacy block: always included
+    }
+    const usedDefs = new Map<string, string>();
+    const queue: string[] = [];
+    const scanForRefs = (text: string) => {
+      for (const tok of text.split(/[\s(),=]+/)) {
+        const key = tok.toLowerCase();
+        if (defByName.has(key) && !usedDefs.has(key)) {
+          usedDefs.set(key, defByName.get(key)!);
+          queue.push(key);
+        }
+      }
+    };
+    scanForRefs(instanceLines);
+    scanForRefs(directives);
+    while (queue.length) scanForRefs(usedDefs.get(queue.shift()!)!);
+
+    const emitBlock = (raw: string) => {
+      for (const l of raw.split("\n")) {
+        const t = l.trimEnd();
+        if (t.trim().length > 0 && !t.trim().startsWith("*")) lines.push(t);
+      }
+    };
+    if (alwaysOn) emitBlock(alwaysOn);
+    for (const raw of usedDefs.values()) emitBlock(raw);
 
     // Fallback device models: emit a generic `.model` for any semiconductor
     // whose model name isn't already provided by the library or a user
@@ -69,7 +106,8 @@ export class NetlistGenerator {
       let m: RegExpExecArray | null;
       while ((m = re.exec(text))) defined.add(m[1].toLowerCase());
     };
-    collectDefs(libLines.join("\n"));
+    for (const b of blocks) if (b.name) defined.add(b.name.toLowerCase());
+    if (alwaysOn) collectDefs(alwaysOn);
     collectDefs(directives);
     const emittedModels = new Set<string>();
     for (const component of circuit.components.values()) {

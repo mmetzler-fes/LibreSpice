@@ -1,8 +1,12 @@
-# Keep the library folder structure, but don't track user-provided library
-# data (dropped-in or imported .lib/.asy/.json files).
+# Ship the curated, ngspice-compatible default parts, but don't track bulk
+# user-provided drop-ins (imported/added .lib/.asy/.json files).
 /sub/*
 /sym/*
 /cmp/*
 !/sub/.gitkeep
 !/sym/.gitkeep
 !/cmp/.gitkeep
+
+# --- curated defaults (tracked) ---
+!/sub/UniversalOpAmp2.lib
+!/sym/OpAmps/
