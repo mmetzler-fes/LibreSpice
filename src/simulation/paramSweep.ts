@@ -22,44 +22,85 @@ const MAX_STEPS = 512;
  *   `.step oct  param NAME start stop N`        N points per octave (log)
  *   `.step      param NAME list v1 v2 …`        explicit list
  */
-export function parseStepDirective(netlist: string): StepSpec | null {
-  for (const raw of netlist.split(/\r?\n/)) {
-    const m = raw.trim().match(/^\.step\s+(?:(lin|oct|dec)\s+)?param\s+(\S+)\s+(.*)$/i);
-    if (!m) continue;
-    const kind = (m[1] || "lin").toLowerCase();
-    const name = m[2];
-    const rest = m[3].trim();
+/** Parse a single `.step param …` line into its swept values, or null. */
+function parseStepLine(raw: string): StepSpec | null {
+  const m = raw.trim().match(/^\.step\s+(?:(lin|oct|dec)\s+)?param\s+(\S+)\s+(.*)$/i);
+  if (!m) return null;
+  const kind = (m[1] || "lin").toLowerCase();
+  const name = m[2];
+  const rest = m[3].trim();
 
-    const list = rest.match(/^list\s+(.*)$/i);
-    if (list) {
-      const values = list[1].split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-      return values.length ? { name, values: values.slice(0, MAX_STEPS) } : null;
-    }
-
-    const nums = rest.split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-    if (nums.length < 3) return null;
-    const [start, stop, third] = nums;
-    const values: number[] = [];
-
-    if (kind === "lin") {
-      if (third === 0) return null;
-      const steps = Math.floor((stop - start) / third + 1e-9);
-      for (let i = 0; i <= steps && values.length < MAX_STEPS; i++) {
-        values.push(Number((start + i * third).toPrecision(12)));
-      }
-    } else {
-      // dec / oct: `third` is points per decade / octave (logarithmic sweep).
-      if (start <= 0 || stop <= 0 || third <= 0) return null;
-      const decades = kind === "dec" ? Math.log10(stop / start) : Math.log2(stop / start);
-      const ratio = kind === "dec" ? Math.pow(10, 1 / third) : Math.pow(2, 1 / third);
-      const total = Math.max(0, Math.round(third * decades));
-      for (let i = 0; i <= total && values.length < MAX_STEPS; i++) {
-        values.push(Number((start * Math.pow(ratio, i)).toPrecision(12)));
-      }
-    }
-    return values.length ? { name, values } : null;
+  const list = rest.match(/^list\s+(.*)$/i);
+  if (list) {
+    const values = list[1].split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
+    return values.length ? { name, values: values.slice(0, MAX_STEPS) } : null;
   }
-  return null;
+
+  const nums = rest.split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
+  if (nums.length < 3) return null;
+  const [start, stop, third] = nums;
+  const values: number[] = [];
+
+  if (kind === "lin") {
+    if (third === 0) return null;
+    const steps = Math.floor((stop - start) / third + 1e-9);
+    for (let i = 0; i <= steps && values.length < MAX_STEPS; i++) {
+      values.push(Number((start + i * third).toPrecision(12)));
+    }
+  } else {
+    // dec / oct: `third` is points per decade / octave (logarithmic sweep).
+    if (start <= 0 || stop <= 0 || third <= 0) return null;
+    const decades = kind === "dec" ? Math.log10(stop / start) : Math.log2(stop / start);
+    const ratio = kind === "dec" ? Math.pow(10, 1 / third) : Math.pow(2, 1 / third);
+    const total = Math.max(0, Math.round(third * decades));
+    for (let i = 0; i <= total && values.length < MAX_STEPS; i++) {
+      values.push(Number((start * Math.pow(ratio, i)).toPrecision(12)));
+    }
+  }
+  return values.length ? { name, values } : null;
+}
+
+/** All `.step param` sweeps in the netlist (LTSpice allows several, nested). */
+export function parseStepDirectives(netlist: string): StepSpec[] {
+  const specs: StepSpec[] = [];
+  for (const raw of netlist.split(/\r?\n/)) {
+    const s = parseStepLine(raw);
+    if (s) specs.push(s);
+  }
+  return specs;
+}
+
+/** The first `.step` sweep, or null (kept for callers that want a single one). */
+export function parseStepDirective(netlist: string): StepSpec | null {
+  return parseStepDirectives(netlist)[0] ?? null;
+}
+
+/** One assignment in a nested-sweep combination. */
+export interface StepCombo {
+  /** e.g. `R12=1 RL=10` — used to tag traces and label the run. */
+  tag: string;
+  assignments: { name: string; value: number }[];
+}
+
+/**
+ * Cartesian product of several `.step` sweeps (LTSpice runs every combination),
+ * capped at {@link MAX_STEPS} total runs so a broad nested sweep can't explode.
+ */
+export function stepCombinations(specs: StepSpec[], fmt: (v: number) => string): StepCombo[] {
+  let combos: { name: string; value: number }[][] = [[]];
+  for (const spec of specs) {
+    const next: { name: string; value: number }[][] = [];
+    for (const combo of combos) {
+      for (const value of spec.values) {
+        next.push([...combo, { name: spec.name, value }]);
+      }
+    }
+    combos = next.slice(0, MAX_STEPS);
+  }
+  return combos.map((assignments) => ({
+    tag: assignments.map((a) => `${a.name}=${fmt(a.value)}`).join(" "),
+    assignments,
+  }));
 }
 
 /** Remove every `.step` directive line (ngspice can't execute them). */

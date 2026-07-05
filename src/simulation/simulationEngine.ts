@@ -3,7 +3,7 @@ import type { SimulationResult } from "@store/simulationStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { formatSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import {
-  parseStepDirective, stripStepDirectives, withParam, parseMeasurements, type Measurement,
+  parseStepDirectives, stepCombinations, stripStepDirectives, withParam, parseMeasurements, type Measurement,
 } from "./paramSweep.js";
 
 let sim: Simulation | null = null;
@@ -44,9 +44,9 @@ async function runOnce(netlist: string): Promise<{ result: SimulationResult; log
 
 export async function runSimulation(netlist: string): Promise<SimulationResult> {
   const setLog = useSimulationStore.getState().setLog;
-  const step = parseStepDirective(netlist);
+  const steps = parseStepDirectives(netlist);
   try {
-    if (!step || step.values.length === 0) {
+    if (steps.length === 0 || steps.every((s) => s.values.length === 0)) {
       // Strip any (unparseable) `.step` too — ngspice can't execute it.
       const nl = stripStepDirectives(netlist);
       const { result, log } = await runOnce(nl);
@@ -54,18 +54,22 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
       return result;
     }
 
-    // Parameter sweep: run once per value, merge the traces (suffixing each
-    // signal with the step value) so the existing plot shows one curve per run.
+    // Parameter sweep: run once per combination of all `.step` params (LTSpice
+    // runs the full nested product), injecting every param so none is left as an
+    // unresolved `{name}` — that would otherwise stall/abort ngspice. Traces are
+    // merged, each suffixed with the combination so the plot shows one curve per
+    // run.
     const base = stripStepDirectives(netlist);
-    const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: step.name, values: [] } };
+    const combos = stepCombinations(steps, formatSpiceNumber);
+    const paramName = steps.map((s) => s.name).join(", ");
+    const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: paramName, values: [] } };
     const measRows: string[] = [];
     let lastLog = "";
-    for (const value of step.values) {
-      const nl = withParam(base, step.name, value);
+    for (const combo of combos) {
+      const nl = combo.assignments.reduce((acc, a) => withParam(acc, a.name, a.value), base);
       const { result, log } = await runOnce(nl);
       lastLog = log;
-      const tag = `${step.name}=${formatSpiceNumber(value)}`;
-      merged.step!.values.push(tag);
+      merged.step!.values.push(combo.tag);
       if (!merged.time && result.time) {
         merged.time = result.time;
         merged.data["time"] = result.time;
@@ -73,15 +77,15 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
       }
       for (const v of result.variables) {
         if (v === "time" || v === "frequency") continue;
-        const key = `${v} @${tag}`;
+        const key = `${v} @${combo.tag}`;
         merged.data[key] = result.data[v];
         merged.variables.push(key);
       }
       const meas: Measurement[] = parseMeasurements(log);
-      if (meas.length) measRows.push(`${tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
+      if (meas.length) measRows.push(`${combo.tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
     }
 
-    const measBlock = measRows.length ? `===== Measurements (.step ${step.name}) =====\n${measRows.join("\n")}\n\n` : "";
+    const measBlock = measRows.length ? `===== Measurements (.step ${paramName}) =====\n${measRows.join("\n")}\n\n` : "";
     setLog(`${measBlock}===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`);
     return merged;
   } catch (e) {
