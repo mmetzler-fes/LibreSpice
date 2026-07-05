@@ -211,5 +211,15 @@ function convertResult(result: ResultType): SimulationResult {
   }
 
   const time = data["time"] ?? data[variables[0]];
-  return { variables, data, time };
+
+  // Hide subcircuit-internal signals (hierarchical names contain a `.`, e.g.
+  // `v(xu1.ng)`, `i(@b.xu1.bout[i])`) — like LTSpice, only top-level nodes and
+  // device currents are probeable. This also keeps the auto-probe and the (huge)
+  // probe list meaningful when a macromodel has many internal parts.
+  const isAxis = (v: string) => v === "time" || v === "frequency";
+  const kept = variables.filter((v) => isAxis(v) || !v.includes("."));
+  const keptData: Record<string, Float64Array> = {};
+  for (const v of kept) if (data[v]) keptData[v] = data[v];
+  if (time && !keptData["time"]) keptData["time"] = time;
+  return { variables: kept, data: keptData, time };
 }

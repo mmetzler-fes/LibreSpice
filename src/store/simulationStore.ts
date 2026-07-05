@@ -69,7 +69,16 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       const kept = selectedVariables.filter((v) => result.variables.includes(v) && !isAxis(v));
       const pending = pendingProbes.filter((p) => result.variables.includes(p) && !isAxis(p));
       const merged = [...new Set([...kept, ...pending])];
-      const firstReal = result.variables.find((v) => !isAxis(v));
+      // Auto-pick a MEANINGFUL default probe: prefer a varying signal over a
+      // constant one (e.g. a supply rail), so the plot isn't a lone flat line.
+      const isConstant = (v: string) => {
+        const d = result.data[v];
+        if (!d || d.length === 0) return true;
+        for (let i = 1; i < d.length; i++) if (d[i] !== d[0]) return false;
+        return true;
+      };
+      const firstReal = result.variables.find((v) => !isAxis(v) && !isConstant(v))
+        ?? result.variables.find((v) => !isAxis(v));
       const next = merged.length > 0 ? merged : (firstReal ? [firstReal] : []);
       set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [] });
     } else {
