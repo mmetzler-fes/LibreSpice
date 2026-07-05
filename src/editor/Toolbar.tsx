@@ -225,7 +225,10 @@ export function Toolbar() {
           multiple: false,
         });
         const file = await handle.getFile();
-        loadedText = await file.text();
+        // LTSpice writes .asc files in Windows-1252 (byte 0xB5 = µ).
+        // Decoding as UTF-8 (the default) replaces 0xB5 with U+FFFD, which
+        // breaks SI-suffix parsing (e.g. "14µF" → "14F" = 14 Farads).
+        loadedText = new TextDecoder("windows-1252").decode(await file.arrayBuffer());
         loadedHandle = handle;
         loadedName = file.name;
       } catch (err: any) {
@@ -242,7 +245,7 @@ export function Toolbar() {
       input.onchange = async (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
         if (file) {
-          const text = await file.text();
+          const text = new TextDecoder("windows-1252").decode(await file.arrayBuffer());
           loadFromAsc(text);
           setFileHandle(null, file.name);
           setCircuitName(file.name.replace(/\.asc$/i, ""));
