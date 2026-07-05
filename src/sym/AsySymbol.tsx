@@ -28,9 +28,19 @@ export function mapSymbol(sym: AsySymbol, size: number, margin = 8, snap = 0, na
   const b = symbolBounds(sym);
   const span = Math.max(b.width, b.height, 1);
   const scale = nativeScale ? 1 : (size - 2 * margin) / span;
+  // Centre on the pins' bounding box (not the full geometry) so decorations
+  // like an inductor's direction arrow don't pull the terminals sideways off
+  // the wires they must land on. This matches how symbolToNode positions the
+  // node (also pin-based). Fall back to the geometry centre if there are no pins.
+  let cx = b.cx, cy = b.cy;
+  if (nativeScale && sym.pins.length > 0) {
+    const xs = sym.pins.map((p) => p.x), ys = sym.pins.map((p) => p.y);
+    cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  }
   const map = (x: number, y: number): [number, number] => [
-    size / 2 + (x - b.cx) * scale,
-    size / 2 + (y - b.cy) * scale,
+    size / 2 + (x - cx) * scale,
+    size / 2 + (y - cy) * scale,
   ];
   // Snap pins to the editor grid so every terminal sits on a grid line (the
   // node box origin is grid-aligned, so a node-local multiple of the grid is a
