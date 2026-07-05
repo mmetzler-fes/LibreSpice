@@ -7,8 +7,32 @@
  * generated netlist, plus a structured representation for the UI.
  */
 
-/** Where an imported entry lives. */
-export type LibraryScope = "local" | "temp";
+/**
+ * Where an imported entry lives:
+ *   - `local`  persists to localStorage in this browser.
+ *   - `temp`   lives only for the current session.
+ *   - `server` comes from the file-backed library served by the backend
+ *              (re-fetched on load; never written to localStorage).
+ */
+export type LibraryScope = "local" | "temp" | "server";
+
+/**
+ * A placeable component descriptor (LTSpice `cmp/`): links a graphical symbol
+ * to an optional SPICE model and its pin order, so it can be dropped from the
+ * "Insert Component" menu.
+ */
+export interface ComponentDescriptor {
+  /** Component name shown in the menu, e.g. `1N4148`. */
+  name: string;
+  /** Base name of the `.asy` symbol to render. */
+  symbol: string;
+  /** SPICE instance prefix, e.g. `D`, `Q`, `X`. */
+  prefix?: string;
+  /** Linked `.model`/`.subckt` name, if any. */
+  model?: string;
+  /** Ordered pin names (falls back to the symbol's own pins when omitted). */
+  pins?: string[];
+}
 
 /**
  * Canonical base component a `.model` maps onto. `unknown` means the model type

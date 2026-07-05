@@ -17,6 +17,14 @@ export default defineConfig({
   worker: {
     format: "es",
   },
+  server: {
+    // Proxy library API to the thin backend during `npm run dev`. If no server
+    // is running the requests fail silently and the app falls back to the
+    // bundled defaults + localStorage.
+    proxy: {
+      "/api": "http://localhost:8080",
+    },
+  },
   optimizeDeps: {
     exclude: ["eecircuit-engine"],
   },

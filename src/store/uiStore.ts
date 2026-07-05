@@ -18,6 +18,8 @@ export interface PendingLibraryPlacement {
   raw?: string;
   /** Model name to assign to a typed device (models only). */
   model?: string;
+  /** Custom `.asy` symbol to draw a subcircuit with (instead of the generic box). */
+  symbolName?: string;
 }
 
 interface UIState {
@@ -32,6 +34,7 @@ interface UIState {
   darkMode: boolean;
   showDirectiveModal: boolean;
   showLibraryImport: boolean;
+  showInsertComponent: boolean;
   dockOpen: boolean;
   dockHeight: number;
   dockTab: DockTab;
@@ -52,6 +55,7 @@ interface UIActions {
   toggleDarkMode: () => void;
   toggleDirectiveModal: () => void;
   toggleLibraryImport: () => void;
+  toggleInsertComponent: () => void;
   toggleDock: () => void;
   setDockHeight: (height: number) => void;
   setDockTab: (tab: DockTab) => void;
@@ -70,6 +74,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   darkMode: false,
   showDirectiveModal: false,
   showLibraryImport: false,
+  showInsertComponent: false,
   dockOpen: true,
   dockHeight: 240,
   dockTab: "netlist",
@@ -88,6 +93,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
   toggleDirectiveModal: () => set((s) => ({ showDirectiveModal: !s.showDirectiveModal })),
   toggleLibraryImport: () => set((s) => ({ showLibraryImport: !s.showLibraryImport })),
+  toggleInsertComponent: () => set((s) => ({ showInsertComponent: !s.showInsertComponent })),
   toggleDock: () => set((s) => ({ dockOpen: !s.dockOpen })),
   setDockHeight: (dockHeight) => set({ dockHeight: Math.max(120, Math.min(600, dockHeight)) }),
   setDockTab: (dockTab) => set({ dockTab, dockOpen: true }),

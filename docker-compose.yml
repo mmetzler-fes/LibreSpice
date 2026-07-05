@@ -1,0 +1,17 @@
+services:
+  librespice:
+    build: .
+    image: librespice
+    # Run as your host user so files written into ./library are owned by you
+    # (no root/sudo needed to edit or delete them). Override via the .env file
+    # if your UID/GID differ from 1000:1000.
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "8080:8080"
+    volumes:
+      # Component library on the host: drop .lib/.asy/.json files into
+      # ./library/{lib,sym,cmp} and they are picked up automatically.
+      - ./library:/data/lib
+    environment:
+      LIBRESPICE_LIB_DIR: /data/lib
+    restart: unless-stopped

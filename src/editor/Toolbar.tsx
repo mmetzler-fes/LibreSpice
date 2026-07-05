@@ -3,6 +3,7 @@ import { useUIStore, type EditorMode } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import { DirectiveModal } from "./DirectiveModal.js";
 import { ModelImportModal } from "./ModelImportModal.js";
+import { InsertComponentModal } from "./InsertComponentModal.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
@@ -132,7 +133,7 @@ export function Toolbar() {
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
     circuitName, setCircuitName, dataFlags,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
@@ -448,6 +449,12 @@ export function Toolbar() {
 
       <Divider />
 
+      <TBtn title="Insert Component (F2)" onClick={toggleInsertComponent}>
+        <Ico d="M4 5h16v14H4z M12 9v6 M9 12h6" />
+      </TBtn>
+
+      <Divider />
+
       {/* ── Mode hint ── */}
       {editorMode === "place" && pendingPlaceType && (
         <span style={{ fontSize: 11, color: "#2563eb", fontStyle: "italic", marginLeft: 4, whiteSpace: "nowrap" }}>
@@ -461,6 +468,7 @@ export function Toolbar() {
       )}
       <DirectiveModal />
       <ModelImportModal />
+      <InsertComponentModal />
     </div>
   );
 }

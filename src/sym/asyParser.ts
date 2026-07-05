@@ -214,3 +214,24 @@ export function symbolForType(type: ComponentType, norm: SymbolNorm = "default")
   const base = TYPE_TO_SYMBOL[type];
   return base ? resolveSymbol(base, norm) : undefined;
 }
+
+/**
+ * Resolves a symbol by its bare name (case-insensitive), honouring norm
+ * variants. Used for library components whose symbol is not tied to a fixed
+ * editor {@link ComponentType} (e.g. user `.asy` files loaded at runtime).
+ */
+export function symbolByName(name: string, norm: SymbolNorm = "default"): AsySymbol | undefined {
+  return resolveSymbol(name, norm);
+}
+
+/**
+ * Registers an `.asy` symbol at runtime (e.g. fetched from the server library),
+ * so it becomes resolvable via {@link symbolByName} exactly like a bundled one.
+ * Re-registering the same name replaces the previous definition.
+ */
+export function registerSymbol(name: string, rawAsy: string): AsySymbol {
+  const sym = parseAsy(rawAsy);
+  SYMBOL_LIBRARY[name] = sym;
+  LIB_INDEX[name.toLowerCase()] = sym;
+  return sym;
+}

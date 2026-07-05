@@ -1,0 +1,14 @@
+{
+  "name": "librespice-server",
+  "version": "0.1.0",
+  "description": "Thin server serving the LibreSpice SPA and its file-backed component library",
+  "type": "module",
+  "private": true,
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

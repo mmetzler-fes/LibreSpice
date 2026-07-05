@@ -18,7 +18,7 @@ import {
   PulseSourceSymbol,
   GroundSymbol,
 } from "./symbols/Symbols.js";
-import { symbolForType, symbolBounds } from "@sym/asyParser.js";
+import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, NODE_MARGIN, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 
@@ -57,6 +57,8 @@ export interface ComponentNodeData {
   pins?: string[];
   /** Subcircuit/model name shown inside a generic symbol. */
   subName?: string;
+  /** Custom `.asy` symbol name to render a subcircuit with (library components). */
+  symbolName?: string;
   /** User-dragged label offsets (px, in flow coords) from their default spot. */
   labelOffset?: { x: number; y: number };
   valueOffset?: { x: number; y: number };
@@ -326,6 +328,79 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
   );
 }
 
+/**
+ * Renders a subcircuit-style library component using its own parsed `.asy`
+ * symbol. Handles are keyed by the subcircuit's external pin names (matching the
+ * netlist pin order via SpiceOrder), so wiring and net mapping stay identical to
+ * {@link SubcircuitBox} – only the graphics differ.
+ */
+function LibrarySymbolNode({
+  sym,
+  data,
+  nodeId,
+  selected,
+}: {
+  sym: AsySymbol;
+  data: ComponentNodeData;
+  nodeId: string;
+  selected?: boolean;
+}) {
+  const rotation = data.rotation ?? 0;
+  const mirrored = !!data.mirrored;
+  const pins = data.pins ?? [];
+  const mapping = mapSymbol(sym, NODE_SIZE, NODE_MARGIN, GRID);
+  const center = NODE_SIZE / 2;
+  const bounds = symbolBounds(sym);
+  const halfW = (bounds.width / 2) * mapping.scale;
+  const halfH = (bounds.height / 2) * mapping.scale;
+
+  return (
+    <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
+      {mapping.pins.map((pin) => {
+        // Map the symbol's SpiceOrder onto the subcircuit's declared pin name.
+        const handleId = pins[pin.order - 1] ?? `pin${pin.order}`;
+        const [rx, hy] = rotatePoint(pin.px, pin.py, center, center, rotation);
+        const hx = mirrored ? NODE_SIZE - rx : rx;
+        return (
+          <Handle
+            key={handleId}
+            type="source"
+            position={Position.Top}
+            id={handleId}
+            style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
+          />
+        );
+      })}
+      <svg
+        width={NODE_SIZE}
+        height={NODE_SIZE}
+        style={{
+          color: selected ? "#2563eb" : "#0f172a",
+          overflow: "visible",
+          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
+          transition: "transform 0.15s ease",
+        }}
+      >
+        {selected && (
+          <rect
+            x={4} y={4} width={NODE_SIZE - 8} height={NODE_SIZE - 8} rx={4}
+            fill="none" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4 2" opacity={0.5}
+          />
+        )}
+        <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
+      </svg>
+      {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
+        <MovableLabel
+          nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
+          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+        >
+          {data.label}
+        </MovableLabel>
+      ); })()}
+    </div>
+  );
+}
+
 /** Net-id badges shown at each pin of the selected component (e.g. "1: net2"). */
 function PinNetLabels({ nodeId, data }: { nodeId: string; data: ComponentNodeData }) {
   const circuit = useCircuitStore((s) => s.circuit);
@@ -455,6 +530,10 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "subcircuit") {
+    const libSym = nodeData.symbolName ? symbolByName(nodeData.symbolName, symbolNorm) : undefined;
+    if (libSym) {
+      return <LibrarySymbolNode sym={libSym} data={nodeData} nodeId={id} selected={selected} />;
+    }
     return <SubcircuitBox nodeId={id} data={nodeData} selected={selected} />;
   }
   const asySym = symbolForType(nodeData.componentType, symbolNorm);

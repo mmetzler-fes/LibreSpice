@@ -74,7 +74,7 @@ function CanvasInner() {
 
   const {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
-    setEditorMode, startPlacing, cancelPlacing, rotatePlacement,
+    setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
     setDockTab, autoProbeCurrent,
   } = useUIStore();
@@ -132,7 +132,7 @@ function CanvasInner() {
           id,
           type: "component",
           position: { x, y },
-          data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name, rotation: placementRotation },
+          data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name, symbolName: placement.symbolName, rotation: placementRotation },
         };
         addComponent(component, node);
         return;
@@ -163,6 +163,7 @@ function CanvasInner() {
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
       if (e.key === "Escape") { cancelPlacing(); setEditorMode("select"); return; }
+      if (e.key === "F2") { e.preventDefault(); toggleInsertComponent(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); if (canUndo()) undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); if (canRedo()) redo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "r") {
@@ -194,7 +195,7 @@ function CanvasInner() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, mirrorSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement]);
+  }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, mirrorSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement, toggleInsertComponent]);
 
   const onConnect = useCallback(
     (connection: Connection) => {

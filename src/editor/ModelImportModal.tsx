@@ -12,12 +12,29 @@ const EXAMPLE = `.model 1N4148 D(IS=2.52n RS=0.568 N=1.752 CJO=4p M=0.4 TT=20n B
   E1 out 0 in+ in- 100k
 .ends OPAMP`;
 
+/** SPICE instance prefix used for a parsed entry's descriptor badge. */
+function prefixForEntry(entry: { kind: string; deviceClass?: string }): string {
+  if (entry.kind === "subckt") return "X";
+  switch (entry.deviceClass) {
+    case "diode": return "D";
+    case "bjt_npn": case "bjt_pnp": return "Q";
+    case "mosfet_n": case "mosfet_p": return "M";
+    case "resistor": return "R";
+    case "capacitor": return "C";
+    case "inductor": return "L";
+    default: return "X";
+  }
+}
+
 export function ModelImportModal() {
   const { showLibraryImport, toggleLibraryImport } = useUIStore();
-  const { addEntries } = useLibraryStore();
+  const { addEntries, saveEntry, serverAvailable } = useLibraryStore();
   const [text, setText] = useState("");
   const [scope, setScope] = useState<LibraryScope>("local");
+  const [asyText, setAsyText] = useState("");
+  const [asyName, setAsyName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const asyInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -28,12 +45,22 @@ export function ModelImportModal() {
     setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
   };
 
+  const handleAsyFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setAsyText(await file.text());
+    setAsyName(file.name.replace(/\.asy$/i, ""));
+  };
+
   useEffect(() => {
     if (showLibraryImport) {
       setText("");
-      setScope("local");
+      setScope(serverAvailable ? "server" : "local");
+      setAsyText("");
+      setAsyName("");
     }
-  }, [showLibraryImport]);
+  }, [showLibraryImport, serverAvailable]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -54,8 +81,37 @@ export function ModelImportModal() {
     ...(parsed?.entries.flatMap((e) => e.warnings) ?? []),
   ];
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!parsed || parsed.entries.length === 0) return;
+
+    if (scope === "server") {
+      // Persist each entry as a file on the server; attach the uploaded .asy
+      // (once) to the first entry so it links as that component's symbol.
+      const symbol = asyName || undefined;
+      let attachedAsy = false;
+      let allOk = true;
+      for (const entry of parsed.entries) {
+        const ok = await saveEntry({
+          name: entry.name,
+          modelText: entry.raw,
+          asyText: !attachedAsy && asyText ? asyText : undefined,
+          descriptor: {
+            symbol: symbol ?? entry.name,
+            prefix: prefixForEntry(entry),
+            model: entry.name,
+            pins: entry.kind === "subckt" ? entry.pins : undefined,
+          },
+        });
+        if (asyText && !attachedAsy && ok) attachedAsy = true;
+        if (!ok) allOk = false;
+      }
+      // Fall back to a session copy if the server write failed, so the user
+      // doesn't silently lose the import.
+      if (!allOk) addEntries(parsed.entries, "temp");
+      toggleLibraryImport();
+      return;
+    }
+
     addEntries(parsed.entries, scope);
     toggleLibraryImport();
   };
@@ -103,6 +159,28 @@ export function ModelImportModal() {
             >
               📂 Load .lib file…
             </button>
+            <input
+              ref={asyInputRef}
+              type="file"
+              accept=".asy"
+              onChange={handleAsyFile}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => asyInputRef.current?.click()}
+              title="Optional: attach a graphical .asy symbol for this component"
+              style={{
+                padding: "6px 12px", fontSize: 12, fontWeight: 600, borderRadius: 4,
+                border: `1px solid ${asyName ? "#16a34a" : "#475569"}`, background: "#0f172a",
+                color: asyName ? "#86efac" : "#bfdbfe", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              {asyName ? `🖼 ${asyName}.asy` : "🖼 Add .asy symbol…"}
+            </button>
+            {asyName && (
+              <span onClick={() => { setAsyText(""); setAsyName(""); }} title="Remove symbol" style={{ color: "#94a3b8", cursor: "pointer", fontSize: 14 }}>×</span>
+            )}
             <span style={{ fontSize: 11, color: "#64748b" }}>or paste below</span>
           </div>
           <SpiceHighlight value={text} onChange={setText} placeholder={EXAMPLE} minHeight={200}
@@ -123,9 +201,12 @@ export function ModelImportModal() {
             </div>
           )}
 
-          {/* Scope selector (CircuitSim-style Local vs Temp) */}
+          {/* Scope selector: server library (Docker volume) vs browser-local vs temp */}
           <div style={{ display: "flex", gap: 8 }}>
             {([
+              ...(serverAvailable
+                ? [["server", "🗄 Save to Library", "Write files to the shared server library (persists on disk)"] as const]
+                : []),
               ["local", "💾 Add to Local", "Persist in this browser across sessions"],
               ["temp", "⏱ Use Temp", "Keep only for the current session"],
             ] as const).map(([val, label, hint]) => (
