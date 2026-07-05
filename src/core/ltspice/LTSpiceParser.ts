@@ -3,7 +3,7 @@ import { createSpiceComponent } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 
 // Must match LTSpiceExporter / ComponentNode so WINDOW ↔ offset round-trips.
 const LABEL_DEFAULT = { left: 8, top: 30 };
@@ -312,7 +312,7 @@ export class LTSpiceParser {
     // our rendered terminals line up with the pin coordinates the wires use.
     // Otherwise the LTSpice origin (a corner) becomes the center and every pin
     // sits ~16px off, forcing dog-leg wires.
-    const { x: nodeX, y: nodeY } = symbolToNode(sym.x, sym.y, rotated);
+    const { x: nodeX, y: nodeY } = symbolToNode(sym.x, sym.y, rotated, centeringFor(cType));
 
     const comp = createSpiceComponent(cType, sym.id, label, nodeX, nodeY);
 

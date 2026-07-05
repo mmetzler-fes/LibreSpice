@@ -40,6 +40,7 @@ export const TYPE_TO_SYMBOL: Record<string, string> = {
   mosfet_n: "nmos", mosfet_p: "pmos",
   vsource: "voltage", isource: "current",
   sinesource: "voltage", pulsesource: "voltage",
+  opamp: "UniversalOpAmp2",
 };
 
 export interface PinOffset { handle: string; dx: number; dy: number }
@@ -105,20 +106,37 @@ export function rotatedOffsets(type: string, deg: number): PinOffset[] {
   });
 }
 
-function mean(offsets: PinOffset[]): { mx: number; my: number } {
+/**
+ * Centre of a pin set. `mean` (the average) suits small 2-pin parts; `bbox`
+ * (the pin bounding-box centre) suits asymmetric multi-pin parts like the
+ * op-amp, whose averaged centre would sit off to one side and shift the whole
+ * symbol relative to the imported wires.
+ */
+export type Centering = "mean" | "bbox";
+
+/** Which centring an editor component type uses (see {@link Centering}). */
+export function centeringFor(type: string): Centering {
+  return type === "opamp" ? "bbox" : "mean";
+}
+
+function centre(offsets: PinOffset[], mode: Centering): { mx: number; my: number } {
+  if (mode === "bbox") {
+    const xs = offsets.map((p) => p.dx), ys = offsets.map((p) => p.dy);
+    return { mx: (Math.min(...xs) + Math.max(...xs)) / 2, my: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  }
   const mx = offsets.reduce((s, p) => s + p.dx, 0) / offsets.length;
   const my = offsets.reduce((s, p) => s + p.dy, 0) / offsets.length;
   return { mx, my };
 }
 
-/** Symbol origin → node top-left, centering the box on the pin bounding box. */
-export function symbolToNode(symX: number, symY: number, offsets: PinOffset[]): { x: number; y: number } {
-  const { mx, my } = mean(offsets);
+/** Symbol origin → node top-left, centering the box on the pins. */
+export function symbolToNode(symX: number, symY: number, offsets: PinOffset[], mode: Centering = "mean"): { x: number; y: number } {
+  const { mx, my } = centre(offsets, mode);
   return { x: Math.round(symX + mx) - CENTER, y: Math.round(symY + my) - CENTER };
 }
 
 /** Node top-left → symbol origin (inverse of {@link symbolToNode}). */
-export function nodeToSymbol(nodeX: number, nodeY: number, offsets: PinOffset[]): { x: number; y: number } {
-  const { mx, my } = mean(offsets);
+export function nodeToSymbol(nodeX: number, nodeY: number, offsets: PinOffset[], mode: Centering = "mean"): { x: number; y: number } {
+  const { mx, my } = centre(offsets, mode);
   return { x: Math.round(nodeX + CENTER - mx), y: Math.round(nodeY + CENTER - my) };
 }

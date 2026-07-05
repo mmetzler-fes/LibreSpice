@@ -2,7 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import {
-  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, rotatedOffsets, nodeToSymbol,
+  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, rotatedOffsets, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
@@ -59,7 +59,7 @@ export class LTSpiceExporter {
 
       const deg = data.rotation ?? 0;
       const rotated = rotatedOffsets(data.componentType, deg);
-      const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated);
+      const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));
       for (const p of rotated) pinCoord.set(`${node.id}-${p.handle}`, { x: symX + p.dx, y: symY + p.dy });
 
       const symName = TYPE_TO_SYMBOL[data.componentType] || "res";

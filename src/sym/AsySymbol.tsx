@@ -17,11 +17,17 @@ export interface SymbolMapping {
 /**
  * Computes the transform that fits a symbol's geometry (and pins) into a square
  * pixel box of `size`, centered, leaving `margin` px on every side.
+ *
+ * With `nativeScale`, the symbol is drawn at LTSpice's native scale (1 unit =
+ * 1 px) and merely centred in the box — so terminals keep the exact spacing of
+ * imported wires (which are in the same 1:1 coordinate system) instead of being
+ * shrunk to fit. Symbols larger than the box overflow it (handled by the caller
+ * via `overflow: visible`). Previews keep the fit-to-box behaviour.
  */
-export function mapSymbol(sym: AsySymbol, size: number, margin = 8, snap = 0): SymbolMapping {
+export function mapSymbol(sym: AsySymbol, size: number, margin = 8, snap = 0, nativeScale = false): SymbolMapping {
   const b = symbolBounds(sym);
   const span = Math.max(b.width, b.height, 1);
-  const scale = (size - 2 * margin) / span;
+  const scale = nativeScale ? 1 : (size - 2 * margin) / span;
   const map = (x: number, y: number): [number, number] => [
     size / 2 + (x - b.cx) * scale,
     size / 2 + (y - b.cy) * scale,
