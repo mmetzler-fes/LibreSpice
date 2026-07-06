@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
-import { NetlistGenerator, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+import { NetlistGenerator, parseAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
@@ -27,6 +27,10 @@ interface CircuitState {
   netlist: string;
   simulationConfig: SimulationConfig;
   spiceDirectives: string;
+  /** Show the SPICE directives as a text box on the schematic (LTSpice-style). */
+  showDirectivesOnCanvas: boolean;
+  /** Position (flow coords) of the on-canvas directive text box. */
+  directivesPos: { x: number; y: number };
   /** User-facing diagram/circuit name; default file name for .asc and .plt. */
   circuitName: string;
   /** Positioned data-point annotations (LTSpice DATAFLAGs). */
@@ -46,6 +50,8 @@ interface CircuitActions {
   removeComponent: (id: string) => void;
   updateComponentProperty: (id: string, key: string, value: string | number) => void;
   setLabelOffset: (id: string, kind: "label" | "value", offset: { x: number; y: number }) => void;
+  /** Patch a node's `data` (visual-only fields, e.g. the net-label connector flag). Undoable. */
+  updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   setSelectedComponentId: (id: string | null) => void;
@@ -53,6 +59,8 @@ interface CircuitActions {
   regenerateNetlist: () => void;
   setSimulationConfig: (config: SimulationConfig) => void;
   setSpiceDirectives: (text: string) => void;
+  setShowDirectivesOnCanvas: (show: boolean) => void;
+  moveDirectivesBox: (x: number, y: number) => void;
   setCircuitName: (name: string) => void;
   renameNet: (netId: string, label: string) => void;
   addDataFlag: (x: number, y: number, expr: string) => void;
@@ -87,6 +95,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   netlist: "",
   simulationConfig: DEFAULT_CONFIG,
   spiceDirectives: "",
+  showDirectivesOnCanvas: false,
+  directivesPos: { x: 40, y: 40 },
   circuitName: "Untitled",
   dataFlags: [],
   propertyVersion: 0,
@@ -145,6 +155,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     }));
   },
 
+  updateNodeData: (id, patch) => {
+    const snap = { nodes: get().nodes, edges: get().edges };
+    set((state) => ({
+      nodes: state.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
+      _history: [...state._history, snap],
+      _future: [],
+    }));
+  },
+
   setNodes: (nodes) => set({ nodes }),
 
   setEdges: (edges) => {
@@ -187,6 +206,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set({ spiceDirectives: text });
     get().regenerateNetlist();
   },
+
+  setShowDirectivesOnCanvas: (show) => set({ showDirectivesOnCanvas: show }),
+
+  moveDirectivesBox: (x, y) => set({ directivesPos: { x, y } }),
 
   setCircuitName: (name) => set({ circuitName: name }),
 
@@ -247,6 +270,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         const port = get().circuit.components.get(compId)?.ports.find((p) => p.id === `${compId}-${handle}`);
         if (port?.netId && port.netId !== "0") get().renameNet(port.netId, name);
       }
+      // Auto-apply the loaded directives: adopt the file's analysis command
+      // (.tran/.ac/.dc/.op) into the sim config so the Simulation Panel and plot
+      // match — no need to open the SPICE Directives dialog and press Apply.
+      const analysis = directives.split("\n").map(parseAnalysisDirective).find((c): c is SimulationConfig => c !== null);
+      if (analysis) get().setSimulationConfig(analysis);
+      else get().regenerateNetlist();
     }, 0);
   },
 
@@ -416,7 +445,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   exportSnapshot: () => {
-    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags } = get();
+    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags, showDirectivesOnCanvas, directivesPos } = get();
     const componentProps: Record<string, Record<string, string | number>> = {};
     for (const [id, comp] of circuit.components) {
       const props: Record<string, string | number> = {};
@@ -427,7 +456,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     for (const [id, net] of circuit.nets) {
       if (id !== "0" && net.nodeLabel !== id) netLabels[id] = net.nodeLabel;
     }
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, dataFlags };
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, dataFlags, showDirectivesOnCanvas, directivesPos };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -460,6 +489,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: snapshot.spiceDirectives,
       simulationConfig: snapshot.simulationConfig,
       dataFlags: snapshot.dataFlags ?? [],
+      showDirectivesOnCanvas: snapshot.showDirectivesOnCanvas ?? false,
+      directivesPos: snapshot.directivesPos ?? { x: 40, y: 40 },
       selectedComponentId: null,
       viewFitNonce: get().viewFitNonce + 1,
       fileHandle: null,

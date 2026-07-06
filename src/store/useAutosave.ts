@@ -10,6 +10,8 @@ export function useAutosave() {
   const edges = useCircuitStore((s) => s.edges);
   const spiceDirectives = useCircuitStore((s) => s.spiceDirectives);
   const simulationConfig = useCircuitStore((s) => s.simulationConfig);
+  const showDirectivesOnCanvas = useCircuitStore((s) => s.showDirectivesOnCanvas);
+  const directivesPos = useCircuitStore((s) => s.directivesPos);
   const propertyVersion = useCircuitStore((s) => s.propertyVersion);
   const netVersion = useCircuitStore((s) => s.netVersion);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -22,5 +24,5 @@ export function useAutosave() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [nodes, edges, spiceDirectives, simulationConfig, propertyVersion, netVersion, exportSnapshot]);
+  }, [nodes, edges, spiceDirectives, simulationConfig, showDirectivesOnCanvas, directivesPos, propertyVersion, netVersion, exportSnapshot]);
 }

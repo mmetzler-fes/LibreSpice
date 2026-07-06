@@ -22,6 +22,7 @@ import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
 import { WireEdge, WireOverlay, type WireData } from "./WireTool.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
+import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
 import { NODE_SIZE, GRID } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
@@ -38,7 +39,7 @@ import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
 import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
 import { usePlotStore } from "@simulation/plotStore.js";
-import type { ComponentType } from "./nodes/ComponentNode.js";
+import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -61,7 +62,7 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit, addDataFlag, renameNet, viewFitNonce,
+    circuit, addDataFlag, renameNet, viewFitNonce, updateNodeData,
   } = useCircuitStore();
 
   // After a full load (import / snapshot) the content may sit off-screen (e.g.
@@ -83,7 +84,7 @@ function CanvasInner() {
   const addExpression = usePlotStore((s) => s.addExpression);
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean } | null>(null);
   /** Right-click menu on a wire: annotate the net's potential / current. */
   const [wireMenu, setWireMenu] = useState<{ netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
@@ -255,11 +256,19 @@ function CanvasInner() {
   const onNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
       event.preventDefault();
+      const e = event as React.MouseEvent;
+      const f = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const data = node.data as ComponentNodeData;
+      // Net labels get their own menu (net label ↔ connector).
+      if (data?.componentType === "netlabel") {
+        setSelectedComponentId(node.id);
+        setWireMenu(null);
+        setNodeMenu({ id: node.id, label: data.label || "NET", x: e.clientX, y: e.clientY, fx: f.x, fy: f.y, isNetlabel: true, connector: !!data.connector });
+        return;
+      }
       const comp = circuit.components.get(node.id);
       if (!comp || comp.id.startsWith("ground")) return;
       setSelectedComponentId(node.id);
-      const e = event as React.MouseEvent;
-      const f = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       setWireMenu(null);
       setNodeMenu({ id: node.id, label: comp.label, x: e.clientX, y: e.clientY, fx: f.x, fy: f.y });
     },
@@ -320,6 +329,12 @@ function CanvasInner() {
     );
     if (name != null && name.trim()) renameNet(netId, name.trim());
     setWireMenu(null);
+  };
+
+  // Switch a net label between a plain wire-name tag and a directional connector.
+  const setNetlabelConnector = (connector: boolean) => {
+    if (nodeMenu) updateNodeData(nodeMenu.id, { connector });
+    setNodeMenu(null);
   };
 
   const probeCurrentInScope = () => {
@@ -461,6 +476,7 @@ function CanvasInner() {
           </ReactFlow>
 
           <DataFlagLayer />
+          <DirectiveBox />
 
           {editorMode === "wire" && (
             <WireOverlay wrapperRef={wrapperRef} nodes={nodes} edges={edges} onCreateWire={onCreateWire} />
@@ -494,11 +510,24 @@ function CanvasInner() {
             padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 170,
           }}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
-            <button style={nodeMenuItem} onClick={() => addComponentDataFlag("V")}>Datenpunkt: Spannung U</button>
-            <button style={nodeMenuItem} onClick={() => addComponentDataFlag("I")}>Datenpunkt: Strom I</button>
-            <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
-            <button style={nodeMenuItem} onClick={probeCurrentInScope}>View I({nodeMenu.label}) in scope</button>
-            <button style={nodeMenuItem} onClick={probeVoltageInScope}>View U({nodeMenu.label}) in scope</button>
+            {nodeMenu.isNetlabel ? (
+              <>
+                <button style={nodeMenuItem} onClick={() => setNetlabelConnector(false)}>
+                  {nodeMenu.connector ? " " : "✓ "}Net label (Leitung benennen)
+                </button>
+                <button style={nodeMenuItem} onClick={() => setNetlabelConnector(true)}>
+                  {nodeMenu.connector ? "✓ " : " "}Connector (Pfeil, verbindet entfernte Netze)
+                </button>
+              </>
+            ) : (
+              <>
+                <button style={nodeMenuItem} onClick={() => addComponentDataFlag("V")}>Datenpunkt: Spannung U</button>
+                <button style={nodeMenuItem} onClick={() => addComponentDataFlag("I")}>Datenpunkt: Strom I</button>
+                <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+                <button style={nodeMenuItem} onClick={probeCurrentInScope}>View I({nodeMenu.label}) in scope</button>
+                <button style={nodeMenuItem} onClick={probeVoltageInScope}>View U({nodeMenu.label}) in scope</button>
+              </>
+            )}
           </div>
         </>
       )}

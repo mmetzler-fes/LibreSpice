@@ -1,0 +1,70 @@
+import { useRef } from "react";
+import { useViewport } from "@xyflow/react";
+import { useCircuitStore } from "@store/circuitStore.js";
+import { useUIStore } from "@store/uiStore.js";
+
+/**
+ * LTSpice-style on-schematic SPICE directive text box. Shown when "Display in
+ * circuit" is enabled in the SPICE Directives dialog; draggable, positioned in
+ * flow coordinates so it pans/zooms with the sheet. Double-click opens the
+ * dialog to edit.
+ */
+export function DirectiveBox() {
+  const vp = useViewport();
+  const show = useCircuitStore((s) => s.showDirectivesOnCanvas);
+  const directives = useCircuitStore((s) => s.spiceDirectives);
+  const pos = useCircuitStore((s) => s.directivesPos);
+  const moveBox = useCircuitStore((s) => s.moveDirectivesBox);
+  const toggleDirectiveModal = useUIStore((s) => s.toggleDirectiveModal);
+  const darkMode = useUIStore((s) => s.darkMode);
+
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; zoom: number } | null>(null);
+
+  if (!show || !directives.trim()) return null;
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, zoom: vp.zoom };
+    const move = (ev: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      moveBox(d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
+    };
+    const up = () => {
+      drag.current = null;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const left = vp.x + pos.x * vp.zoom;
+  const top = vp.y + pos.y * vp.zoom;
+  const lines = directives.replace(/\n+$/, "").split("\n");
+
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
+      <div
+        onMouseDown={startDrag}
+        onDoubleClick={(e) => { e.stopPropagation(); toggleDirectiveModal(); }}
+        title="SPICE directives — drag to move, double-click to edit"
+        style={{
+          position: "absolute", left, top,
+          transformOrigin: "top left", transform: `scale(${vp.zoom})`,
+          pointerEvents: "auto", cursor: "move", userSelect: "none",
+          fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 12, lineHeight: "16px",
+          padding: "4px 8px", borderRadius: 4, whiteSpace: "pre",
+          color: darkMode ? "#e2e8f0" : "#1e293b",
+          background: darkMode ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.9)",
+          border: `1px solid ${darkMode ? "#334155" : "#94a3b8"}`,
+        }}
+      >
+        {lines.map((l, i) => (
+          <div key={i} style={{ color: l.trim().startsWith("*") ? "#64748b" : undefined }}>{l || " "}</div>
+        ))}
+      </div>
+    </div>
+  );
+}

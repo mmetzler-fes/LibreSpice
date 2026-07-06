@@ -12,7 +12,7 @@ const EXAMPLES = `.tran 1u 10m        * Transient: step=1µs, stop=10ms
 .model 2N2222 NPN (Bf=100 Vaf=100)`;
 
 export function DirectiveModal() {
-  const { spiceDirectives, setSpiceDirectives } = useCircuitStore();
+  const { spiceDirectives, setSpiceDirectives, showDirectivesOnCanvas, setShowDirectivesOnCanvas } = useCircuitStore();
   const { showDirectiveModal, toggleDirectiveModal } = useUIStore();
   const [text, setText] = useState(spiceDirectives);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -244,7 +244,17 @@ export function DirectiveModal() {
           </div>
 
           {/* Buttons */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#cbd5e1", cursor: "pointer", marginRight: "auto" }}
+              title="Show these directives as a text box on the schematic">
+              <input
+                type="checkbox"
+                checked={showDirectivesOnCanvas}
+                onChange={(e) => setShowDirectivesOnCanvas(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              Display in circuit
+            </label>
             <button
               onClick={() => { setSpiceDirectives(""); setText(""); toggleDirectiveModal(); }}
               style={{ padding: "6px 14px", border: "1px solid #475569", background: "transparent", color: "#94a3b8", borderRadius: 4, cursor: "pointer", fontSize: 12 }}

@@ -19,6 +19,10 @@ export interface CircuitSnapshot {
   netLabels: Record<string, string>;
   /** Positioned data-point annotations (LTSpice DATAFLAGs). */
   dataFlags?: DataFlag[];
+  /** Show the SPICE directives as a text box on the schematic. */
+  showDirectivesOnCanvas?: boolean;
+  /** Position (flow coords) of the on-canvas directive text box. */
+  directivesPos?: { x: number; y: number };
 }
 
 export function createSnapshot(state: {
