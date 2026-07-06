@@ -190,6 +190,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const { autoProbeCurrent, toggleAutoProbeCurrent } = useUIStore();
   const analysisType = useCircuitStore((s) => s.simulationConfig.type);
   const circuitName = useCircuitStore((s) => s.circuitName);
+  // Handle of the currently open .asc, used to start file dialogs in its folder.
+  const fileHandle = useCircuitStore((s) => s.fileHandle);
   const {
     panels, traceToPanel, colors, expressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
@@ -327,8 +329,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const axisFrom = (low: number, high: number, step?: number): PltAxis =>
     ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: step && step > 0 ? step : (high - low) / 5, high });
 
-  // Save the plot configuration as an LTSpice-compatible `.plt` file.
-  const handleSavePlt = () => {
+  // Save the plot configuration as an LTSpice-compatible `.plt` file, defaulting
+  // to the current .asc's folder and base name.
+  const handleSavePlt = async () => {
     const time = result!.time!;
     const doc: PltDoc = {
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
@@ -341,54 +344,90 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         return { traces, x, y, log: [!!panel.logX, false, false] };
       }),
     };
-    downloadText(serializePlt(doc), `${circuitName.trim() || "plot"}.plt`, "text/plain");
+    const content = serializePlt(doc);
+    const suggestedName = `${circuitName.trim() || "plot"}.plt`;
+    if ("showSaveFilePicker" in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName,
+          startIn: fileHandle ?? undefined,
+          types: [{ description: "LTSpice Plot Settings", accept: { "text/plain": [".plt"] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        // fall through to a plain download
+      }
+    }
+    downloadText(content, suggestedName, "text/plain");
   };
 
-  // Load an LTSpice `.plt` file, rebuild the panels and re-plot the data.
-  const handleLoadPlt = () => {
+  // Parse a `.plt` document's text, rebuild the panels and re-plot the data.
+  const applyPltText = useCallback((text: string) => {
+    const doc = parsePlt(text);
+    if (!doc) { alert("Invalid .plt file"); return; }
+
+    // Resolve raw probe names to the actual result variable when possible.
+    const resolveName = (n: string) =>
+      looksLikeExpression(n) ? n : (result ? matchResultVariable(result, [n]) ?? n : n);
+
+    const newPanels: PlotPanel[] = [];
+    const tracePanel: Record<string, string> = {};
+    const exprs = new Set<string>();
+    const raw = new Set<string>();
+
+    doc.panes.forEach((pane, i) => {
+      const id = `panel-${i}`;
+      // Map each Y[k] tuple to its unit group (same order as the traces).
+      const units = [...new Set(pane.traces.map((t) => inferUnit(stripStepTag(resolveName(t)))))];
+      const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
+      units.forEach((u, k) => {
+        const ax = pane.y[k];
+        if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickStep(ax) };
+      });
+      newPanels.push({
+        id,
+        xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
+        yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
+        yAxes,
+      });
+      for (const t of pane.traces) {
+        const name = resolveName(t);
+        tracePanel[name] = id;
+        if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
+      }
+    });
+
+    importSettings({ version: 1, panels: newPanels, traceToPanel: tracePanel, colors: {}, expressions: [...exprs], syncX: false });
+    // Make the referenced probes active so the traces are re-plotted.
+    setSelectedVariables([...raw]);
+  }, [result, importSettings, setSelectedVariables]);
+
+  // Load an LTSpice `.plt` file, starting the picker in the current .asc's folder.
+  const handleLoadPlt = async () => {
+    if ("showOpenFilePicker" in window) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          startIn: fileHandle ?? undefined,
+          types: [{ description: "LTSpice Plot Settings", accept: { "text/plain": [".plt"], "application/octet-stream": [".plt"] } }],
+          multiple: false,
+        });
+        applyPltText(await (await handle.getFile()).text());
+        return;
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        // fall through to a plain <input> picker
+      }
+    }
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".plt";
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const doc = parsePlt(await file.text());
-      if (!doc) { alert("Invalid .plt file"); return; }
-
-      // Resolve raw probe names to the actual result variable when possible.
-      const resolveName = (n: string) =>
-        looksLikeExpression(n) ? n : (result ? matchResultVariable(result, [n]) ?? n : n);
-
-      const newPanels: PlotPanel[] = [];
-      const tracePanel: Record<string, string> = {};
-      const exprs = new Set<string>();
-      const raw = new Set<string>();
-
-      doc.panes.forEach((pane, i) => {
-        const id = `panel-${i}`;
-        // Map each Y[k] tuple to its unit group (same order as the traces).
-        const units = [...new Set(pane.traces.map((t) => inferUnit(stripStepTag(resolveName(t)))))];
-        const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
-        units.forEach((u, k) => {
-          const ax = pane.y[k];
-          if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickStep(ax) };
-        });
-        newPanels.push({
-          id,
-          xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
-          yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
-          yAxes,
-        });
-        for (const t of pane.traces) {
-          const name = resolveName(t);
-          tracePanel[name] = id;
-          if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
-        }
-      });
-
-      importSettings({ version: 1, panels: newPanels, traceToPanel: tracePanel, colors: {}, expressions: [...exprs], syncX: false });
-      // Make the referenced probes active so the traces are re-plotted.
-      setSelectedVariables([...raw]);
+      if (file) applyPltText(await file.text());
     };
     input.click();
   };
