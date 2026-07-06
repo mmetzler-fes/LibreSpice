@@ -15,11 +15,16 @@ export function SimulationPanel({ compact = false }: { compact?: boolean }) {
   const cfg = simulationConfig;
 
   const handleRun = async () => {
-    if (!netlist) return;
+    // Rebuild the netlist right before running so a freshly loaded circuit
+    // simulates immediately — no need to open SPICE Directives and press Apply.
+    // This also captures the asynchronously-loaded server library.
+    useCircuitStore.getState().regenerateNetlist();
+    const fresh = useCircuitStore.getState().netlist;
+    if (!fresh) return;
     setStatus("running");
     try {
       const { runSimulation } = await import("./simulationEngine.js");
-      const res = await runSimulation(netlist);
+      const res = await runSimulation(fresh);
       setResult(res);
       setDockTab("waveform");
     } catch (e) {
