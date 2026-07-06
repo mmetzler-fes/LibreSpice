@@ -2,11 +2,12 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSimulationStore, type SimulationResult } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
-import { matchResultVariable, canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
+import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
-import { serializePlt, parsePlt, siPrefix, tickStep, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+import { stripStepTag, applyPltText } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 
 /** Trigger a browser download of a text payload. */
@@ -29,10 +30,6 @@ const ANALYSIS_LABEL: Record<string, string> = {
 };
 
 /** A trace name is a formula unless it is a single variable / `V(..)` / `I(..)`. */
-function looksLikeExpression(name: string): boolean {
-  return !/^\s*[@A-Za-z_][\w.]*\s*(\([^()]*\))?\s*$/.test(name);
-}
-
 const MARGIN = { top: 16, right: 16, bottom: 36, left: 56 };
 const MARGIN_COMPACT = { top: 8, right: 8, bottom: 28, left: 48 };
 
@@ -142,11 +139,6 @@ interface ViewRange { xMin: number; xMax: number; yMin: number; yMax: number }
 interface UnitGroup { unit: string; traces: string[]; yMin: number; yMax: number }
 
 /** Strip a `.step` tag suffix (" @Cvar=1m") to recover the base trace name. */
-function stripStepTag(name: string): string {
-  const i = name.lastIndexOf(" @");
-  return i >= 0 ? name.slice(0, i) : name;
-}
-
 /** Group a panel's traces by physical unit (V, A, Ω, …) for separate y-axes. */
 function groupByUnit(traces: string[], seriesMap: Record<string, Float64Array | null>): UnitGroup[] {
   const byUnit = new Map<string, string[]>();
@@ -195,7 +187,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const {
     panels, traceToPanel, colors, expressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
-    addExpression, removeExpression, toggleSyncX, importSettings,
+    addExpression, removeExpression, toggleSyncX,
   } = usePlotStore();
   const isDark = !svgLight;
   // Active palette: bright for dark backgrounds, deep for light backgrounds.
@@ -365,47 +357,6 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     downloadText(content, suggestedName, "text/plain");
   };
 
-  // Parse a `.plt` document's text, rebuild the panels and re-plot the data.
-  const applyPltText = useCallback((text: string) => {
-    const doc = parsePlt(text);
-    if (!doc) { alert("Invalid .plt file"); return; }
-
-    // Resolve raw probe names to the actual result variable when possible.
-    const resolveName = (n: string) =>
-      looksLikeExpression(n) ? n : (result ? matchResultVariable(result, [n]) ?? n : n);
-
-    const newPanels: PlotPanel[] = [];
-    const tracePanel: Record<string, string> = {};
-    const exprs = new Set<string>();
-    const raw = new Set<string>();
-
-    doc.panes.forEach((pane, i) => {
-      const id = `panel-${i}`;
-      // Map each Y[k] tuple to its unit group (same order as the traces).
-      const units = [...new Set(pane.traces.map((t) => inferUnit(stripStepTag(resolveName(t)))))];
-      const yAxes: Record<string, { min?: number; max?: number; ticks?: number }> = {};
-      units.forEach((u, k) => {
-        const ax = pane.y[k];
-        if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickStep(ax) };
-      });
-      newPanels.push({
-        id,
-        xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
-        yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
-        yAxes,
-      });
-      for (const t of pane.traces) {
-        const name = resolveName(t);
-        tracePanel[name] = id;
-        if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
-      }
-    });
-
-    importSettings({ version: 1, panels: newPanels, traceToPanel: tracePanel, colors: {}, expressions: [...exprs], syncX: false });
-    // Make the referenced probes active so the traces are re-plotted.
-    setSelectedVariables([...raw]);
-  }, [result, importSettings, setSelectedVariables]);
-
   // Load an LTSpice `.plt` file, starting the picker in the current .asc's folder.
   const handleLoadPlt = async () => {
     if ("showOpenFilePicker" in window) {
@@ -415,7 +366,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           types: [{ description: "LTSpice Plot Settings", accept: { "text/plain": [".plt"], "application/octet-stream": [".plt"] } }],
           multiple: false,
         });
-        applyPltText(await (await handle.getFile()).text());
+        if (!applyPltText(await (await handle.getFile()).text())) alert("Invalid .plt file");
         return;
       } catch (err: any) {
         if (err?.name === "AbortError") return;
@@ -427,7 +378,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     input.accept = ".plt";
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) applyPltText(await file.text());
+      if (file && !applyPltText(await file.text())) alert("Invalid .plt file");
     };
     input.click();
   };

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore, type EditorMode } from "@store/uiStore.js";
+import { applyPltText } from "@simulation/pltApply.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import { DirectiveModal } from "./DirectiveModal.js";
 import { ModelImportModal } from "./ModelImportModal.js";
@@ -90,6 +92,9 @@ export function Toolbar() {
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, darkMode } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
+
+  // When an opened folder holds several .asc files, let the user pick one.
+  const [folderPick, setFolderPick] = useState<{ dir: any; files: { name: string; handle: any }[] } | null>(null);
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
 
@@ -221,6 +226,54 @@ export function Toolbar() {
     setCircuitName(loadedName.replace(/\.asc$/i, ""));
   };
 
+  // Load one .asc from an opened folder, plus its sibling <name>.plt if present.
+  const openAscFromFolder = async (dir: any, name: string, handle: any) => {
+    const text = new TextDecoder("windows-1252").decode(await (await handle.getFile()).arrayBuffer());
+    loadFromAsc(text);
+    setFileHandle(handle, name);
+    const base = name.replace(/\.asc$/i, "");
+    setCircuitName(base);
+    // Auto-load the matching plot settings if the folder has <name>.plt.
+    try {
+      const pltHandle = await dir.getFileHandle(`${base}.plt`);
+      applyPltText(await (await pltHandle.getFile()).text());
+    } catch {
+      /* no sibling .plt — nothing to apply */
+    }
+    setFolderPick(null);
+  };
+
+  // Open a folder, then a .asc inside it, and auto-load its plot settings. This
+  // needs directory access (showDirectoryPicker) — a single-file open cannot
+  // read sibling files.
+  const handleOpenFolder = async () => {
+    if (!("showDirectoryPicker" in window)) {
+      alert("Ordner öffnen wird von diesem Browser nicht unterstützt. Bitte 'Öffnen' verwenden.");
+      return;
+    }
+    let dir: any;
+    try {
+      dir = await (window as any).showDirectoryPicker();
+    } catch (err: any) {
+      if (err?.name !== "AbortError") console.error(err);
+      return;
+    }
+    const files: { name: string; handle: any }[] = [];
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === "file" && /\.asc$/i.test(name)) files.push({ name, handle });
+    }
+    if (files.length === 0) {
+      alert("Keine .asc-Datei in diesem Ordner gefunden.");
+      return;
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    if (files.length === 1) {
+      await openAscFromFolder(dir, files[0].name, files[0].handle);
+      return;
+    }
+    setFolderPick({ dir, files });
+  };
+
   const handleShareUrl = async () => {
     const url = buildShareUrl(exportSnapshot());
     try {
@@ -253,6 +306,12 @@ export function Toolbar() {
       </TBtn>
       <TBtn title="Open (Ctrl+O)" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </TBtn>
+      <TBtn title="Open folder — loads the .asc and its matching .plt plot settings" onClick={handleOpenFolder}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          <path d="M8 13h8 M12 17v-8" />
+        </svg>
       </TBtn>
       <TBtn title="Save (Ctrl+S)" onClick={() => handleSave(false)}>
         <Ico d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8" />
@@ -441,6 +500,33 @@ export function Toolbar() {
       <DirectiveModal />
       <ModelImportModal />
       <InsertComponentModal />
+
+      {/* Folder open: choose which .asc when the folder holds several. */}
+      {folderPick && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setFolderPick(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <div style={{ background: darkMode ? "#1e293b" : "#fff", border: `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`, borderRadius: 8, width: 380, maxWidth: "90vw", maxHeight: "70vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 50px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`, fontSize: 14, fontWeight: 600, color: darkMode ? "#e2e8f0" : "#1e293b" }}>
+              Schaltung wählen
+            </div>
+            <div style={{ overflowY: "auto", padding: 6 }}>
+              {folderPick.files.map((f) => (
+                <button
+                  key={f.name}
+                  onClick={() => openAscFromFolder(folderPick.dir, f.name, f.handle)}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "transparent", color: darkMode ? "#e2e8f0" : "#1e293b", cursor: "pointer", fontSize: 13, borderRadius: 4, fontFamily: "monospace" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? "#334155" : "#f1f5f9")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  📄 {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
