@@ -1,8 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Node, Edge } from "@xyflow/react";
-import { symbolForType, type SymbolNorm } from "@sym/asyParser.js";
+import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
-import { NODE_SIZE, NODE_MARGIN, getNodePins } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
+import { netLabelShape } from "./netLabelShape.js";
+import { captionSvgPlacement, DEFAULT_HALF } from "./captionLayout.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
@@ -47,10 +49,45 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
     );
   }
 
+  if (type === "netlabel") {
+    // Port connector: hollow terminal circle + direction arrow + name tag,
+    // matching the editor's NetLabelNode (see netLabelShape).
+    const name = data.label || "NET";
+    const shape = netLabelShape(rotation);
+    const th = 16;
+    const tagW = Math.max(20, name.length * 6.8 + 12);
+    const rectX = shape.tag.anchor === "start" ? shape.tag.x : shape.tag.x - tagW / 2;
+    const rectY = shape.tag.baseline === "middle" ? shape.tag.y - th / 2 : shape.tag.y - th;
+    const textX = shape.tag.anchor === "start" ? rectX + 6 : shape.tag.x;
+    const isConnector = !!data.connector;
+    return (
+      <g transform={`translate(${x} ${y})`}>
+        {isConnector && (
+          <>
+            <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
+            <polygon points={shape.head} fill="#334155" />
+          </>
+        )}
+        <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
+        <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={1} />
+        <text x={textX} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor={shape.tag.anchor}>{name}</text>
+      </g>
+    );
+  }
+
   const sym = symbolForType(type, norm);
+  // Native-scale mapping (margin 0, grid-snapped) — identical to the editor node
+  // and to getNodePins, so the drawn symbol lands exactly on its pins (and thus
+  // on the wire endpoints). A fit-to-box mapping would shrink/offset it.
+  const mapping = sym ? mapSymbol(sym, NODE_SIZE, 0, GRID, true) : null;
+  // Drawn half-extents in px, matching the editor, so captions hug the shape and
+  // the user's dragged offset lands identically.
+  const halfW = sym ? (symbolBounds(sym).width / 2) * mapping!.scale : DEFAULT_HALF.w;
+  const halfH = sym ? (symbolBounds(sym).height / 2) * mapping!.scale : DEFAULT_HALF.h;
+
   const inner = sym ? (
     <g transform={transformFor(rotation, mirrored, NODE_SIZE / 2, NODE_SIZE / 2)}>
-      <AsyGeometry sym={sym} mapping={mapSymbol(sym, NODE_SIZE, NODE_MARGIN)} strokeWidth={1.6} />
+      <AsyGeometry sym={sym} mapping={mapping!} strokeWidth={1.6} />
     </g>
   ) : (() => {
     const Fallback = type === "vsource"
@@ -65,14 +102,16 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   })();
 
   const showCaption = type !== "ground";
+  const labelPos = captionSvgPlacement("label", rotation, halfW, halfH, data.labelOffset);
+  const valuePos = captionSvgPlacement("value", rotation, halfW, halfH, data.valueOffset);
   return (
     <g transform={`translate(${x} ${y})`} color="#0f172a">
       {inner}
       {showCaption && (
-        <text x={2} y={NODE_SIZE / 2 - 6} fontSize={11} fontFamily="monospace" fill="#374151" textAnchor="end">{data.label}</text>
+        <text x={labelPos.x} y={labelPos.y} textAnchor={labelPos.textAnchor} dominantBaseline={labelPos.baseline} fontSize={11} fontFamily="monospace" fill="#374151">{data.label}</text>
       )}
       {showCaption && data.valueLabel && (
-        <text x={2} y={NODE_SIZE / 2 + 9} fontSize={10} fontFamily="monospace" fill="#6b7280" textAnchor="end">{data.valueLabel}</text>
+        <text x={valuePos.x} y={valuePos.y} textAnchor={valuePos.textAnchor} dominantBaseline={valuePos.baseline} fontSize={10} fontFamily="monospace" fill="#6b7280">{data.valueLabel}</text>
       )}
     </g>
   );

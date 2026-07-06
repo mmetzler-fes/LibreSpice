@@ -21,6 +21,8 @@ import {
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
+import { netLabelShape } from "../netLabelShape.js";
+import { captionLayout, DEFAULT_HALF } from "../captionLayout.js";
 
 export type ComponentType =
   | "resistor"
@@ -53,6 +55,9 @@ export interface ComponentNodeData {
   mirrored?: boolean;
   /** For the generalized voltage source: "DC" | "Sine" | "Pulse". */
   sourceType?: string;
+  /** Net-label variant: `true` draws a direction arrow (connector to a distant
+   *  same-named net); default/`false` is a plain wire name tag. */
+  connector?: boolean;
   hasProbe?: boolean;
   /** External pin names for `subcircuit` nodes (drives generated handles). */
   pins?: string[];
@@ -66,40 +71,6 @@ export interface ComponentNodeData {
   [key: string]: unknown;
 }
 
-/** Gap (px) between a caption and the symbol's drawn bounding box. */
-const CAPTION_GAP = 5;
-/** Fallback half-extents for symbols we can't measure (hand-drawn fallbacks). */
-const DEFAULT_HALF = { w: 18, h: 26 };
-
-/**
- * Readable caption placement that hugs the symbol's actual shape: captions sit
- * just left of a narrow part (e.g. resistor) or further out for a wide one
- * (e.g. voltage source), and move above/below when the part lies horizontal.
- * Text always stays upright. `halfW`/`halfH` are the drawn symbol's pixel
- * half-extents (before rotation).
- */
-function captionLayout(
-  kind: "label" | "value",
-  rotation: number,
-  halfW: number,
-  halfH: number,
-): { left: number; top: number; transform: string } {
-  const c = NODE_SIZE / 2;
-  const horizontal = rotation === 90 || rotation === 270;
-  const extentX = horizontal ? halfH : halfW; // horizontal reach after rotation
-  const extentY = horizontal ? halfW : halfH; // vertical reach after rotation
-  if (horizontal) {
-    // Above / below the part, centered.
-    return kind === "label"
-      ? { left: c, top: c - extentY - CAPTION_GAP, transform: "translate(-50%, -100%)" }
-      : { left: c, top: c + extentY + CAPTION_GAP, transform: "translate(-50%, 0)" };
-  }
-  // Left of the part, stacked near the vertical centre.
-  const rightEdge = c - extentX - CAPTION_GAP;
-  return kind === "label"
-    ? { left: rightEdge, top: c - 8, transform: "translate(-100%, -50%)" }
-    : { left: rightEdge, top: c + 9, transform: "translate(-100%, -50%)" };
-}
 
 /**
  * A component caption (reference or value) that sits at its default spot plus a
@@ -536,16 +507,29 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
   const c = NODE_SIZE / 2;
   const name = data.label || "NET";
   const color = selected ? "#2563eb" : "#334155";
+  // "connector" = draw the direction arrow (joins distant parts on one net
+  // without a wire); default = a plain net label that just names a wire.
+  const isConnector = !!data.connector;
+  const shape = netLabelShape(data.rotation ?? 0);
+  // Tag position mirrors netLabelShape's anchor/baseline (the Handle itself is
+  // the hollow terminal circle, so we only draw the arrow + tag here).
+  const tagStyle: React.CSSProperties = shape.tag.baseline === "middle"
+    ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
+    : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
   return (
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
       <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
-        <line x1={c} y1={c} x2={c + 13} y2={c} stroke={color} strokeWidth={1.4} />
-        <circle cx={c} cy={c} r={2.6} fill={color} />
+        {isConnector && (
+          <>
+            <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+            <polygon points={shape.head} fill={color} />
+          </>
+        )}
       </svg>
       <div
         style={{
-          position: "absolute", left: c + 15, top: c, transform: "translate(0, -50%)",
+          position: "absolute", ...tagStyle,
           padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
           userSelect: "none", background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
           border: `1px solid ${selected ? "#2563eb" : "#94a3b8"}`,
