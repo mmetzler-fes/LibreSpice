@@ -88,7 +88,10 @@ export function getSnapshotFromUrl(): CircuitSnapshot | null {
 
 export function buildShareUrl(snapshot: CircuitSnapshot): string {
   const encoded = encodeSnapshot(snapshot);
-  const base = `${window.location.origin}${window.location.pathname}`;
+  // Point at the app's own base path (import.meta.env.BASE_URL, always trailing
+  // "/") rather than the current pathname, so the link opens the app directly —
+  // never the landing page that may sit next to it.
+  const base = `${window.location.origin}${import.meta.env.BASE_URL}`;
   return `${base}#${URL_HASH_PREFIX}${encoded}`;
 }
 

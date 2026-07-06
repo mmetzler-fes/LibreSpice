@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LibreSpice</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #f8fafc; color: #1e293b; padding: 24px;
+      }
+      main {
+        max-width: 640px; width: 100%;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+        padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+      }
+      h1 { margin: 0 0 4px; font-size: 32px; letter-spacing: -0.5px; }
+      .tag { margin: 0 0 24px; color: #64748b; font-size: 15px; }
+      p { line-height: 1.65; font-size: 15px; }
+      ul { line-height: 1.8; padding-left: 20px; font-size: 15px; }
+      .cta {
+        display: inline-block; margin-top: 20px; padding: 12px 24px;
+        background: #2563eb; color: #fff; text-decoration: none;
+        border-radius: 8px; font-weight: 600; font-size: 15px;
+      }
+      .cta:hover { background: #1d4ed8; }
+      footer { margin-top: 28px; font-size: 12px; color: #94a3b8; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0f172a; color: #e2e8f0; }
+        main { background: #1e293b; border-color: #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .tag { color: #94a3b8; }
+        footer { color: #64748b; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>LibreSpice</h1>
+      <p class="tag">Ein SPICE-Schaltplaneditor und Simulator im Browser.</p>
+
+      <p>
+        LibreSpice ist ein freier, browserbasierter Editor zum Zeichnen
+        elektronischer Schaltpläne und zum Simulieren ihres Verhaltens — ganz
+        ohne Installation. Bauteile werden per Klick platziert, verdrahtet und
+        über eine eingebettete SPICE-Engine analysiert.
+      </p>
+
+      <ul>
+        <li>Schaltpläne zeichnen (R, C, L, Dioden, Transistoren, Quellen, Op-Amps …)</li>
+        <li>Transienten-, AC-, DC- und Arbeitspunkt-Analyse</li>
+        <li>Import von LTSpice-Modellen (<code>.asc</code>, <code>.model</code>, <code>.subckt</code>)</li>
+        <li>Ergebnisse als Wellenform anzeigen und Schaltpläne als SVG exportieren</li>
+      </ul>
+
+      <a class="cta" href="app/">Zur App →</a>
+
+      <footer>
+        Freie Software · Zum Starten auf „Zur App" klicken.
+      </footer>
+    </main>
+  </body>
+</html>

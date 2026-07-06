@@ -3,6 +3,10 @@ import type { ComponentDescriptor, LibraryEntry, LibraryScope } from "@core/libr
 import { ModelParser } from "@core/library/ModelParser.js";
 import { registerSymbol } from "@sym/asyParser.js";
 
+/** Library API endpoint, relative to the app's base path so it works under a
+ *  subpath deployment (e.g. /librespice/app/) as well as at the root. */
+const API_LIBRARY = `${import.meta.env.BASE_URL}api/library`;
+
 /**
  * Holds imported LTSpice models/subcircuits, mirroring CircuitSim's "Add to
  * Local" vs "Use Temp" split, plus a third `server` scope:
@@ -127,7 +131,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
   fetchServerLibrary: async () => {
     let data: { models?: string[]; symbols?: { name: string; raw: string }[]; components?: ComponentDescriptor[] };
     try {
-      const res = await fetch("/api/library");
+      const res = await fetch(API_LIBRARY);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       data = await res.json();
     } catch {
@@ -186,7 +190,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
 
   saveEntry: async (payload) => {
     try {
-      const res = await fetch("/api/library", {
+      const res = await fetch(API_LIBRARY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

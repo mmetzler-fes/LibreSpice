@@ -6,6 +6,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Public base path the SPA is served under. Keep in sync with the runtime
+# APP_BASE (e.g. build with --build-arg BASE_PATH=/librespice/app/ and run with
+# APP_BASE=/librespice/app/). Defaults to root.
+ARG BASE_PATH=/
+ENV BASE_PATH=$BASE_PATH
+
 # Build the static bundle into /app/dist.
 COPY . .
 RUN npm run build
@@ -21,9 +27,14 @@ ENV LIBRESPICE_LIB_DIR=/data/lib
 COPY server/package.json server/package-lock.json* ./server/
 RUN cd server && npm install --omit=dev --no-audit --no-fund
 
-# App: server code + built assets.
+# App: server code + built assets + static landing page.
 COPY server ./server
+COPY site ./site
 COPY --from=build /app/dist ./dist
+
+# Subpath hosting: set to match the build's BASE_PATH, e.g. /librespice/app/.
+# Default "/" serves the app at the root (no separate landing page).
+ENV APP_BASE=/
 
 # Run as the non-root `node` user (uid/gid 1000) so files written into the
 # library volume are owned by a normal user, not root. Pre-create the library

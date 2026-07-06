@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 import { resolve } from "path";
 
 export default defineConfig({
+  // Public base path the app is served under. Default "/" for local dev and
+  // root deployments; set e.g. BASE_PATH=/librespice/app/ to host it under a
+  // subpath. All asset URLs, the share link and API calls derive from this.
+  base: process.env.BASE_PATH || "/",
   plugins: [react()],
   resolve: {
     alias: {
