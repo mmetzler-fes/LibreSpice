@@ -83,8 +83,8 @@ export const VoltageSourceSymbol = () => (
     <circle cx="0" cy="0" r="20" fill="none" stroke="currentColor" strokeWidth="1.5" />
     <line x1="0" y1="-30" x2="0" y2="-20" stroke="currentColor" strokeWidth="1.5" />
     <line x1="0" y1="20" x2="0" y2="30" stroke="currentColor" strokeWidth="1.5" />
-    <text x="0" y="-6" textAnchor="middle" fontSize="12" fill="currentColor">+</text>
-    <text x="0" y="10" textAnchor="middle" fontSize="12" fill="currentColor">−</text>
+    <text x="0" y="-5" textAnchor="middle" fontSize="16" fontWeight="700" fill="currentColor">+</text>
+    <text x="0" y="11" textAnchor="middle" fontSize="16" fontWeight="700" fill="currentColor">−</text>
   </g>
 );
 

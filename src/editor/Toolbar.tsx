@@ -9,6 +9,7 @@ import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
+import { SymbolPreview } from "./SymbolPreview.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
 
@@ -19,29 +20,7 @@ const Ico = ({ d, size = 18 }: { d: string; size?: number }) => (
   </svg>
 );
 
-// Schematic-specific small symbols rendered as SVG
-const SymR = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <rect x="-5" y="-9" width="10" height="18" rx="1" fill="none" stroke="currentColor" strokeWidth="1.8" />
-  </svg>
-);
-const SymC = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <line x1="-7" y1="-3" x2="7" y2="-3" stroke="currentColor" strokeWidth="2" />
-    <line x1="-7" y1="3" x2="7" y2="3" stroke="currentColor" strokeWidth="2" />
-  </svg>
-);
-const SymL = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <path d="M-6,-8 Q0,-8 0,-2 Q0,4 6,4" fill="none" stroke="currentColor" strokeWidth="1.8" />
-  </svg>
-);
-const SymD = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <polygon points="0,-9 8,6 -8,6" fill="currentColor" />
-    <line x1="-9" y1="6" x2="9" y2="6" stroke="currentColor" strokeWidth="2" />
-  </svg>
-);
+// Ground keeps its own dedicated toolbar glyph (no palette entry requested).
 const SymGnd = () => (
   <svg width="18" height="18" viewBox="-9 -12 18 24">
     <line x1="0" y1="-10" x2="0" y2="-2" stroke="currentColor" strokeWidth="2" />
@@ -50,39 +29,13 @@ const SymGnd = () => (
     <line x1="-2" y1="8" x2="2" y2="8" stroke="currentColor" strokeWidth="2.2" />
   </svg>
 );
-const SymV = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    <text x="0" y="-1" textAnchor="middle" fontSize="9" fill="currentColor" stroke="none">V</text>
-  </svg>
+
+// Quick-place buttons reuse the sidebar palette's symbols (current norm variant),
+// inheriting the button's text color so active/dark/disabled states still apply.
+const TbSym = ({ type }: { type: ComponentType }) => (
+  <SymbolPreview type={type} size={24} margin={3} strokeWidth={1.4} color="currentColor" />
 );
-const SymI = () => (
-  <svg width="18" height="18" viewBox="-9 -12 18 24">
-    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    <text x="0" y="-1" textAnchor="middle" fontSize="9" fill="currentColor" stroke="none">I</text>
-  </svg>
-);
-const SymQ = () => (
-  <svg width="18" height="18" viewBox="-12 -12 24 24">
-    <line x1="-4" y1="-10" x2="-4" y2="10" stroke="currentColor" strokeWidth="2" />
-    <line x1="-10" y1="0" x2="-4" y2="0" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="-4" y1="-6" x2="8" y2="-10" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="-4" y1="6" x2="8" y2="10" stroke="currentColor" strokeWidth="1.8" />
-    <polygon points="3,8 8,10 6,5" fill="currentColor" />
-  </svg>
-);
-const SymM = () => (
-  <svg width="18" height="18" viewBox="-12 -12 24 24">
-    <line x1="-4" y1="-10" x2="-4" y2="10" stroke="currentColor" strokeWidth="2" strokeDasharray="3 2" />
-    <line x1="2" y1="-7" x2="2" y2="7" stroke="currentColor" strokeWidth="2" />
-    <line x1="-10" y1="0" x2="2" y2="0" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="2" y1="-6" x2="9" y2="-6" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="2" y1="6" x2="9" y2="6" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="9" y1="-6" x2="9" y2="-10" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="9" y1="6" x2="9" y2="10" stroke="currentColor" strokeWidth="1.8" />
-    <polygon points="4,3 9,6 4,9" fill="currentColor" />
-  </svg>
-);
+
 // ── Toolbar helpers ───────────────────────────────────────────────────────────
 
 interface TBtnProps {
@@ -404,16 +357,16 @@ export function Toolbar() {
 
       {/* ── Quick-place components ── */}
       <TBtn title="Place Resistor (R)" active={isPlacing("resistor")} onClick={() => handlePlace("resistor")}>
-        <SymR />
+        <TbSym type="resistor" />
       </TBtn>
       <TBtn title="Place Capacitor (C)" active={isPlacing("capacitor")} onClick={() => handlePlace("capacitor")}>
-        <SymC />
+        <TbSym type="capacitor" />
       </TBtn>
       <TBtn title="Place Inductor (L)" active={isPlacing("inductor")} onClick={() => handlePlace("inductor")}>
-        <SymL />
+        <TbSym type="inductor" />
       </TBtn>
       <TBtn title="Place Diode (D)" active={isPlacing("diode")} onClick={() => handlePlace("diode")}>
-        <SymD />
+        <TbSym type="diode" />
       </TBtn>
       <TBtn title="Place Ground (G)" active={isPlacing("ground")} onClick={() => handlePlace("ground")}>
         <SymGnd />
@@ -422,19 +375,19 @@ export function Toolbar() {
       <Divider />
 
       <TBtn title="Place Voltage Source (V)" active={isPlacing("vsource")} onClick={() => handlePlace("vsource")}>
-        <SymV />
+        <TbSym type="vsource" />
       </TBtn>
       <TBtn title="Place Current Source (I)" active={isPlacing("isource")} onClick={() => handlePlace("isource")}>
-        <SymI />
+        <TbSym type="isource" />
       </TBtn>
 
       <Divider />
 
       <TBtn title="Place NPN Transistor (Q)" active={isPlacing("bjt_npn")} onClick={() => handlePlace("bjt_npn")}>
-        <SymQ />
+        <TbSym type="bjt_npn" />
       </TBtn>
       <TBtn title="Place NMOSFET (M)" active={isPlacing("mosfet_n")} onClick={() => handlePlace("mosfet_n")}>
-        <SymM />
+        <TbSym type="mosfet_n" />
       </TBtn>
 
       <Divider />

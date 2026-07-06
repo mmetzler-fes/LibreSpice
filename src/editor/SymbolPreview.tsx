@@ -43,8 +43,12 @@ export function SymbolPreview({ type, size, margin = 4, strokeWidth = 1.2, color
   const Fallback = FALLBACK_SYMBOLS[type];
   if (Fallback) {
     // Match ComponentNode's fallback rendering exactly (viewBox -40..40 in an 80px box).
+    // `non-scaling-stroke` (see index.css) keeps the hand-drawn symbols' strokes
+    // at their authored pixel width instead of shrinking with the 80→size scale,
+    // so they read as boldly as the fit-to-box `.asy` symbols (e.g. the voltage
+    // source, which otherwise came out noticeably thinner in the palette/toolbar).
     return (
-      <svg width={size} height={size} viewBox="-40 -40 80 80" style={{ flexShrink: 0, color }}>
+      <svg width={size} height={size} viewBox="-40 -40 80 80" className="sym-preview-fallback" style={{ flexShrink: 0, color }}>
         <Fallback />
       </svg>
     );

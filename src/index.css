@@ -55,3 +55,10 @@ body {
   outline: none !important;
   box-shadow: none !important;
 }
+
+/* Hand-drawn fallback symbols in the palette/toolbar previews are authored in an
+   80-unit box and shrunk to ~24-30px, which would thin their strokes. Keep them
+   at their authored pixel width so they read as boldly as the .asy symbols. */
+.sym-preview-fallback * {
+  vector-effect: non-scaling-stroke;
+}
