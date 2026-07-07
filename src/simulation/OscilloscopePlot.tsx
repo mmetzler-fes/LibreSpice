@@ -427,15 +427,46 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     input.click();
   };
 
-  // No result, or a result without a usable time base (e.g. failed run, `.op`).
-  if (!result || !result.time || result.time.length === 0) {
+  const noData = (
+    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: isDark ? "#0f172a" : "#f8fafc" }}>
+      <p style={{ margin: 0, fontSize: compact ? 12 : 14 }}>No simulation data</p>
+      <p style={{ margin: 0, fontSize: 11, color: "#475569" }}>Run simulation — double-click a component to probe</p>
+    </div>
+  );
+  if (!result) return noData;
+
+  // Operating point (`.op`) — or any single-point result — has one DC value per
+  // signal and no sweep/time axis to plot, so show the values as a table
+  // (LTSpice-style) instead of an empty graph.
+  if (analysisType === "op" || result.time?.length === 1) {
+    const rows = dedupeProbes(result.variables)
+      .filter(({ raw }) => raw !== "time" && raw !== "frequency")
+      .map(({ raw, display }) => ({ display, value: result.data[raw]?.[0] ?? NaN, unit: inferUnit(raw) }));
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: isDark ? "#0f172a" : "#f8fafc" }}>
-        <p style={{ margin: 0, fontSize: compact ? 12 : 14 }}>No simulation data</p>
-        <p style={{ margin: 0, fontSize: 11, color: "#475569" }}>Run simulation — double-click a component to probe</p>
+      <div style={{ height: "100%", overflow: "auto", background: isDark ? "#0f172a" : "#f8fafc", padding: compact ? 12 : 20 }}>
+        <div style={{ fontSize: compact ? 12 : 14, fontWeight: 600, color: isDark ? "#e2e8f0" : "#1e293b", marginBottom: 10 }}>
+          {analysisType === "op" ? "Operating Point (.op)" : "DC bias values"}
+        </div>
+        {rows.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>No node voltages or currents in the result.</p>
+        ) : (
+          <table style={{ borderCollapse: "collapse", fontFamily: "monospace", fontSize: compact ? 11 : 13 }}>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.display}>
+                  <td style={{ padding: "3px 24px 3px 0", color: isDark ? "#94a3b8" : "#475569", whiteSpace: "nowrap" }}>{r.display}</td>
+                  <td style={{ padding: "3px 0", textAlign: "right", color: isDark ? "#e2e8f0" : "#1e293b", whiteSpace: "nowrap" }}>{fmtVal(r.value, r.unit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     );
   }
+
+  // No usable time base (e.g. a failed run).
+  if (!result.time || result.time.length === 0) return noData;
 
   const sidebarW = compact ? 150 : 210;
 
