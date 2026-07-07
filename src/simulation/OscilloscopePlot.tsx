@@ -3,7 +3,7 @@ import { useSimulationStore, type SimulationResult } from "@store/simulationStor
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
-import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel } from "./plotStore.js";
+import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel, type YScale } from "./plotStore.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
@@ -131,6 +131,50 @@ function logTicks(min: number, max: number): number[] {
     }
   }
   return ticks;
+}
+
+/** Every integer decade multiple (1·10ⁿ…9·10ⁿ) in range — minor grid for log axes. */
+function logMinorTicks(min: number, max: number): number[] {
+  if (min <= 0 || max <= 0) return [];
+  const lo = Math.floor(Math.log10(min));
+  const hi = Math.ceil(Math.log10(max));
+  const ticks: number[] = [];
+  for (let e = lo; e <= hi; e++) {
+    for (let m = 1; m < 10; m++) {
+      const v = m * 10 ** e;
+      if (v >= min && v <= max) ticks.push(v);
+    }
+  }
+  return ticks;
+}
+
+/** Sub-divide each major interval into `divisions` — minor grid for linear axes. */
+function minorTicksLinear(majors: number[], divisions: number): number[] {
+  if (majors.length < 2 || divisions < 2) return [];
+  const step = (majors[1] - majors[0]) / divisions;
+  const out: number[] = [];
+  for (let i = 0; i < majors.length - 1; i++) {
+    for (let d = 1; d < divisions; d++) out.push(majors[i] + d * step);
+  }
+  return out;
+}
+
+/**
+ * Forward/inverse maps for a y-axis scale mode. `fwd` takes a data value into
+ * the space the axis is linear in (identity / log10 / dB); `inv` returns from
+ * that space back to a data value (used to label ticks). Log and dB are only
+ * defined for positive magnitudes — non-positive values map to NaN so the line
+ * simply breaks there.
+ */
+function yScaleMaps(mode: YScale): { fwd: (v: number) => number; inv: (u: number) => number } {
+  switch (mode) {
+    case "log":
+      return { fwd: (v) => (v > 0 ? Math.log10(v) : NaN), inv: (u) => 10 ** u };
+    case "db":
+      return { fwd: (v) => (Math.abs(v) > 0 ? 20 * Math.log10(Math.abs(v)) : NaN), inv: (u) => 10 ** (u / 20) };
+    default:
+      return { fwd: (v) => v, inv: (u) => u };
+  }
 }
 
 interface ViewRange { xMin: number; xMax: number; yMin: number; yMax: number }
@@ -396,7 +440,11 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const sidebarW = compact ? 150 : 210;
 
   return (
-    <div style={{ height: "100%", display: "flex", overflow: "hidden", background: isDark ? "#0f172a" : "#f8fafc" }}>
+    // Scroll wrapper: under heavy browser zoom (Ctrl+wheel) the fixed-size
+    // sidebar and min-height panels can grow past the viewport — scroll to reach
+    // the rest instead of clipping it.
+    <div style={{ height: "100%", overflow: "auto", background: isDark ? "#0f172a" : "#f8fafc" }}>
+    <div style={{ height: "100%", minWidth: compact ? 320 : 480, minHeight: compact ? 180 : 300, display: "flex" }}>
       {/* ── Sidebar: probes, colours, expressions ── */}
       <div style={{
         width: sidebarW, flexShrink: 0, borderRight: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
@@ -554,6 +602,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           );
         })}
       </div>
+    </div>
     </div>
   );
 }
@@ -793,8 +842,45 @@ function PlotPanelView(props: PlotPanelViewProps) {
     if (logX) return t <= 0 ? NaN : ((Math.log10(t) - lxMin) / (lxMax - lxMin)) * plotW;
     return ((t - vr.xMin) / (vr.xMax - vr.xMin)) * plotW;
   };
-  const mkToSy = (g: { yMin: number; yMax: number }) =>
-    (v: number): number => plotH - ((v - g.yMin) / (g.yMax - g.yMin)) * plotH;
+
+  // y-axis scale (linear / log10 / dB). Log and dB axes are linear in fwd-space
+  // (log10 v / 20·log10|v|), so their extent is fitted from the data there — the
+  // linear-space yMin/yMax (and their manual overrides) don't apply.
+  const yScale: YScale = panel.yScale ?? "linear";
+  const ymap = yScaleMaps(yScale);
+  const fwdDomain = (g: { yMin: number; yMax: number; traces: string[] }): [number, number] => {
+    if (yScale === "linear") return [g.yMin, g.yMax];
+    let lo = Infinity, hi = -Infinity;
+    for (const tr of g.traces) {
+      const d = seriesMap[tr];
+      if (!d) continue;
+      for (const v of d) { const f = ymap.fwd(v); if (isFinite(f)) { if (f < lo) lo = f; if (f > hi) hi = f; } }
+    }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.05;
+    return [lo - pad, hi + pad];
+  };
+  const mkToSy = (g: { yMin: number; yMax: number; traces: string[] }) => {
+    const [fLo, fHi] = fwdDomain(g);
+    return (v: number): number => plotH - ((ymap.fwd(v) - fLo) / (fHi - fLo)) * plotH;
+  };
+  // y-axis tick data-values + labels for one group, honouring the scale mode.
+  // The `tick` field (g.ticks) sets the spacing: for dB it is a step in dB, for
+  // log a step in decades (log10), for linear a step in data units.
+  const yTicksFor = (g: AxisGroup): { v: number; label: string }[] => {
+    const [fLo, fHi] = fwdDomain(g);
+    if (yScale === "db")
+      return ticksFor(fLo, fHi, g.ticks, autoYCount).map((u) => ({ v: ymap.inv(u), label: `${Number(u.toPrecision(3))}dB` }));
+    if (yScale === "log") {
+      // With an explicit tick step, space decades linearly in log10; otherwise
+      // fall back to the natural 1·2·5 decade ticks.
+      if (g.ticks && g.ticks > 0)
+        return ticksFor(fLo, fHi, g.ticks, autoYCount).map((u) => ({ v: ymap.inv(u), label: fmtVal(ymap.inv(u)) }));
+      return logTicks(ymap.inv(fLo), ymap.inv(fHi)).map((v) => ({ v, label: fmtVal(v) }));
+    }
+    return ticksFor(g.yMin, g.yMax, g.ticks, autoYCount).map((v) => ({ v, label: fmtVal(v) }));
+  };
   const toSy = mkToSy(y0); // left axis
   const groupOf = (t: string) => yGroups.find((g) => g.traces.includes(t)) ?? y0;
 
@@ -814,8 +900,19 @@ function PlotPanelView(props: PlotPanelViewProps) {
   // Auto tick counts when no explicit spacing (panel.xTicks/yTicks) is set.
   const autoXCount = Math.max(4, Math.floor(plotW / 80));
   const autoYCount = Math.max(3, Math.floor(plotH / 60));
+  // Log x-axis: label 1·2·5 per decade; the 1…9 minor lines below fill in the
+  // classic 10-gridlines-per-decade look.
   const xTicks = logX ? logTicks(xLo, vr.xMax) : ticksFor(vr.xMin, vr.xMax, panel.xTicks, autoXCount);
-  const yTicks = ticksFor(y0.yMin, y0.yMax, y0.ticks, autoYCount);
+  const yTicks = yTicksFor(y0);
+
+  // Minor gridlines (no labels): finer grid between the labelled major lines,
+  // LTSpice-style. Log axes get every integer decade multiple (2…9); linear/dB
+  // axes get one line halfway between each major.
+  const xMinor = logX ? logMinorTicks(xLo, vr.xMax) : minorTicksLinear(xTicks, 2);
+  const [yfLo, yfHi] = yScale === "linear" ? [y0.yMin, y0.yMax] : fwdDomain(y0);
+  const yMinor = yScale === "log"
+    ? logMinorTicks(ymap.inv(Math.min(yfLo, yfHi)), ymap.inv(Math.max(yfLo, yfHi)))
+    : minorTicksLinear(yTicks.map((t) => t.v), 2);
 
   const nearestIndex = (t: number): number => {
     let lo = 0, hi = time.length - 1;
@@ -979,11 +1076,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
             extra={
               <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#94a3b8" }}>
                 <input type="checkbox" checked={logX} onChange={(e) => onUpdate({ logX: e.target.checked })} />
-                log
+                logarithmic
               </label>
             }
           />
-          {(yGroups.length > 0 ? yGroups : [y0]).map((g) => (
+          {(yGroups.length > 0 ? yGroups : [y0]).map((g, gi) => (
             <AxisFields
               key={g.unit || "y"}
               title={g.unit ? `y (${g.unit})` : "y-axis"}
@@ -992,6 +1089,26 @@ function PlotPanelView(props: PlotPanelViewProps) {
               onMin={(v) => setYAxis(g.unit, { min: v })}
               onMax={(v) => setYAxis(g.unit, { max: v })}
               onTicks={(v) => setYAxis(g.unit, { ticks: v })}
+              extra={gi === 0 ? (
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#94a3b8" }}>
+                  scale
+                  <select
+                    value={panel.yScale ?? "linear"}
+                    onChange={(e) => onUpdate({ yScale: e.target.value as YScale })}
+                    title="y-axis scale"
+                    style={{
+                      fontSize: 9, padding: "1px 2px",
+                      background: isDark ? "#0b1120" : "#fff",
+                      color: isDark ? "#e2e8f0" : "#1e293b",
+                      border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+                    }}
+                  >
+                    <option value="linear">linear</option>
+                    <option value="log">logarithmic</option>
+                    <option value="db">decibel</option>
+                  </select>
+                </label>
+              ) : undefined}
             />
           ))}
         </div>
@@ -1012,6 +1129,13 @@ function PlotPanelView(props: PlotPanelViewProps) {
           <rect width={dims.w} height={dims.h} fill={th.bg} />
           <rect x={margin.left} y={margin.top} width={plotW} height={plotH} fill={th.plot} rx={2} />
           <g transform={`translate(${margin.left},${margin.top})`}>
+            {/* Minor gridlines (dashed) — drawn first so the major lines sit on top */}
+            {xMinor.map((t) => { const x = toSx(t); return isFinite(x) ? (
+              <line key={`xm-${t}`} x1={x} y1={0} x2={x} y2={plotH} stroke={th.grid} strokeWidth={1} strokeDasharray="3 3" />
+            ) : null; })}
+            {yMinor.map((v) => { const y = toSy(v); return isFinite(y) ? (
+              <line key={`ym-${v}`} x1={0} y1={y} x2={plotW} y2={y} stroke={th.grid} strokeWidth={1} strokeDasharray="3 3" />
+            ) : null; })}
             {xTicks.map((t) => (
               <g key={t}>
                 <line x1={toSx(t)} y1={0} x2={toSx(t)} y2={plotH} stroke={th.grid} strokeWidth={1} />
@@ -1022,17 +1146,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <text x={plotW / 2} y={plotH + 26} textAnchor="middle" fontSize={9} fontWeight={600} fill={th.axis}>{xLabel}</text>
             )}
             {/* Left y-axis (first unit group) with horizontal grid */}
-            {yTicks.map((v) => (
+            {yTicks.map(({ v, label }) => (
               <g key={v}>
                 <line x1={0} y1={toSy(v)} x2={plotW} y2={toSy(v)} stroke={th.grid} strokeWidth={1} />
                 <text x={-4} y={toSy(v) + 3} textAnchor="end" fontSize={9}
-                  fill={yGroups.length > 1 ? colorFor(y0.traces[0]) : th.axis}>{fmtVal(v)}</text>
+                  fill={yGroups.length > 1 ? colorFor(y0.traces[0]) : th.axis}>{label}</text>
               </g>
             ))}
             {y0.unit && yGroups.length > 1 && (
               <text x={-4} y={-4} textAnchor="end" fontSize={9} fill={colorFor(y0.traces[0])}>{y0.unit}</text>
             )}
-            {vr.yMin < 0 && vr.yMax > 0 && (
+            {yScale === "linear" && vr.yMin < 0 && vr.yMax > 0 && (
               <line x1={0} y1={toSy(0)} x2={plotW} y2={toSy(0)} stroke={th.line} strokeWidth={1} strokeDasharray="4 3" />
             )}
 
@@ -1044,10 +1168,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
               return (
                 <g key={g.unit || r}>
                   <line x1={xLine} y1={0} x2={xLine} y2={plotH} stroke={th.line} strokeWidth={1} />
-                  {ticksFor(g.yMin, g.yMax, g.ticks, autoYCount).map((v) => (
+                  {yTicksFor(g).map(({ v, label }) => (
                     <g key={v}>
                       <line x1={xLine} y1={sy(v)} x2={xLine + 3} y2={sy(v)} stroke={col} strokeWidth={1} />
-                      <text x={xLine + 5} y={sy(v) + 3} textAnchor="start" fontSize={9} fill={col}>{fmtVal(v)}</text>
+                      <text x={xLine + 5} y={sy(v) + 3} textAnchor="start" fontSize={9} fill={col}>{label}</text>
                     </g>
                   ))}
                   {g.unit && <text x={xLine + 5} y={-4} textAnchor="start" fontSize={9} fill={col}>{g.unit}</text>}
@@ -1295,6 +1419,7 @@ function AxisFields({ title, min, max, ticks, minLabel, maxLabel, onMin, onMax, 
  * freely; the value is committed on blur / Enter.
  */
 function AxisInput({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
+  const isDark = !usePlotStore((s) => s.svgLight);
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? (value === undefined || !isFinite(value) ? "" : siFormat(value));
 
@@ -1317,7 +1442,12 @@ function AxisInput({ label, value, onChange }: { label: string; value?: number; 
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") { commit(); (e.target as HTMLInputElement).blur(); } }}
-        style={{ width: 52, padding: "2px 4px", fontSize: 9, background: "#0b1120", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 3 }}
+        style={{
+          width: 52, padding: "2px 4px", fontSize: 9,
+          background: isDark ? "#0b1120" : "#fff",
+          color: isDark ? "#e2e8f0" : "#1e293b",
+          border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+        }}
       />
     </label>
   );

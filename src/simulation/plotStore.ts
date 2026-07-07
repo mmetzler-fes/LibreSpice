@@ -22,6 +22,9 @@ export const PLOT_PALETTE_LIGHT = [
   "#c026d3", "#0369a1", "#e11d48", "#65a30d",
 ];
 
+/** How the y-axis maps data values to screen: linear, log10, or decibel (20·log10|v|). */
+export type YScale = "linear" | "log" | "db";
+
 /** Per-panel axis configuration. Any `undefined` bound means "auto". */
 export interface PlotPanel {
   id: string;
@@ -34,6 +37,8 @@ export interface PlotPanel {
   yMin?: number;
   yMax?: number;
   yTicks?: number;
+  /** y-axis scale mode (default "linear"). Log/dB auto-fit from the data. */
+  yScale?: YScale;
   /** Per-unit y-axis overrides, for panels showing several units (V, A, …). */
   yAxes?: Record<string, YAxisOverride>;
   /** Fixed panel height in px (via the drag handle); unset = share space. */
