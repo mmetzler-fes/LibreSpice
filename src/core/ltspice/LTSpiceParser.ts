@@ -6,20 +6,32 @@ import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 
 
+/** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
+function siMult(suffix: string): number {
+  const s = suffix.trim().toLowerCase();
+  if (s.startsWith("meg")) return 1e6;
+  if (s.startsWith("g")) return 1e9;
+  if (s.startsWith("t")) return 1e12;
+  if (s.startsWith("k")) return 1e3;
+  if (s.startsWith("m")) return 1e-3;
+  if (s.startsWith("u") || s.startsWith("µ")) return 1e-6;
+  if (s.startsWith("n")) return 1e-9;
+  if (s.startsWith("p")) return 1e-12;
+  if (s.startsWith("f")) return 1e-15;
+  return 1;
+}
+
 function parseSI(val: string): number {
   if (!val) return 0;
-  const num = parseFloat(val);
+  const t = val.trim();
+  // European R/L/C notation using the SI letter as the decimal point:
+  // 4R7 = 4.7Ω, 1k5 = 1500, 1k591 = 1591, 2m2 = 2.2m. ("e" is excluded so a
+  // scientific literal like 1e3 is not mistaken for this form.)
+  const infix = t.match(/^(\d+)(meg|[rpnuµmkgtf])(\d+)$/i);
+  if (infix) return parseFloat(`${infix[1]}.${infix[3]}`) * siMult(infix[2]);
+  const num = parseFloat(t);
   if (isNaN(num)) return 0;
-  const suffix = val.replace(/^[-\d.]+/, "").trim().toLowerCase();
-  if (suffix.startsWith("meg")) return num * 1e6;
-  if (suffix.startsWith("g")) return num * 1e9;
-  if (suffix.startsWith("m")) return num * 1e-3;
-  if (suffix.startsWith("k")) return num * 1e3;
-  if (suffix.startsWith("u") || suffix.startsWith("µ")) return num * 1e-6;
-  if (suffix.startsWith("n")) return num * 1e-9;
-  if (suffix.startsWith("p")) return num * 1e-12;
-  if (suffix.startsWith("f")) return num * 1e-15;
-  return num;
+  return num * siMult(t.replace(/^[-\d.]+/, ""));
 }
 
 interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number }
@@ -302,7 +314,12 @@ export class LTSpiceParser {
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
     let cType = symbolToType(sym.name) || "resistor";
     const label = sym.attrs["InstName"] || sym.name;
-    const valueStr = sym.attrs["Value"] || "";
+    // LTSpice writes an empty source value as `""`; treat it as blank.
+    let valueStr = (sym.attrs["Value"] || "").trim();
+    if (valueStr === '""' || valueStr === "''") valueStr = "";
+    // A source's small-signal AC spec lives in a separate attribute
+    // (SYMATTR Value2, e.g. "AC 1"), often with the main Value left empty.
+    const value2 = (sym.attrs["Value2"] || "").trim();
 
     if (cType === "vsource") {
       if (valueStr.toUpperCase().startsWith("SINE")) cType = "sinesource";
@@ -367,7 +384,24 @@ export class LTSpiceParser {
       if (comp.hasOwnProperty("dcValue")) (comp as any).dcValue = num;
     }
 
+    // Small-signal AC magnitude from `AC <mag>` in Value/Value2 (a bare `AC`
+    // means unit amplitude in LTSpice). Without this the source has no AC
+    // excitation and a `.ac` sweep returns an all-zero response.
+    if ((comp as any).acAmplitude !== undefined) {
+      const acm = `${valueStr} ${value2}`.match(/\bAC\b\s*([-+0-9.eE]+[a-zµ]*)?/i);
+      if (acm) {
+        (comp as any).acAmplitude = acm[1] != null ? parseSI(acm[1]) : 1;
+        // An AC-only source (empty main Value) is DC 0, not the constructor default.
+        if (!valueStr && comp.hasOwnProperty("dcValue")) (comp as any).dcValue = 0;
+      }
+    }
+
     components.push(comp);
+
+    // On-canvas value caption: fall back to the AC spec for an AC-only source
+    // (empty main Value) so it isn't rendered blank.
+    let displayValue = valueStr;
+    if (!displayValue && (comp as any).acAmplitude) displayValue = `AC ${(comp as any).acAmplitude}`;
 
     // Note: LTSpice WINDOW positions are intentionally NOT imported as caption
     // offsets. Their coordinate frame doesn't line up with our native-scale
@@ -382,7 +416,7 @@ export class LTSpiceParser {
       data: {
         componentType: cType,
         label,
-        valueLabel: valueStr,
+        valueLabel: displayValue,
         rotation: deg,
       }
     });
