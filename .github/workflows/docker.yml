@@ -2,6 +2,12 @@ name: Build Docker image
 
 # Build the container on every push to main / version tag, and build (without
 # publishing) on pull requests so a broken Dockerfile is caught before merge.
+#
+# Two image variants are published because the app's public base path is baked
+# in at build time (Vite BASE_PATH):
+#   * <tags>       — served at the root "/"          (run with APP_BASE=/)
+#   * <tags>-app   — served under "/app/" with the   (run with APP_BASE=/app/)
+#                    landing page (site/) at "/"
 on:
   push:
     branches: [main]
@@ -37,7 +43,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive image tags
+      # ── Root variant (served at "/") ────────────────────────────────────────
+      - name: Derive image tags (root)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -49,7 +56,7 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - name: Build and push (root)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -57,5 +64,34 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=root
+          cache-to: type=gha,mode=max,scope=root
+
+      # ── Subpath variant (served under "/app/") ──────────────────────────────
+      - name: Derive image tags (app subpath)
+        id: meta-app
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # Same tags as the root variant, suffixed with "-app"
+          # (e.g. :latest-app, :main-app).
+          flavor: suffix=-app
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (app subpath)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_PATH=/app/
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
