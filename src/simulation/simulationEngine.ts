@@ -47,12 +47,28 @@ async function yieldAndContinue(): Promise<boolean> {
   return useSimulationStore.getState().status === "running";
 }
 
+/** Hard cap on a single ngspice run. Some errors (e.g. a failed result write on
+ * an unsupported directive) leave `runSim()` pending forever; without this the
+ * app would sit on "running" indefinitely. */
+const RUN_TIMEOUT_MS = 30_000;
+
 /** Run a single netlist and return its result plus the raw engine log. */
 async function runOnce(netlist: string): Promise<{ result: SimulationResult; log: string }> {
   const engine = await getSimulation();
   engine.setNetList(netlist);
-  const result: ResultType = await engine.runSim();
-  return { result: convertResult(result), log: engineLog(engine) };
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`ngspice did not return within ${RUN_TIMEOUT_MS / 1000}s (a directive may be unsupported)`)),
+      RUN_TIMEOUT_MS,
+    );
+  });
+  try {
+    const result = (await Promise.race([engine.runSim(), timeout])) as ResultType;
+    return { result: convertResult(result), log: engineLog(engine) };
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 export async function runSimulation(netlist: string): Promise<SimulationResult> {

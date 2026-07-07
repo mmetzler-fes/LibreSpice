@@ -119,12 +119,6 @@ export class NetlistGenerator {
       }
     }
 
-    // Compute branch currents for every device (R, C, L, sources, …) so they can
-    // be plotted as @dev[i]. Skip if the user already set the option themselves.
-    if (!/savecurrents/i.test(directives)) {
-      lines.push(".options savecurrents");
-    }
-
     // Parse directive lines – skip blank lines and full-line comments
     const directiveLines = directives
       .split("\n")
@@ -133,6 +127,18 @@ export class NetlistGenerator {
 
     // Only emit auto-generated analysis line when directives don't contain one
     const hasAnalysisInDirectives = directiveLines.some((l) => ANALYSIS_RE.test(l));
+    const isAc = directiveLines.some((l) => /^\.ac\b/i.test(l))
+      || (!hasAnalysisInDirectives && config.type === "ac");
+
+    // Compute branch currents for every device (R, C, L, sources, …) so they can
+    // be plotted as @dev[i]. Skip if the user already set the option themselves.
+    // Also skip for `.ac`: the bundled ngspice can't write a device-current
+    // vector (e.g. @c1[i]) in an AC run, and the failed write aborts the whole
+    // analysis (no result vector) — node voltages and source currents still work.
+    if (!isAc && !/savecurrents/i.test(directives)) {
+      lines.push(".options savecurrents");
+    }
+
     if (!hasAnalysisInDirectives) {
       lines.push(this._analysisLine(config));
     }
