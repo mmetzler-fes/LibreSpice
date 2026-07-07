@@ -24,19 +24,22 @@ interface SymbolPreviewProps {
   margin?: number;
   strokeWidth?: number;
   color?: string;
+  /** Render `.asy` symbols at native 1:1 scale (matching the canvas node), used
+   *  by the placement ghost so it is exactly the size of the placed component. */
+  nativeScale?: boolean;
 }
 
 /**
  * Renders a component type's symbol (current norm variant) at a fixed pixel box,
  * falling back to the hand-drawn React symbols for types without an `.asy`.
  */
-export function SymbolPreview({ type, size, margin = 4, strokeWidth = 1.2, color = "#334155" }: SymbolPreviewProps) {
+export function SymbolPreview({ type, size, margin = 4, strokeWidth = 1.2, color = "#334155", nativeScale = false }: SymbolPreviewProps) {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const sym = symbolForType(type, symbolNorm);
   if (sym) {
     return (
       <span style={{ width: size, height: size, flexShrink: 0, color, display: "inline-block" }}>
-        <AsySymbolView sym={sym} size={size} margin={margin} strokeWidth={strokeWidth} color={color} />
+        <AsySymbolView sym={sym} size={size} margin={margin} strokeWidth={strokeWidth} color={color} nativeScale={nativeScale} />
       </span>
     );
   }

@@ -139,13 +139,17 @@ interface AsySymbolViewProps {
   margin?: number;
   strokeWidth?: number;
   color?: string;
+  /** Render at the symbol's native 1:1 scale (as the canvas node does) instead
+   *  of fitting it to the box. Keeps the placement ghost the same size as the
+   *  placed component. */
+  nativeScale?: boolean;
 }
 
 /** Self-contained <svg> preview of a symbol — used by the palette. */
-export function AsySymbolView({ sym, size, margin = 6, strokeWidth = 1.2, color }: AsySymbolViewProps) {
-  const mapping = mapSymbol(sym, size, margin);
+export function AsySymbolView({ sym, size, margin = 6, strokeWidth = 1.2, color, nativeScale = false }: AsySymbolViewProps) {
+  const mapping = nativeScale ? mapSymbol(sym, size, 0, 0, true) : mapSymbol(sym, size, margin);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ color, display: "block" }}>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ color, display: "block", overflow: nativeScale ? "visible" : undefined }}>
       <AsyGeometry sym={sym} mapping={mapping} strokeWidth={strokeWidth} />
     </svg>
   );

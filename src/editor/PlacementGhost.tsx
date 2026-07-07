@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { SymbolPreview } from "./SymbolPreview.js";
-import { NODE_SIZE, NODE_MARGIN } from "./pinGeometry.js";
+import { NODE_SIZE } from "./pinGeometry.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
@@ -60,7 +60,9 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
         zIndex: 6,
       }}
     >
-      <SymbolPreview type={type} size={NODE_SIZE} margin={NODE_MARGIN} strokeWidth={1.6} color="#2563eb" />
+      {/* nativeScale: render at the node's 1:1 size (not fit-to-box) so the
+          ghost matches the placed component exactly, at any zoom. */}
+      <SymbolPreview type={type} size={NODE_SIZE} nativeScale strokeWidth={1.6} color="#2563eb" />
     </div>
   );
 }
