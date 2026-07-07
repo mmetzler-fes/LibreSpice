@@ -100,8 +100,14 @@ function nodeVoltage(result: SimulationResult, name: string): Val {
   return result.data[v];
 }
 function deviceCurrent(result: SimulationResult, name: string): Val {
+  const lower = name.toLowerCase();
   const v = matchResultVariable(result, [
-    `I(${name})`, `i(${name})`, `@${name}[i]`, `@${name.toLowerCase()}[i]`, `${name}#branch`,
+    `I(${name})`, `i(${name})`,
+    // ngspice's `.options savecurrents` names device currents `i(@r1[i])`, so
+    // match that form exactly rather than relying on the fuzzy fallback (which
+    // could latch onto an unrelated vector that merely contains the name).
+    `i(@${name}[i])`, `i(@${lower}[i])`,
+    `@${name}[i]`, `@${lower}[i]`, `${name}#branch`,
   ]);
   if (!v) throw new EvalError(`unknown device ${name}`);
   return result.data[v];
