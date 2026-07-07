@@ -145,7 +145,7 @@ export class NetlistGenerator {
 
     // Append custom directive lines, normalising LTSpice syntax for ngspice.
     for (const dl of directiveLines) {
-      lines.push(normalizeMeasDirective(normalizeTranDirective(dl)));
+      lines.push(normalizeMeasDirective(normalizeTranDirective(normalizeDcDirective(dl))));
     }
 
     lines.push(".end");
@@ -251,6 +251,18 @@ export function normalizeTranDirective(line: string): string {
 }
 
 /**
+ * A bare `.dc` (no sweep source/range) is invalid in ngspice — it aborts the
+ * whole run with "Bad syntax". Interpret an argument-less `.dc` as the operating
+ * point (`.op`), the simplest DC analysis, so it yields a usable bias result
+ * instead of crashing. A `.dc` that already has a source + range is left as-is.
+ */
+export function normalizeDcDirective(line: string): string {
+  const m = line.match(/^\s*\.dc\b(.*)$/i);
+  if (!m) return line;
+  return m[1].trim() === "" ? ".op" : line;
+}
+
+/**
  * Normalise an LTSpice `.meas` directive for ngspice: LTSpice writes the window
  * as `FROM 20ms TO 40ms`, ngspice needs `from=20ms to=40ms`. TRIG/TARG clauses
  * are left untouched.
@@ -299,6 +311,9 @@ export function parseAnalysisDirective(line: string): SimulationConfig | null {
     };
   }
   if (type === "dc") {
+    // A bare `.dc` (no source/range) is not a valid sweep — treat it as the
+    // operating point, matching normalizeDcDirective's netlist rewrite.
+    if (rest.length === 0) return { type: "op" };
     return {
       type: "dc",
       sourceName: rest[0] ?? "V1",
