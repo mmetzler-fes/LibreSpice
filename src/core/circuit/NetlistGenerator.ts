@@ -332,3 +332,19 @@ export function parseAnalysisDirective(line: string): SimulationConfig | null {
     stopFreq: parseSpiceNumber(rest[3]) ?? 1e6,
   };
 }
+
+/**
+ * Keep the SPICE-directives text in sync with the analysis chosen in the UI.
+ * When the text already carries an analysis line (`.tran`/`.ac`/`.dc`/`.op`) —
+ * e.g. imported from an `.asc` — it takes precedence over the config in the
+ * generated netlist, so the Analysis-Type dropdown would otherwise be ignored.
+ * Replace that first analysis line with the chosen config; if there is none,
+ * leave the text untouched (the generator auto-emits the config's line).
+ */
+export function syncAnalysisDirective(text: string, config: SimulationConfig): string {
+  const lines = text.split("\n");
+  const idx = lines.findIndex((l) => ANALYSIS_RE.test(l.trim()));
+  if (idx < 0) return text;
+  lines[idx] = formatAnalysisDirective(config);
+  return lines.join("\n");
+}

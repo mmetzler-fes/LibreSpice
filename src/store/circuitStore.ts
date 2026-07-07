@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
-import { NetlistGenerator, parseAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
+import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
@@ -198,7 +198,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   setSimulationConfig: (config) => {
-    set({ simulationConfig: config });
+    // If the SPICE-directives text carries an analysis line (e.g. imported from
+    // an `.asc`), it overrides the config in the netlist — so rewrite that line
+    // to the chosen analysis, otherwise switching the Analysis-Type dropdown
+    // would have no effect.
+    set((state) => ({ simulationConfig: config, spiceDirectives: syncAnalysisDirective(state.spiceDirectives, config) }));
     get().regenerateNetlist();
   },
 
