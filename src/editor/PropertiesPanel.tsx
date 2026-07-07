@@ -9,15 +9,18 @@ const SI_MULT: Record<string, number> = {
   k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12, "": 1,
 };
 
-/** Parse a number with an optional SI prefix (e.g. "4.7k", "10n", "1.5M"). */
+/** Parse a number with an optional SI prefix (e.g. "4.7k", "10n", "1.5M", "1MEG"). */
 function parseSI(s: string): number | null {
   const t = s.trim();
   if (t === "") return null;
-  const m = t.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([pnuµmkKMGT]?)/);
+  const m = t.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zµ]*)/i);
   if (!m) return null;
   const base = parseFloat(m[1]);
   if (!isFinite(base)) return null;
-  return base * (SI_MULT[m[2]] ?? 1);
+  const suffix = m[2];
+  // "MEG"/"meg" (LTSpice) and a lone "M" both mean 1e6 here; a lone "m" is milli.
+  if (/^meg/i.test(suffix)) return base * 1e6;
+  return base * (SI_MULT[suffix[0] ?? ""] ?? 1);
 }
 
 /** Format a number with a compact SI prefix (no unit), e.g. 1000 → "1k". */
@@ -26,7 +29,7 @@ function fmtSIShort(v: number): string {
   if (v === 0) return "0";
   const a = Math.abs(v);
   const steps: [number, string][] = [
-    [1e9, "G"], [1e6, "M"], [1e3, "k"], [1, ""],
+    [1e9, "G"], [1e6, "MEG"], [1e3, "k"], [1, ""],
     [1e-3, "m"], [1e-6, "µ"], [1e-9, "n"], [1e-12, "p"],
   ];
   for (const [f, suffix] of steps) {

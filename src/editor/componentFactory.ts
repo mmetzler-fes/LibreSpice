@@ -96,7 +96,8 @@ function fmtSI(v: number, unit: string): string {
   const a = Math.abs(v);
   if (a === 0) return `0${unit}`;
   if (a >= 1e9)  return `${+(v / 1e9).toPrecision(3)}G${unit}`;
-  if (a >= 1e6)  return `${+(v / 1e6).toPrecision(3)}M${unit}`;
+  // 1e6 → "MEG", never "M": SPICE/LTSpice read a lone "M" as milli.
+  if (a >= 1e6)  return `${+(v / 1e6).toPrecision(3)}MEG${unit}`;
   if (a >= 1e3)  return `${+(v / 1e3).toPrecision(3)}k${unit}`;
   if (a >= 1)    return `${+v.toPrecision(3)}${unit}`;
   if (a >= 1e-3) return `${+(v * 1e3).toPrecision(3)}m${unit}`;

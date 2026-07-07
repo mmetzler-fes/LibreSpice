@@ -163,9 +163,13 @@ export class NetlistGenerator {
   }
 }
 
-/** SPICE-style engineering suffixes (case follows SPICE: `meg`=1e6, `m`=milli). */
+/**
+ * SPICE-style engineering suffixes. `MEG`=1e6, `m`=milli (case matters: SPICE and
+ * LTSpice read a lone `M` as *milli*, so 1e6 is always written as `MEG` — never
+ * `M` — to stay compatible with LTSpice).
+ */
 const SPICE_UNITS: { e: number; s: string }[] = [
-  { e: 12, s: "T" }, { e: 9, s: "g" }, { e: 6, s: "meg" }, { e: 3, s: "k" }, { e: 0, s: "" },
+  { e: 12, s: "T" }, { e: 9, s: "g" }, { e: 6, s: "MEG" }, { e: 3, s: "k" }, { e: 0, s: "" },
   { e: -3, s: "m" }, { e: -6, s: "u" }, { e: -9, s: "n" }, { e: -12, s: "p" }, { e: -15, s: "f" },
 ];
 
