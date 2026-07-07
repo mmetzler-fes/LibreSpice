@@ -35,6 +35,18 @@ function engineLog(engine: Simulation): string {
   return parts.join("\n\n");
 }
 
+/**
+ * Yield to the event loop between sweep runs so the browser can paint (progress,
+ * "running" state) and process the Stop button — each `runSim` is a blocking
+ * WASM call, so without this a many-step sweep freezes the tab until it finishes.
+ * Returns false if the user pressed Stop (status left "running"), so the caller
+ * can abort the sweep.
+ */
+async function yieldAndContinue(): Promise<boolean> {
+  await new Promise((r) => setTimeout(r));
+  return useSimulationStore.getState().status === "running";
+}
+
 /** Run a single netlist and return its result plus the raw engine log. */
 async function runOnce(netlist: string): Promise<{ result: SimulationResult; log: string }> {
   const engine = await getSimulation();
@@ -69,16 +81,25 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
     const isSource = new Map(steps.map((s) => [s.name, !!s.isSource]));
     const runs: { combo: (typeof combos)[number]; result: SimulationResult; log: string }[] = [];
     const measRows: string[] = [];
-    for (const combo of combos) {
+    const setProgress = useSimulationStore.getState().setProgress;
+    setProgress({ done: 0, total: combos.length });
+    if (combos.length > 1) await new Promise((r) => setTimeout(r)); // paint before first blocking run
+    for (let i = 0; i < combos.length; i++) {
+      // Between runs, let the UI paint and honour a Stop; abort with the partial
+      // results gathered so far rather than discarding the whole sweep.
+      if (i > 0 && !(await yieldAndContinue())) break;
+      const combo = combos[i];
       const nl = combo.assignments.reduce(
         (acc, a) => (isSource.get(a.name) ? withDcSource(acc, a.name, a.value) : withParam(acc, a.name, a.value)),
         base,
       );
       const { result, log } = await runOnce(nl);
       runs.push({ combo, result, log });
+      setProgress({ done: i + 1, total: combos.length });
       const meas: Measurement[] = parseMeasurements(log);
       if (meas.length) measRows.push(`${combo.tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
     }
+    setProgress(null);
     const lastLog = runs[runs.length - 1]?.log ?? "";
     const paramName = steps.map((s) => s.name).join(", ");
     const measBlock = measRows.length ? `===== Measurements (.step ${paramName}) =====\n${measRows.join("\n")}\n\n` : "";
@@ -172,9 +193,15 @@ async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => v
     step: { param: dc.secondary.name, values: [] },
   };
   let lastLog = "";
-  for (const value of dc.secondary.values) {
+  const setProgress = useSimulationStore.getState().setProgress;
+  setProgress({ done: 0, total: dc.secondary.values.length });
+  if (dc.secondary.values.length > 1) await new Promise((r) => setTimeout(r)); // paint before first blocking run
+  for (let i = 0; i < dc.secondary.values.length; i++) {
+    if (i > 0 && !(await yieldAndContinue())) break;
+    const value = dc.secondary.values[i];
     const nl = withDcSource(base, dc.secondary.name, value);
     const { result, log } = await runOnce(nl);
+    setProgress({ done: i + 1, total: dc.secondary.values.length });
     lastLog = log;
     const tag = `${dc.secondary.name}=${formatSpiceNumber(value)}`;
     merged.step!.values.push(tag);

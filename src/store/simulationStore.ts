@@ -31,6 +31,8 @@ interface SimulationState {
   pendingProbes: string[];
   /** Raw ngspice stdout/stderr from the last run, for the Log panel. */
   log: string;
+  /** Progress of a multi-run `.step`/`.dc` sweep, else null. */
+  progress: { done: number; total: number } | null;
 }
 
 interface SimulationActions {
@@ -43,6 +45,7 @@ interface SimulationActions {
   addProbeCandidates: (candidates: string[]) => void;
   setHoveredVariable: (variable: string | null) => void;
   setLog: (log: string) => void;
+  setProgress: (progress: { done: number; total: number } | null) => void;
   /** Follow a net rename: update selected probes and the current result's keys. */
   renameNetVariable: (oldLabel: string, newLabel: string) => void;
   reset: () => void;
@@ -56,6 +59,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   hoveredVariable: null,
   pendingProbes: [],
   log: "",
+  progress: null,
 
   setStatus: (status) => set({ status }),
   setResult: (result) => {
@@ -80,12 +84,12 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       const firstReal = result.variables.find((v) => !isAxis(v) && !isConstant(v))
         ?? result.variables.find((v) => !isAxis(v));
       const next = merged.length > 0 ? merged : (firstReal ? [firstReal] : []);
-      set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [] });
+      set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [], progress: null });
     } else {
-      set({ result, status: "done", errorMessage: null });
+      set({ result, status: "done", errorMessage: null, progress: null });
     }
   },
-  setErrorMessage: (errorMessage) => set({ errorMessage, status: "error" }),
+  setErrorMessage: (errorMessage) => set({ errorMessage, status: "error", progress: null }),
   setSelectedVariables: (selectedVariables) => set({ selectedVariables }),
   toggleVariable: (variable) => {
     const current = get().selectedVariables;
@@ -123,6 +127,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   },
   setHoveredVariable: (hoveredVariable) => set({ hoveredVariable }),
   setLog: (log) => set({ log }),
+  setProgress: (progress) => set({ progress }),
   renameNetVariable: (oldLabel, newLabel) => {
     if (oldLabel === newLabel) return;
     const rw = (s: string) => renameNetInProbe(s, oldLabel, newLabel);
@@ -140,5 +145,5 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       return { selectedVariables, pendingProbes, result };
     });
   },
-  reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "" }),
+  reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "", progress: null }),
 }));

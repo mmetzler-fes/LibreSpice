@@ -91,7 +91,7 @@ export function Toolbar() {
     circuitName, setCircuitName, dataFlags,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, darkMode } = useUIStore();
-  const { status, setStatus, setResult, setErrorMessage } = useSimulationStore();
+  const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
 
   // When an opened folder holds several .asc files, let the user pick one.
   const [folderPick, setFolderPick] = useState<{ dir: any; files: { name: string; handle: any }[] } | null>(null);
@@ -379,6 +379,11 @@ export function Toolbar() {
           <rect x="5" y="5" width="14" height="14" fill={status === "running" ? "#dc2626" : "#94a3b8"} />
         </svg>
       </TBtn>
+      {progress && progress.total > 1 && (
+        <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap", padding: "0 4px" }}>
+          {`Sweep ${progress.done}/${progress.total}`}
+        </span>
+      )}
 
       <Divider />
 
