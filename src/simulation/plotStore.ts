@@ -59,6 +59,8 @@ interface PlotState {
   colors: Record<string, string>;
   /** Arithmetic traces (e.g. `V(a)-V(b)`), persisted across simulation runs. */
   expressions: string[];
+  /** Expressions currently toggled off (kept in the list, but not drawn). */
+  hiddenExpressions: string[];
   /** LTSpice "Sync. Horiz. Axes": all panels share one x-axis range. */
   syncX: boolean;
   /** Render the diagram (and its .svg export) on a white background. */
@@ -85,6 +87,10 @@ interface PlotActions {
   fitPanel: (id: string) => void;
   setColor: (trace: string, color: string) => void;
   addExpression: (expr: string) => void;
+  /** Rename an existing function expression in place, keeping its panel/colour. */
+  updateExpression: (oldExpr: string, newExpr: string) => void;
+  /** Toggle whether a function is drawn (kept in the list either way). */
+  toggleExpressionHidden: (expr: string) => void;
   removeExpression: (expr: string) => void;
   toggleSyncX: () => void;
   /** Toggle the diagram between the dark (screen) and light (print/beamer) look. */
@@ -105,6 +111,7 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
   traceToPanel: {},
   colors: {},
   expressions: [],
+  hiddenExpressions: [],
   syncX: false,
   svgLight: false,
 
@@ -177,11 +184,40 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
     set((s) => ({ expressions: [...s.expressions, trimmed] }));
   },
 
+  updateExpression: (oldExpr, newExpr) =>
+    set((s) => {
+      const trimmed = newExpr.trim();
+      // No-op on blank, unchanged, or a name that would collide with another
+      // existing expression.
+      if (!trimmed || trimmed === oldExpr) return {};
+      if (s.expressions.includes(trimmed)) return {};
+      const expressions = s.expressions.map((e) => (e === oldExpr ? trimmed : e));
+      // Carry the panel assignment and colour over to the new key.
+      const colors = { ...s.colors };
+      if (oldExpr in colors) { colors[trimmed] = colors[oldExpr]; delete colors[oldExpr]; }
+      const traceToPanel = { ...s.traceToPanel };
+      if (oldExpr in traceToPanel) { traceToPanel[trimmed] = traceToPanel[oldExpr]; delete traceToPanel[oldExpr]; }
+      // Preserve a hidden state across the rename.
+      const hiddenExpressions = s.hiddenExpressions.map((e) => (e === oldExpr ? trimmed : e));
+      return { expressions, colors, traceToPanel, hiddenExpressions };
+    }),
+
+  toggleExpressionHidden: (expr) =>
+    set((s) => ({
+      hiddenExpressions: s.hiddenExpressions.includes(expr)
+        ? s.hiddenExpressions.filter((e) => e !== expr)
+        : [...s.hiddenExpressions, expr],
+    })),
+
   removeExpression: (expr) =>
     set((s) => {
       const traceToPanel = { ...s.traceToPanel };
       delete traceToPanel[expr];
-      return { expressions: s.expressions.filter((e) => e !== expr), traceToPanel };
+      return {
+        expressions: s.expressions.filter((e) => e !== expr),
+        hiddenExpressions: s.hiddenExpressions.filter((e) => e !== expr),
+        traceToPanel,
+      };
     }),
 
   toggleSyncX: () =>
@@ -210,6 +246,7 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       traceToPanel: settings.traceToPanel ?? {},
       colors: settings.colors ?? {},
       expressions: settings.expressions ?? [],
+      hiddenExpressions: [],
       syncX: !!settings.syncX,
     });
   },
@@ -222,7 +259,7 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       for (const [k, v] of Object.entries(state.colors)) colors[rw(k)] = v;
       const traceToPanel: Record<string, string> = {};
       for (const [k, v] of Object.entries(state.traceToPanel)) traceToPanel[rw(k)] = v;
-      return { expressions: state.expressions.map(rw), colors, traceToPanel };
+      return { expressions: state.expressions.map(rw), hiddenExpressions: state.hiddenExpressions.map(rw), colors, traceToPanel };
     });
   },
 }));

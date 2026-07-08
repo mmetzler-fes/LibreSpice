@@ -232,9 +232,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const spiceDirectives = useCircuitStore((s) => s.spiceDirectives);
   const propertyVersion = useCircuitStore((s) => s.propertyVersion);
   const {
-    panels, traceToPanel, colors, expressions, syncX, svgLight,
+    panels, traceToPanel, colors, expressions, hiddenExpressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
-    addExpression, removeExpression, toggleSyncX,
+    addExpression, updateExpression, toggleExpressionHidden, removeExpression, toggleSyncX,
   } = usePlotStore();
   const isDark = !svgLight;
   // Active palette: bright for dark backgrounds, deep for light backgrounds.
@@ -276,9 +276,11 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   // .step sweep, expressions expand to one trace per parameter value so a
   // function like V(a)-V(b) is drawn for every step.
   const allTraces = useMemo(() => {
-    const exprTraces = stepTags ? expressions.flatMap((e) => stepTags.map((t) => `${e} @${t}`)) : expressions;
+    // Hidden functions stay in the list but aren't drawn.
+    const shown = expressions.filter((e) => !hiddenExpressions.includes(e));
+    const exprTraces = stepTags ? shown.flatMap((e) => stepTags.map((t) => `${e} @${t}`)) : shown;
     return [...new Set([...selectedVariables, ...exprTraces])];
-  }, [selectedVariables, expressions, stepTags]);
+  }, [selectedVariables, expressions, hiddenExpressions, stepTags]);
 
   // Resolve each trace to a data series (raw variable or evaluated expression).
   const seriesMap = useMemo(() => {
@@ -388,6 +390,20 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     addExpression(expr);
     setExprInput("");
     setExprError(null);
+  };
+
+  // Commit an inline edit of an existing function. Reject (return false, keeping
+  // the row in edit mode) when the new expression doesn't parse.
+  const handleEditExpression = (oldExpr: string, next: string): boolean => {
+    const trimmed = next.trim();
+    if (!trimmed) return false;
+    if (result) {
+      const r = evalExpression(result, trimmed, paramMap);
+      if (r.error) { setExprError(r.error); return false; }
+    }
+    setExprError(null);
+    updateExpression(oldExpr, trimmed);
+    return true;
   };
 
   // `step` is the grid spacing (our tick model); fall back to ~5 divisions.
@@ -589,15 +605,16 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               key={expr}
               label={expr}
               color={colorFor(expr)}
-              active
+              active={!hiddenExpressions.includes(expr)}
               draggable
               error={seriesMap.errors[expr]}
-              onToggle={() => removeExpression(expr)}
+              onToggle={() => toggleExpressionHidden(expr)}
               onDragStart={(e) => e.dataTransfer.setData(DND_MIME, expr)}
               onSwatch={() => setColorPickerFor(colorPickerFor === expr ? null : expr)}
               showPicker={colorPickerFor === expr}
               onPick={(c) => { setColor(expr, c); setColorPickerFor(null); }}
               onRemove={() => removeExpression(expr)}
+              onEdit={(next) => handleEditExpression(expr, next)}
             />
           ))}
         </div>
@@ -610,7 +627,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               value={exprInput}
               onChange={(e) => { setExprInput(e.target.value); setExprError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") handleAddExpression(); }}
-              placeholder="V(a)-V(b)"
+              placeholder="V(a)-V(b)  ·  {R1}*I(D2) [V]"
+              title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
               style={{
                 flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
                 background: isDark ? "#0b1120" : "#fff",
@@ -682,24 +700,40 @@ interface ProbeRowProps {
   showPicker: boolean;
   onPick: (c: string) => void;
   onRemove?: () => void;
+  /** When set, the row is an editable function; returns true if the edit is
+   *  accepted (valid), so the row can leave edit mode. */
+  onEdit?: (next: string) => boolean;
 }
 
-function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStart, onSwatch, showPicker, onPick, onRemove }: ProbeRowProps) {
+function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStart, onSwatch, showPicker, onPick, onRemove, onEdit }: ProbeRowProps) {
   const svgLight = usePlotStore((s) => s.svgLight);
   const isDark = !svgLight;
   const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+  // Set on Escape so the ensuing blur discards instead of committing.
+  const cancelled = useRef(false);
+
+  const beginEdit = () => { setDraft(label); setEditing(true); };
+  const commitEdit = () => {
+    if (cancelled.current) { cancelled.current = false; setEditing(false); return; }
+    // A no-op change (or one the store rejects, e.g. invalid) leaves edit mode
+    // only when accepted; keep editing so the user can fix a bad expression.
+    if (draft.trim() === label || onEdit?.(draft) !== false) setEditing(false);
+  };
+
   return (
     <div style={{ position: "relative" }}>
       <div
-        draggable={draggable}
+        draggable={draggable && !editing}
         onDragStart={onDragStart}
         style={{
           display: "flex", alignItems: "center", gap: 6,
           padding: "4px 6px", borderRadius: 4,
           background: active ? (isDark ? "#1e293b" : "#e2e8f0") : "transparent",
-          cursor: draggable ? "grab" : "pointer",
+          cursor: editing ? "text" : draggable ? "grab" : "pointer",
         }}
-        title={draggable ? "Drag into a panel" : undefined}
+        title={editing ? undefined : draggable ? "Drag into a panel" : undefined}
       >
         <button
           onClick={(e) => { e.stopPropagation(); onSwatch(); }}
@@ -710,19 +744,46 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
             background: active ? color : (isDark ? "#334155" : "#94a3b8"),
           }}
         />
-        <button
-          onClick={onToggle}
-          style={{
-            flex: 1, minWidth: 0, border: "none", background: "transparent", padding: 0,
-            textAlign: "left", cursor: "pointer",
-            fontSize: 10, fontFamily: "monospace",
-            color: error ? "#f87171" : active ? color : "#475569",
-            wordBreak: "break-all",
-          }}
-        >
-          {label}
-        </button>
-        {onRemove && (
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitEdit();
+              else if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); }
+            }}
+            onBlur={commitEdit}
+            style={{
+              flex: 1, minWidth: 0, padding: "1px 4px", fontSize: 10, fontFamily: "monospace",
+              background: isDark ? "#0b1120" : "#fff", color: isDark ? "#e2e8f0" : "#1e293b",
+              border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+            }}
+          />
+        ) : (
+          <button
+            onClick={onToggle}
+            style={{
+              flex: 1, minWidth: 0, border: "none", background: "transparent", padding: 0,
+              textAlign: "left", cursor: "pointer",
+              fontSize: 10, fontFamily: "monospace",
+              color: error ? "#f87171" : active ? color : "#475569",
+              wordBreak: "break-all",
+            }}
+          >
+            {label}
+          </button>
+        )}
+        {onEdit && !editing && (
+          <button
+            onClick={(e) => { e.stopPropagation(); beginEdit(); }}
+            title="Funktion bearbeiten"
+            style={{ border: "none", background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}
+          >
+            ✎
+          </button>
+        )}
+        {onRemove && !editing && (
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(); }}
             title="Remove"

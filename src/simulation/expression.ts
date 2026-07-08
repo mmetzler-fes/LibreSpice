@@ -1,5 +1,6 @@
 import { matchResultVariable } from "@core/circuit/probeUtils.js";
 import type { SimulationResult } from "@store/simulationStore.js";
+import { splitUnitAnnotation } from "./units.js";
 
 /**
  * Arithmetic expressions over probe variables, e.g. `V(punkt1)-V(punkt2)`,
@@ -146,7 +147,9 @@ export function evalExpression(result: SimulationResult, expr: string, params: R
   const length = result.time?.length ?? 0;
   if (length === 0) return { error: "No data" };
   try {
-    const fn = compile(expr, result, params);
+    // Drop any trailing ` [unit]` annotation — it only steers axis grouping.
+    const { body } = splitUnitAnnotation(expr);
+    const fn = compile(body, result, params);
     const values = new Float64Array(length);
     for (let i = 0; i < length; i++) values[i] = fn(i);
     return { values };

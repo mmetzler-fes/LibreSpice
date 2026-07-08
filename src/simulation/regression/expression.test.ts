@@ -1,5 +1,6 @@
 import type { SimulationResult } from "@store/simulationStore.js";
 import { evalExpression } from "../expression.js";
+import { inferUnit } from "../units.js";
 
 export interface TestReport {
   total: number;
@@ -53,6 +54,27 @@ const CASES: Case[] = [
       const res = makeResult({ "v(a)": [1, 1, 1] });
       const r = evalExpression(res, "V(a)*{Rx}", { R1: 3 });
       if (!r.error) fail("expected an error for unknown parameter");
+    },
+  },
+  {
+    name: "trailing [unit] annotation is ignored when evaluating",
+    run: (fail) => {
+      const res = makeResult({ "i(d2)": [0.1, 0.2, 0.3] });
+      const r = evalExpression(res, "{R1}*I(D2) [V]", { R1: 100 });
+      if (r.error) return fail(r.error);
+      const got = r.values && Array.from(r.values).map((v) => Math.round(v));
+      if (!got || got.join(",") !== "10,20,30") fail(`got ${got}`);
+    },
+  },
+  {
+    name: "explicit [V] annotation overrides inferred unit",
+    run: (fail) => {
+      // {R1}*I(D2) can't be dimensionally inferred (a {param} has no unit) → "",
+      // but the annotation forces "V" so it shares the voltage axis.
+      if (inferUnit("{R1}*I(D2)") !== "") fail(`bare inferUnit = ${inferUnit("{R1}*I(D2)")}`);
+      if (inferUnit("{R1}*I(D2) [V]") !== "V") fail(`annotated inferUnit = ${inferUnit("{R1}*I(D2) [V]")}`);
+      // Annotation must not disturb a device-current suffix like @r1[i].
+      if (inferUnit("I(@r1[i])") !== "A") fail(`device current inferUnit = ${inferUnit("I(@r1[i])")}`);
     },
   },
 ];

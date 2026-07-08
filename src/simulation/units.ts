@@ -107,8 +107,23 @@ function label(d: Dim | null): string {
   return parts.join("·");
 }
 
+/**
+ * An expression may carry an explicit unit as a trailing ` [unit]`, e.g.
+ * `{R1}*I(D2) [V]`. This lets the user force which y-axis it shares when the
+ * unit can't be inferred (a `{param}` has no known dimension on its own). The
+ * required space before `[` distinguishes it from a device-current suffix like
+ * `@r1[i]`. Returns the expression body and the annotated unit (or null).
+ */
+export function splitUnitAnnotation(name: string): { body: string; unit: string | null } {
+  const m = name.match(/^(.*\S)\s+\[([^\]]+)\]\s*$/);
+  return m ? { body: m[1], unit: m[2].trim() } : { body: name, unit: null };
+}
+
 /** Human-readable unit label for a trace (`""` = dimensionless/unknown). */
 export function inferUnit(name: string): string {
-  const toks = tokenize(name);
+  // An explicit ` [unit]` annotation wins over dimensional inference.
+  const { body, unit } = splitUnitAnnotation(name);
+  if (unit !== null) return unit;
+  const toks = tokenize(body);
   return toks ? label(compile(toks)) : "";
 }
