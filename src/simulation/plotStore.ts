@@ -41,6 +41,8 @@ export interface PlotPanel {
   yScale?: YScale;
   /** Per-unit y-axis overrides, for panels showing several units (V, A, …). */
   yAxes?: Record<string, YAxisOverride>;
+  /** Manual y-axis caption (e.g. "U [V]"); empty = auto from the primary unit. */
+  yLabel?: string;
   /** Fixed panel height in px (via the drag handle); unset = share space. */
   height?: number;
 }

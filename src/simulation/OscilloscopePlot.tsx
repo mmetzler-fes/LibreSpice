@@ -126,6 +126,13 @@ function displayVar(name: string): string {
   return `${fn}(${m[1].toUpperCase()})`;
 }
 
+/** Default y-axis caption from a physical unit, e.g. "V" → "U [V]", "A" → "I [A]". */
+function defaultAxisLabel(unit: string): string {
+  if (!unit) return "";
+  const quantity: Record<string, string> = { V: "U", A: "I", W: "P", "Ω": "R", "℧": "G" };
+  return `${quantity[unit] ? `${quantity[unit]} ` : ""}[${unit}]`;
+}
+
 function fmtVal(v: number, unit = ""): string {
   const s = siFormat(v);
   return s === "—" ? s : `${s}${unit}`;
@@ -1178,6 +1185,42 @@ function PlotPanelView(props: PlotPanelViewProps) {
         xText: fmtX(s.sampleT), yText: fmtVal(s.value), dark: isDark,
       }));
     }
+    const svgText = (x: number, y: number, s: string, o: { fill: string; anchor?: string; weight?: string }) => {
+      const t = doc.createElementNS(SVG_NS, "text");
+      t.setAttribute("x", String(x)); t.setAttribute("y", String(y));
+      t.setAttribute("fill", o.fill); t.setAttribute("font-size", "10");
+      t.setAttribute("font-family", "ui-monospace, monospace");
+      if (o.anchor) t.setAttribute("text-anchor", o.anchor);
+      if (o.weight) t.setAttribute("font-weight", o.weight);
+      t.textContent = s;
+      return t;
+    };
+    // y-axis caption (manual, else derived from the primary unit).
+    const yCap = panel.yLabel?.trim() || defaultAxisLabel(y0.unit);
+    if (yCap) clone.appendChild(svgText(6, 12, yCap, { fill: th.axis, weight: "600" }));
+    // Legend of probe names (colour swatch + name), top-right inside the plot.
+    if (traces.length > 0) {
+      const names = traces.map(displayVar);
+      const legW = Math.max(60, ...names.map((n) => n.length * 6 + 24));
+      const rightEdge = margin.left + plotW;
+      const gx = rightEdge - legW - 8, gy = margin.top + 8;
+      const g = doc.createElementNS(SVG_NS, "g");
+      g.setAttribute("transform", `translate(${gx},${gy})`);
+      const box = doc.createElementNS(SVG_NS, "rect");
+      box.setAttribute("width", String(legW)); box.setAttribute("height", String(traces.length * 15 + 8));
+      box.setAttribute("rx", "4"); box.setAttribute("fill", isDark ? "#0f172a" : "#ffffff");
+      box.setAttribute("fill-opacity", "0.85"); box.setAttribute("stroke", th.frame);
+      g.appendChild(box);
+      traces.forEach((t, i) => {
+        const ry = 8 + i * 15;
+        const sw = doc.createElementNS(SVG_NS, "rect");
+        sw.setAttribute("x", "7"); sw.setAttribute("y", String(ry)); sw.setAttribute("width", "10");
+        sw.setAttribute("height", "3"); sw.setAttribute("rx", "1"); sw.setAttribute("fill", colorFor(t));
+        g.appendChild(sw);
+        g.appendChild(svgText(22, ry + 4, names[i], { fill: isDark ? "#e2e8f0" : "#1e293b" }));
+      });
+      clone.appendChild(g);
+    }
     return clone;
   };
 
@@ -1464,6 +1507,22 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke={th.frame} strokeWidth={1} />
           </g>
         </svg>
+        {/* Editable y-axis caption (top-left). Baked into the .svg on export. */}
+        <input
+          value={panel.yLabel ?? ""}
+          onChange={(e) => onUpdate({ yLabel: e.target.value })}
+          placeholder={defaultAxisLabel(y0.unit) || "y [Einheit]"}
+          title="y-Achsen-Beschriftung (wird mit exportiert)"
+          spellCheck={false}
+          style={{
+            position: "absolute", top: 2, left: 4, width: margin.left + 64,
+            padding: "0 2px", fontSize: 10, fontFamily: "monospace", fontWeight: 600,
+            background: "transparent", color: isDark ? "#cbd5e1" : "#1e293b",
+            border: "1px solid transparent", borderRadius: 3, outline: "none",
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = isDark ? "#334155" : "#cbd5e1"; e.currentTarget.style.background = isDark ? "#0b1120" : "#fff"; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "transparent"; }}
+        />
         {cursorInfo && isFinite(cursorInfo.sx) && (() => {
           // Default: box centred on the data-value y; manual drag overrides.
           const autoTop = clampTop(
