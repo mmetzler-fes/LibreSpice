@@ -9,6 +9,24 @@ import {
 
 let sim: Simulation | null = null;
 
+/**
+ * X-axis label + unit for a plain single-source `.dc` sweep (the swept source's
+ * value is the x-axis, e.g. `V` for a voltage source, `A` for a current one).
+ * Returns null when there is no `.dc` directive, so time analyses keep the
+ * default seconds axis.
+ */
+function dcSweepAxis(netlist: string): { label: string; unit: string } | null {
+  for (const raw of netlist.split("\n")) {
+    const m = raw.trim().match(/^\.dc\s+([A-Za-z][\w]*)/i);
+    if (m) {
+      const name = m[1];
+      const unit = /^i/i.test(name) ? "A" : "V";
+      return { label: name, unit };
+    }
+  }
+  return null;
+}
+
 async function getSimulation(): Promise<Simulation> {
   if (!sim) {
     sim = new Simulation();
@@ -85,6 +103,13 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
       const nl = stripStepDirectives(netlist);
       const { result, log } = await runOnce(nl);
       setLog(`===== Netlist =====\n${nl.trim()}\n\n${log}`);
+      // A `.dc` sweep's x-vector is the swept source value, not time (ngspice
+      // still returns it as the scale/"time" vector). Label/unit it (V or A) so
+      // the plot shows e.g. "5V" instead of "5s".
+      const dcAxis = dcSweepAxis(nl);
+      if (dcAxis) {
+        return { ...result, xLabel: dcAxis.label, xUnit: dcAxis.unit };
+      }
       return result;
     }
 
@@ -205,7 +230,7 @@ async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => v
     .map((l) => (/^\s*\.dc\b/i.test(l) ? `.dc ${dc.primary}` : l))
     .join("\n");
   const merged: SimulationResult = {
-    variables: [], data: {}, time: undefined, xLabel: dc.primaryName,
+    variables: [], data: {}, time: undefined, xLabel: dc.primaryName, xUnit: /^i/i.test(dc.primaryName) ? "A" : "V",
     step: { param: dc.secondary.name, values: [] },
   };
   let lastLog = "";

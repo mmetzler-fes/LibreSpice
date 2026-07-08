@@ -7,6 +7,10 @@ import type { SimulationResult } from "@store/simulationStore.js";
  * unary minus. References are resolved against the current simulation result
  * via {@link matchResultVariable}, so both `V(node)`/`v(node)` and raw ngspice
  * vector names work.
+ *
+ * A `{name}` token resolves to a scalar parameter — a component value (e.g.
+ * `{R1}` → R1's resistance) or a `.param` — so expressions like `I(R1)*{R1}`
+ * (the power in R1) work. Parameter values come from the `params` map.
  */
 
 /** Resolve a single reference token (e.g. `V(out)`) to a data series. */
@@ -22,11 +26,12 @@ type Eval = (i: number) => number;
 type Tok =
   | { t: "num"; v: number }
   | { t: "ref"; v: string }
+  | { t: "param"; v: string }
   | { t: "op"; v: string };
 
 function tokenize(src: string): Tok[] {
   const re =
-    /\s+|([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)|([A-Za-z_@][\w.]*\s*\([^()]*\))|([A-Za-z_@][\w.]*)|([+\-*/()])/g;
+    /\s+|([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)|\{\s*([A-Za-z_@][\w.]*)\s*\}|([A-Za-z_@][\w.]*\s*\([^()]*\))|([A-Za-z_@][\w.]*)|([+\-*/()])/g;
   const toks: Tok[] = [];
   let m: RegExpExecArray | null;
   let last = 0;
@@ -34,9 +39,10 @@ function tokenize(src: string): Tok[] {
     if (m.index !== last) throw new Error(`Unexpected "${src.slice(last, m.index)}"`);
     last = re.lastIndex;
     if (m[1] !== undefined) toks.push({ t: "num", v: parseFloat(m[1]) });
-    else if (m[2] !== undefined) toks.push({ t: "ref", v: m[2].replace(/\s+/g, "") });
-    else if (m[3] !== undefined) toks.push({ t: "ref", v: m[3] });
-    else if (m[4] !== undefined) toks.push({ t: "op", v: m[4] });
+    else if (m[2] !== undefined) toks.push({ t: "param", v: m[2] });
+    else if (m[3] !== undefined) toks.push({ t: "ref", v: m[3].replace(/\s+/g, "") });
+    else if (m[4] !== undefined) toks.push({ t: "ref", v: m[4] });
+    else if (m[5] !== undefined) toks.push({ t: "op", v: m[5] });
     // whitespace: skip
   }
   if (last !== src.length) throw new Error(`Unexpected "${src.slice(last)}"`);
@@ -44,7 +50,7 @@ function tokenize(src: string): Tok[] {
 }
 
 /** Recursive-descent parser: expr → term (('+'|'-') term)*, term → factor, etc. */
-function compile(src: string, result: SimulationResult): Eval {
+function compile(src: string, result: SimulationResult, params: Record<string, number>): Eval {
   const toks = tokenize(src);
   let pos = 0;
 
@@ -101,6 +107,13 @@ function compile(src: string, result: SimulationResult): Eval {
       eat();
       return () => t.v;
     }
+    if (t.t === "param") {
+      eat();
+      const key = Object.keys(params).find((k) => k.toLowerCase() === t.v.toLowerCase());
+      if (key === undefined) throw new Error(`Unknown parameter "{${t.v}}"`);
+      const val = params[key];
+      return () => val;
+    }
     if (t.t === "ref") {
       eat();
       const series = resolveSeries(result, t.v);
@@ -125,12 +138,15 @@ export function isExpression(result: SimulationResult, name: string): boolean {
   return !result.data[name] && matchResultVariable(result, [name]) === null;
 }
 
-/** Evaluate `expr` sample-by-sample over the result's time base. */
-export function evalExpression(result: SimulationResult, expr: string): ExprResult {
+/**
+ * Evaluate `expr` sample-by-sample over the result's time base. `params` maps
+ * `{name}` tokens (component values, `.param`s) to scalar values.
+ */
+export function evalExpression(result: SimulationResult, expr: string, params: Record<string, number> = {}): ExprResult {
   const length = result.time?.length ?? 0;
   if (length === 0) return { error: "No data" };
   try {
-    const fn = compile(expr, result);
+    const fn = compile(expr, result, params);
     const values = new Float64Array(length);
     for (let i = 0; i < length; i++) values[i] = fn(i);
     return { values };

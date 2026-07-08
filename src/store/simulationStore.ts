@@ -19,6 +19,11 @@ export interface SimulationResult {
    * and format the x-axis appropriately.
    */
   xLabel?: string;
+  /**
+   * Physical unit of the x-axis (e.g. "V" for a `.dc` voltage sweep). When set,
+   * the x-axis ticks are suffixed with it instead of the default time "s".
+   */
+  xUnit?: string;
 }
 
 interface SimulationState {

@@ -228,6 +228,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const circuitName = useCircuitStore((s) => s.circuitName);
   // Handle of the currently open .asc, used to start file dialogs in its folder.
   const fileHandle = useCircuitStore((s) => s.fileHandle);
+  const circuit = useCircuitStore((s) => s.circuit);
+  const spiceDirectives = useCircuitStore((s) => s.spiceDirectives);
+  const propertyVersion = useCircuitStore((s) => s.propertyVersion);
   const {
     panels, traceToPanel, colors, expressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
@@ -242,6 +245,32 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const [exprError, setExprError] = useState<string | null>(null);
 
   const stepTags = result?.step?.values ?? null;
+
+  // Scalar parameters usable in `{name}` expression tokens: each component's
+  // primary value (e.g. R1 → resistance) plus any `.param NAME=value`, so a
+  // formula like `I(R1)*{R1}` (power in R1) can reference the component value.
+  const paramMap = useMemo(() => {
+    void propertyVersion; // recompute when a component property is edited
+    const map: Record<string, number> = {};
+    for (const comp of circuit.components.values()) {
+      for (const p of comp.getProperties()) {
+        if (p.key === "label") continue;
+        const n = typeof p.value === "number" ? p.value : parseSpiceNumber(String(p.value));
+        if (n !== undefined && isFinite(n)) { map[comp.label] = n; break; }
+      }
+    }
+    // `.param NAME=value …` — user-defined params override component values.
+    for (const line of spiceDirectives.split("\n")) {
+      const m = line.match(/^\s*\.param\s+(.+)$/i);
+      if (!m) continue;
+      for (const pair of m[1].split(/\s+/)) {
+        const eq = pair.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
+        const n = eq ? parseSpiceNumber(eq[2]) : undefined;
+        if (eq && n !== undefined) map[eq[1]] = n;
+      }
+    }
+    return map;
+  }, [circuit, spiceDirectives, propertyVersion]);
 
   // Every trace we can draw: selected raw probes + arithmetic expressions. For a
   // .step sweep, expressions expand to one trace per parameter value so a
@@ -269,7 +298,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         const tag = at >= 0 && stepTags?.includes(trace.slice(at + 2)) ? trace.slice(at + 2) : null;
         const base = tag ? trace.slice(0, at) : trace;
         if (expressions.includes(base)) {
-          const r = evalExpression(tag ? stepView(tag) : result, base);
+          const r = evalExpression(tag ? stepView(tag) : result, base, paramMap);
           map[trace] = r.values ?? null;
           if (r.error) errors[base] = r.error;
         } else {
@@ -278,7 +307,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       }
     }
     return { map, errors };
-  }, [result, allTraces, expressions, stepTags]);
+  }, [result, allTraces, expressions, stepTags, paramMap]);
 
   // For a .step sweep, group each signal's per-step traces under one collapsible
   // topic so the probe list stays readable.
@@ -353,7 +382,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     const expr = exprInput.trim();
     if (!expr) return;
     if (result) {
-      const r = evalExpression(result, expr);
+      const r = evalExpression(result, expr, paramMap);
       if (r.error) { setExprError(r.error); return; }
     }
     addExpression(expr);
@@ -613,6 +642,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               seriesMap={seriesMap.map}
               time={result.time!}
               xLabel={result.xLabel}
+              xUnit={result.xUnit}
               colorFor={colorFor}
               compact={compact}
               index={i}
@@ -735,6 +765,8 @@ interface PlotPanelViewProps {
   time: Float64Array;
   /** When set, the x-axis is a swept parameter (not time) — used for labels. */
   xLabel?: string;
+  /** Physical unit of the x-axis (e.g. "V" for a `.dc` sweep); default seconds. */
+  xUnit?: string;
   colorFor: (trace: string) => string;
   compact: boolean;
   index: number;
@@ -754,17 +786,21 @@ interface PlotPanelViewProps {
 
 /** Diagram colours for the on-screen (dark) and print/beamer (light) looks. */
 const PLOT_THEME = {
-  dark:  { bg: "#0f172a", plot: "#0b1120", grid: "#1e293b", axis: "#475569", line: "#334155", dot: "#0f172a", frame: "#334155" },
-  light: { bg: "#ffffff", plot: "#ffffff", grid: "#e2e8f0", axis: "#475569", line: "#94a3b8", dot: "#ffffff", frame: "#cbd5e1" },
+  // `axis` styles only the tick/label text (not gridlines), so it is set for
+  // high contrast against the plot background: near-white on dark, near-black on
+  // light — the low-contrast slate before was hard to read on a beamer.
+  dark:  { bg: "#0f172a", plot: "#0b1120", grid: "#1e293b", axis: "#cbd5e1", line: "#334155", dot: "#0f172a", frame: "#334155" },
+  light: { bg: "#ffffff", plot: "#ffffff", grid: "#e2e8f0", axis: "#1e293b", line: "#94a3b8", dot: "#ffffff", frame: "#cbd5e1" },
 };
 
 function PlotPanelView(props: PlotPanelViewProps) {
-  const { panel, traces, seriesMap, time, xLabel, colorFor, compact, index, count, syncX,
+  const { panel, traces, seriesMap, time, xLabel, xUnit, colorFor, compact, index, count, syncX,
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
-  // The x-axis is time by default; for a parameter sweep (`.op` + `.step`) it is
-  // the swept param, so format the ticks as a plain SI value instead of seconds.
-  const fmtX = (t: number) => (xLabel ? fmtVal(t) : fmtTime(t));
+  // The x-axis is time by default; for a swept-parameter/`.dc` run it is the
+  // swept quantity, so format the ticks with its unit (e.g. "5V") instead of
+  // seconds.
+  const fmtX = (t: number) => (xLabel ? fmtVal(t, xUnit ?? "") : fmtTime(t));
   const canRemove = count > 1;
   const circuitName = useCircuitStore((s) => s.circuitName);
   const svgLight = usePlotStore((s) => s.svgLight);

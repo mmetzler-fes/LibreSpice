@@ -16,7 +16,18 @@ export interface CircuitSnapshot {
   simulationConfig: SimulationConfig;
   /** component id → property key → value */
   componentProps: Record<string, Record<string, string | number>>;
+  /**
+   * Custom net names keyed by internal net id. Fragile across reloads because
+   * net ids are re-assigned on rebuild — kept only for backward compatibility.
+   * Prefer {@link netLabelPorts}, which anchors names to a stable port id.
+   */
   netLabels: Record<string, string>;
+  /**
+   * Custom net names keyed by a representative connected port id. Port ids are
+   * stable across a rebuild (component id + handle), so these survive the
+   * net-id reassignment that `rebuildConnections` performs on load.
+   */
+  netLabelPorts?: Record<string, string>;
   /** Positioned data-point annotations (LTSpice DATAFLAGs). */
   dataFlags?: DataFlag[];
   /** Show the SPICE directives as a text box on the schematic. */

@@ -457,10 +457,18 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       componentProps[id] = props;
     }
     const netLabels: Record<string, string> = {};
+    // Anchor custom net names to a stable port id as well: net ids are
+    // re-assigned when the circuit is rebuilt on load, so the net-id map alone
+    // loses labels whose net happens to get a different id. A port id survives.
+    const netLabelPorts: Record<string, string> = {};
     for (const [id, net] of circuit.nets) {
-      if (id !== "0" && net.nodeLabel !== id) netLabels[id] = net.nodeLabel;
+      if (id !== "0" && net.nodeLabel !== id) {
+        netLabels[id] = net.nodeLabel;
+        const anchor = net.connectedPortIds.size > 0 ? Array.from(net.connectedPortIds)[0] : null;
+        if (anchor) netLabelPorts[anchor] = net.nodeLabel;
+      }
     }
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, dataFlags, showDirectivesOnCanvas, directivesPos };
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, showDirectivesOnCanvas, directivesPos };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -505,8 +513,22 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     setTimeout(() => {
       get().rebuildConnections();
+      // Legacy net-id-keyed labels first (may miss if net ids shifted on rebuild)…
       for (const [netId, label] of Object.entries(snapshot.netLabels)) {
         get().renameNet(netId, label);
+      }
+      // …then port-anchored labels, which reliably resolve the net a given port
+      // now belongs to. These win, so a name is never lost to net-id churn.
+      if (snapshot.netLabelPorts) {
+        for (const [portId, label] of Object.entries(snapshot.netLabelPorts)) {
+          for (const comp of get().circuit.components.values()) {
+            const port = comp.ports.find((p) => p.id === portId);
+            if (port?.netId && port.netId !== "0") {
+              get().renameNet(port.netId, label);
+              break;
+            }
+          }
+        }
       }
     }, 0);
   },

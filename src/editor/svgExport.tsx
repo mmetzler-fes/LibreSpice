@@ -4,6 +4,7 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
+import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
 import { captionSvgPlacement, DEFAULT_HALF } from "./captionLayout.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import {
@@ -125,24 +126,39 @@ export function buildSchematicSvg(nodes: Node[], edges: Edge[], norm: SymbolNorm
     for (const p of getNodePins(node, norm)) pinMap.set(`${p.nodeId}-${p.handleId}`, { x: p.x, y: p.y });
   }
 
-  // Bounding box over symbols and wire endpoints.
+  // Route every wire first (endpoints + stored waypoints/taps, expanded to right
+  // angles exactly like the editor's WireEdge) so the exported wire matches what's
+  // on screen — and so the bounding box can include every vertex.
+  const wireVerts: FlowPoint[][] = [];
+  for (const e of edges) {
+    const data = e.data as WireData | undefined;
+    // A wire that taps an existing wire draws to its junction point, otherwise to
+    // the true pin centre.
+    const a = data?.sourceTap ?? (e.source && e.sourceHandle ? pinMap.get(`${e.source}-${e.sourceHandle}`) : undefined);
+    const b = data?.targetTap ?? (e.target && e.targetHandle ? pinMap.get(`${e.target}-${e.targetHandle}`) : undefined);
+    if (!a || !b) { wireVerts.push([]); continue; }
+    const waypoints = data?.waypoints ?? [];
+    wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint]));
+  }
+
+  // Bounding box over symbols, pins and every wire vertex (so a hand-routed
+  // waypoint outside the component boxes is never clipped).
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const grow = (x: number, y: number) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
   for (const n of nodes) { grow(n.position.x, n.position.y); grow(n.position.x + NODE_SIZE, n.position.y + NODE_SIZE); }
   for (const { x, y } of pinMap.values()) grow(x, y);
+  for (const verts of wireVerts) for (const p of verts) grow(p.x, p.y);
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_SIZE; maxY = NODE_SIZE; }
   const pad = 24;
   minX -= pad; minY -= pad; maxX += pad; maxY += pad;
   const width = Math.round(maxX - minX);
   const height = Math.round(maxY - minY);
 
-  const wires = edges.map((e, i) => {
-    const a = e.source && e.sourceHandle ? pinMap.get(`${e.source}-${e.sourceHandle}`) : undefined;
-    const b = e.target && e.targetHandle ? pinMap.get(`${e.target}-${e.targetHandle}`) : undefined;
-    if (!a || !b) return null;
-    // Orthogonal 2-segment route (horizontal then vertical), matching the editor.
-    return <polyline key={`w${i}`} points={`${a.x},${a.y} ${b.x},${a.y} ${b.x},${b.y}`} fill="none" stroke="#1e293b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />;
-  });
+  const wires = wireVerts.map((verts, i) =>
+    verts.length === 0 ? null : (
+      <polyline key={`w${i}`} points={verts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke="#1e293b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    ),
+  );
 
   const svg = (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${minX} ${minY} ${width} ${height}`}>
