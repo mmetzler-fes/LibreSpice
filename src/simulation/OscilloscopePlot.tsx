@@ -42,6 +42,51 @@ function clampTop(top: number, containerH: number): number {
   return Math.max(4, Math.min(containerH - READOUT_H - 4, top));
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Build a native-SVG readout box (title + x/y readout) mirroring the on-screen
+ * HTML cursor/stamp box, so it survives the .svg export (the HTML overlays do
+ * not). Positioned at (x, y) in the panel's pixel coordinate space.
+ */
+function svgReadoutBox(
+  doc: Document,
+  x: number,
+  y: number,
+  o: { color: string; title: string; xText: string; yText: string; dark: boolean },
+): SVGGElement {
+  const W = READOUT_W, PAD = 6, LH = 15;
+  const H = PAD * 2 + LH * 3;
+  const fg = o.dark ? "#e2e8f0" : "#1e293b";
+  const g = doc.createElementNS(SVG_NS, "g");
+  g.setAttribute("transform", `translate(${x},${y})`);
+  const rect = doc.createElementNS(SVG_NS, "rect");
+  rect.setAttribute("width", String(W));
+  rect.setAttribute("height", String(H));
+  rect.setAttribute("rx", "4");
+  rect.setAttribute("fill", o.dark ? "#1e293b" : "#ffffff");
+  rect.setAttribute("fill-opacity", "0.92");
+  rect.setAttribute("stroke", o.color);
+  g.appendChild(rect);
+  const text = (tx: number, ty: number, fill: string, anchor: "start" | "end", s: string) => {
+    const t = doc.createElementNS(SVG_NS, "text");
+    t.setAttribute("x", String(tx));
+    t.setAttribute("y", String(ty));
+    t.setAttribute("fill", fill);
+    t.setAttribute("font-size", "10");
+    t.setAttribute("font-family", "ui-monospace, monospace");
+    t.setAttribute("text-anchor", anchor);
+    t.textContent = s;
+    g.appendChild(t);
+  };
+  text(PAD, PAD + 11, o.color, "start", o.title);
+  text(PAD, PAD + 11 + LH, "#64748b", "start", "x");
+  text(W - PAD, PAD + 11 + LH, fg, "end", o.xText);
+  text(PAD, PAD + 11 + LH * 2, "#64748b", "start", "y");
+  text(W - PAD, PAD + 11 + LH * 2, fg, "end", o.yText);
+  return g;
+}
+
 const DND_MIME = "application/x-librespice-trace";
 
 const SI_PREFIXES: { e: number; s: string }[] = [
@@ -406,6 +451,46 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     return true;
   };
 
+  // Each panel registers a builder that produces its export SVG (with readout
+  // boxes baked in); "export all" stacks them into one file.
+  const exportersRef = useRef<Map<string, () => SVGSVGElement | null>>(new Map());
+  const registerExport = useCallback((id: string, build: (() => SVGSVGElement | null) | null) => {
+    if (build) exportersRef.current.set(id, build);
+    else exportersRef.current.delete(id);
+  }, []);
+
+  const handleExportAllSvg = useCallback(() => {
+    const GAP = 12;
+    // Keep the on-screen panel order.
+    const parts = panels
+      .map((p) => exportersRef.current.get(p.id)?.())
+      .filter((s): s is SVGSVGElement => !!s);
+    if (parts.length === 0) return;
+    const width = Math.max(...parts.map((s) => Number(s.getAttribute("width")) || 0));
+    const heights = parts.map((s) => Number(s.getAttribute("height")) || 0);
+    const totalH = heights.reduce((a, b) => a + b, 0) + GAP * (parts.length - 1);
+    const root = document.createElementNS(SVG_NS, "svg");
+    root.setAttribute("xmlns", SVG_NS);
+    root.setAttribute("width", String(width));
+    root.setAttribute("height", String(totalH));
+    root.setAttribute("viewBox", `0 0 ${width} ${totalH}`);
+    const bg = document.createElementNS(SVG_NS, "rect");
+    bg.setAttribute("width", String(width));
+    bg.setAttribute("height", String(totalH));
+    bg.setAttribute("fill", svgLight ? "#ffffff" : "#0f172a");
+    root.appendChild(bg);
+    let y = 0;
+    parts.forEach((s, i) => {
+      // Nest each panel SVG as its own viewport at the stacked offset.
+      s.setAttribute("x", "0");
+      s.setAttribute("y", String(y));
+      root.appendChild(s);
+      y += heights[i] + GAP;
+    });
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(root)}`;
+    downloadText(xml, `${(circuitName.trim() || "plot")}_Diagramme.svg`, "image/svg+xml");
+  }, [panels, svgLight, circuitName]);
+
   // `step` is the grid spacing (our tick model); fall back to ~5 divisions.
   const axisFrom = (low: number, high: number, step?: number): PltAxis =>
     ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: step && step > 0 ? step : (high - low) / 5, high });
@@ -677,6 +762,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               onSavePlt={handleSavePlt}
               onLoadPlt={handleLoadPlt}
               onUpdate={(patch) => updatePanel(panel.id, patch)}
+              registerExport={registerExport}
+              onExportAll={handleExportAllSvg}
             />
           );
         })}
@@ -843,6 +930,11 @@ interface PlotPanelViewProps {
   onSavePlt: () => void;
   onLoadPlt: () => void;
   onUpdate: (patch: Partial<PlotPanel>) => void;
+  /** Register/unregister this panel's export-SVG builder with the parent, so it
+   *  can combine every panel into one file. */
+  registerExport: (id: string, build: (() => SVGSVGElement | null) | null) => void;
+  /** Export all panels stacked into a single .svg (only shown when count > 1). */
+  onExportAll: () => void;
 }
 
 /** Diagram colours for the on-screen (dark) and print/beamer (light) looks. */
@@ -856,7 +948,8 @@ const PLOT_THEME = {
 
 function PlotPanelView(props: PlotPanelViewProps) {
   const { panel, traces, seriesMap, time, xLabel, xUnit, colorFor, compact, index, count, syncX,
-    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate } = props;
+    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate,
+    registerExport, onExportAll } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   // The x-axis is time by default; for a swept-parameter/`.dc` run it is the
   // swept quantity, so format the ticks with its unit (e.g. "5V") instead of
@@ -868,16 +961,6 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const toggleSvgLight = usePlotStore((s) => s.toggleSvgLight);
   const isDark = !svgLight;
   const th = svgLight ? PLOT_THEME.light : PLOT_THEME.dark;
-
-  // Serialise this panel's SVG to a downloadable standalone file.
-  const handleExportSvg = () => {
-    const svg = document.getElementById(`osc-svg-${panel.id}`);
-    if (!svg) return;
-    const clone = svg.cloneNode(true) as SVGSVGElement;
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
-    downloadText(xml, `${(circuitName.trim() || "plot")}_Diagramm.svg`, "image/svg+xml");
-  };
 
   /** Merge a manual override into one unit's y-axis. */
   const setYAxis = (unit: string, patch: { min?: number; max?: number; ticks?: number }) =>
@@ -1067,6 +1150,53 @@ function PlotPanelView(props: PlotPanelViewProps) {
     const value = seriesMap[st.trace]?.[idx] ?? NaN;
     return { i, trace: st.trace, sampleT, value, sx: toSx(sampleT), sy: mkToSy(groupOf(st.trace))(value), color: colorFor(st.trace), top: st.top, left: st.left };
   });
+
+  // Build a standalone export SVG for this panel: a clone of the live plot SVG
+  // (traces, grid, cursor/stamp markers) plus the cursor & stamp readout boxes
+  // rendered as native SVG — the on-screen boxes are HTML overlays and would be
+  // lost otherwise.
+  const buildExportSvg = (): SVGSVGElement | null => {
+    const src = document.getElementById(`osc-svg-${panel.id}`) as SVGSVGElement | null;
+    if (!src) return null;
+    const clone = src.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", SVG_NS);
+    const doc = clone.ownerDocument;
+    if (cursorInfo && isFinite(cursorInfo.sx)) {
+      const autoTop = clampTop(isFinite(cursorInfo.sy) ? margin.top + cursorInfo.sy - READOUT_H / 2 : 4, dims.h);
+      const boxTop = cursorManualTop ?? autoTop;
+      const boxLeft = Math.min(dims.w - READOUT_W, margin.left + cursorInfo.sx + 8);
+      clone.appendChild(svgReadoutBox(doc, boxLeft, boxTop, {
+        color: cursorInfo.color, title: displayVar(cursor!.trace),
+        xText: fmtX(cursorInfo.sampleT), yText: fmtVal(cursorInfo.value), dark: isDark,
+      }));
+    }
+    for (const s of stampInfos) {
+      if (!isFinite(s.sx)) continue;
+      const sLeft = s.left ?? Math.min(dims.w - READOUT_W, margin.left + s.sx + 8);
+      clone.appendChild(svgReadoutBox(doc, sLeft, s.top, {
+        color: s.color, title: displayVar(s.trace),
+        xText: fmtX(s.sampleT), yText: fmtVal(s.value), dark: isDark,
+      }));
+    }
+    return clone;
+  };
+
+  // Export just this panel (readouts included).
+  const handleExportSvg = () => {
+    const svg = buildExportSvg();
+    if (!svg) return;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(svg)}`;
+    downloadText(xml, `${(circuitName.trim() || "plot")}_Diagramm.svg`, "image/svg+xml");
+  };
+
+  // Keep the parent's exporter registry pointed at the latest closure so a
+  // combined "export all" always serialises the current cursor/stamp state.
+  const buildExportRef = useRef(buildExportSvg);
+  buildExportRef.current = buildExportSvg;
+  useEffect(() => {
+    registerExport(panel.id, () => buildExportRef.current());
+    return () => registerExport(panel.id, null);
+  }, [panel.id, registerExport]);
 
   // Stamp the current cursor position (or the panel centre) for `trace`.
   // Initial top is positioned at the data value's y-coordinate.
@@ -1494,6 +1624,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <button style={menuItemStyle} onClick={() => { onSavePlt(); setPaneMenu(null); }}>Save Plot Settings (.plt)</button>
             <button style={menuItemStyle} onClick={() => { onLoadPlt(); setPaneMenu(null); }}>Open Plot Settings (.plt)</button>
             <button style={menuItemStyle} onClick={() => { handleExportSvg(); setPaneMenu(null); }}>Export Diagram (.svg)</button>
+            {count > 1 && (
+              <button style={menuItemStyle} onClick={() => { onExportAll(); setPaneMenu(null); }}>Export All Diagrams (.svg)</button>
+            )}
           </div>
         </>
       )}
