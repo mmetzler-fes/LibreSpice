@@ -301,12 +301,29 @@ export function parseAnalysisDirective(line: string): SimulationConfig | null {
   if (type === "tran") {
     const uic = /\buic\b/i.test(m[2]);
     const nums = rest.filter((t) => !/^uic$/i.test(t)).map((t) => parseSpiceNumber(t));
+    
+    let stepTime = 1e-6;
+    let stopTime = 1e-3;
+    let startTime = nums[2];
+    let maxStep = nums[3];
+
+    if (nums.length === 1 && nums[0] !== undefined) {
+      stopTime = nums[0];
+      stepTime = stopTime > 0 ? stopTime / 1000 : 1e-6;
+    } else if (nums.length >= 2) {
+      stepTime = nums[0] ?? 1e-6;
+      stopTime = nums[1] ?? 1e-3;
+      if (stepTime <= 0 && stopTime > 0) {
+        stepTime = stopTime / 1000;
+      }
+    }
+
     return {
       type: "tran",
-      stepTime: nums[0] ?? 1e-6,
-      stopTime: nums[1] ?? 1e-3,
-      startTime: nums[2],
-      maxStep: nums[3],
+      stepTime,
+      stopTime,
+      startTime,
+      maxStep,
       uic,
     };
   }
