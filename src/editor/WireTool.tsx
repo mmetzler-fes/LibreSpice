@@ -129,7 +129,7 @@ interface WireTarget {
 }
 
 /** Nearest point on segment AB to P, with squared distance. */
-function projectToSegment(p: FlowPoint, a: FlowPoint, b: FlowPoint): { point: FlowPoint; d2: number } {
+export function projectToSegment(p: FlowPoint, a: FlowPoint, b: FlowPoint): { point: FlowPoint; d2: number } {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
   const len2 = abx * abx + aby * aby;

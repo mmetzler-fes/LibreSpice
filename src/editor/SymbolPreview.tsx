@@ -40,10 +40,10 @@ export function SymbolPreview({ type, size, margin = 4, strokeWidth = 1.2, color
   if (type === "netlabel") {
     return (
       <svg width={size} height={size} viewBox="0 0 80 80" style={{ flexShrink: 0, color, overflow: "visible" }}>
-        <circle cx="16" cy="40" r="3" fill="currentColor" />
-        <path d="M16 40 h12" stroke="currentColor" strokeWidth="2" fill="none" />
-        <rect x="28" y="29" width="38" height="22" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
-        <path d="M35 40 h24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+        <circle cx="40" cy="40" r="3" fill="currentColor" />
+        <path d="M40 40 h12" stroke="currentColor" strokeWidth="2" fill="none" />
+        <rect x="52" y="29" width="38" height="22" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
+        <path d="M59 40 h24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
       </svg>
     );
   }

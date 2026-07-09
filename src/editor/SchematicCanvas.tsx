@@ -20,11 +20,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
-import { WireEdge, WireOverlay, type WireData } from "./WireTool.js";
+import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, type FlowPoint } from "./WireTool.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
-import { NODE_SIZE, GRID } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
@@ -97,6 +97,75 @@ function CanvasInner() {
   const existingLabels = () =>
     useCircuitStore.getState().nodes.map((n) => String((n.data as { label?: string }).label ?? "")).filter(Boolean);
 
+  const autoConnectNodePins = useCallback(
+    (node: Node) => {
+      const symbolNorm = useUIStore.getState().symbolNorm;
+      const newPins = getNodePins(node, symbolNorm);
+      const newEdges: Edge[] = [];
+      const currentEdges = useCircuitStore.getState().edges;
+      const currentNodes = useCircuitStore.getState().nodes;
+      
+      const getPinPos = (nId: string, hId: string | null | undefined): FlowPoint | null => {
+        if (!hId) return null;
+        const n = nId === node.id ? node : currentNodes.find((x) => x.id === nId);
+        if (!n) return null;
+        const p = getNodePins(n, symbolNorm).find((q) => q.handleId === hId);
+        return p ? { x: p.x, y: p.y } : null;
+      };
+
+      for (const pin of newPins) {
+        let bestWire: Edge | null = null;
+        let bestTap: FlowPoint | null = null;
+        
+        for (const e of currentEdges) {
+          const s = (e.data?.sourceTap as FlowPoint | undefined) ?? getPinPos(e.source, e.sourceHandle);
+          const t = (e.data?.targetTap as FlowPoint | undefined) ?? getPinPos(e.target, e.targetHandle);
+          if (!s || !t) continue;
+          const wp = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
+          const verts = orthoVertices([s, ...wp, t]);
+          for (let i = 0; i < verts.length - 1; i++) {
+            const { point, d2 } = projectToSegment({ x: pin.x, y: pin.y }, verts[i], verts[i + 1]);
+            if (d2 <= 4) {
+              bestWire = e;
+              bestTap = point;
+              break;
+            }
+          }
+          if (bestWire) break;
+        }
+        
+        if (bestWire && bestTap) {
+          const edgeId = `wire_${node.id}-${pin.handleId}__${bestWire.source}-${bestWire.sourceHandle}_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+          newEdges.push({
+            id: edgeId,
+            source: node.id,
+            sourceHandle: pin.handleId,
+            target: bestWire.source,
+            targetHandle: bestWire.sourceHandle,
+            type: "wire",
+            data: {
+              waypoints: [],
+              targetTap: bestTap,
+              hostEdgeId: bestWire.id,
+            },
+          });
+        }
+      }
+      
+      if (newEdges.length > 0) {
+        const { setEdges, connectPorts, regenerateNetlist } = useCircuitStore.getState();
+        setEdges([...currentEdges, ...newEdges]);
+        for (const ne of newEdges) {
+          try {
+            connectPorts(`${ne.source}-${ne.sourceHandle}`, `${ne.target}-${ne.targetHandle}`);
+          } catch { /* */ }
+        }
+        regenerateNetlist();
+      }
+    },
+    [],
+  );
+
   const placeComponent = useCallback(
     (type: ComponentType, cx: number, cy: number) => {
       // Center the node on the (snapped) cursor: node.position is its top-left.
@@ -115,8 +184,9 @@ function CanvasInner() {
         data: { componentType: type, label, valueLabel, rotation: placementRotation },
       };
       addComponent(component, node);
+      setTimeout(() => autoConnectNodePins(node), 0);
     },
-    [addComponent, placementRotation],
+    [addComponent, placementRotation, autoConnectNodePins],
   );
 
   const placeLibraryComponent = useCallback(
@@ -136,6 +206,7 @@ function CanvasInner() {
           data: { componentType: "subcircuit", label, pins: placement.pins ?? [], subName: placement.name, symbolName: placement.symbolName, rotation: placementRotation },
         };
         addComponent(component, node);
+        setTimeout(() => autoConnectNodePins(node), 0);
         return;
       }
 
@@ -154,8 +225,9 @@ function CanvasInner() {
         data: { componentType: placement.componentType, label, valueLabel, rotation: placementRotation },
       };
       addComponent(component, node);
+      setTimeout(() => autoConnectNodePins(node), 0);
     },
-    [addComponent, placementRotation],
+    [addComponent, placementRotation, autoConnectNodePins],
   );
 
   useEffect(() => {
@@ -408,9 +480,65 @@ function CanvasInner() {
     (changes: NodeChange[]) => {
       const removals = changes.filter((c) => c.type === "remove" && "id" in c);
       removals.forEach((c) => removeComponent((c as any).id));
-      setNodes(applyNodeChanges(changes, nodes));
+
+      const symbolNorm = useUIStore.getState().symbolNorm;
+      
+      const modifiedChanges = changes.map(change => {
+        if (change.type === 'position' && change.position && change.id) {
+          const node = nodes.find(n => n.id === change.id);
+          if (node && node.data.componentType === "netlabel") {
+            const tapEdge = edges.find(e => e.source === node.id && e.data?.targetTap);
+            if (tapEdge && tapEdge.data?.hostEdgeId) {
+              const hostWire = edges.find(e => e.id === tapEdge.data?.hostEdgeId);
+              if (hostWire) {
+                const pinX = change.position.x + NODE_SIZE / 2;
+                const pinY = change.position.y + NODE_SIZE / 2;
+                
+                const getPinPos = (nId: string, hId: string | null | undefined): FlowPoint | null => {
+                  if (!hId) return null;
+                  const n = nodes.find((x) => x.id === nId);
+                  if (!n) return null;
+                  const p = getNodePins(n, symbolNorm).find((q) => q.handleId === hId);
+                  return p ? { x: p.x, y: p.y } : null;
+                };
+                
+                const s = (hostWire.data?.sourceTap as FlowPoint | undefined) ?? getPinPos(hostWire.source, hostWire.sourceHandle);
+                const t = (hostWire.data?.targetTap as FlowPoint | undefined) ?? getPinPos(hostWire.target, hostWire.targetHandle);
+                
+                if (s && t) {
+                  const wp = (hostWire.data?.waypoints as FlowPoint[] | undefined) ?? [];
+                  const verts = orthoVertices([s, ...wp, t]);
+                  let bestTap: FlowPoint | null = null;
+                  let minD2 = Infinity;
+                  for (let i = 0; i < verts.length - 1; i++) {
+                    const { point, d2 } = projectToSegment({ x: pinX, y: pinY }, verts[i], verts[i + 1]);
+                    if (d2 < minD2) {
+                      minD2 = d2;
+                      bestTap = point;
+                    }
+                  }
+                  
+                  if (bestTap) {
+                    change.position.x = bestTap.x - NODE_SIZE / 2;
+                    change.position.y = bestTap.y - NODE_SIZE / 2;
+                    
+                    // Update the tap edge so it visually remains attached at length 0
+                    setTimeout(() => {
+                      const latestEdges = useCircuitStore.getState().edges;
+                      useCircuitStore.getState().setEdges(latestEdges.map(e => e.id === tapEdge.id ? { ...e, data: { ...e.data, targetTap: bestTap } } : e));
+                    }, 0);
+                  }
+                }
+              }
+            }
+          }
+        }
+        return change;
+      });
+
+      setNodes(applyNodeChanges(modifiedChanges, nodes));
     },
-    [nodes, setNodes, removeComponent],
+    [nodes, setNodes, removeComponent, edges],
   );
 
   const onEdgesChange = useCallback(
