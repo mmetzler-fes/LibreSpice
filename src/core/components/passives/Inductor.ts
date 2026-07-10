@@ -1,5 +1,6 @@
 import { SpiceComponent } from "../base/SpiceComponent.js";
 import { Port, type Point, type Property } from "../base/Port.js";
+import { isParametricValue, toComponentNumber } from "../base/componentValue.js";
 
 export class Inductor extends SpiceComponent {
   inductance: number;
@@ -34,8 +35,8 @@ export class Inductor extends SpiceComponent {
   setProperty(key: string, value: string | number): void {
     if (key === "label") this.label = String(value);
     if (key === "inductance") {
-      if (typeof value === "string" && value.includes("{")) this.valueExpr = value;
-      else { this.valueExpr = undefined; this.inductance = Number(value); }
+      if (isParametricValue(value)) this.valueExpr = value;
+      else { this.valueExpr = undefined; this.inductance = toComponentNumber(value, this.inductance); }
     }
   }
 

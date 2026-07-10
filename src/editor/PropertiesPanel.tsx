@@ -3,50 +3,35 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { getProbeCandidates, netLabel } from "@core/circuit/probeUtils.js";
+import { isParametricValue, parseValueInput, valueFieldText } from "@core/components/base/componentValue.js";
 
-const SI_MULT: Record<string, number> = {
-  p: 1e-12, n: 1e-9, u: 1e-6, "µ": 1e-6, m: 1e-3,
-  k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12, "": 1,
-};
-
-/** Parse a number with an optional SI prefix (e.g. "4.7k", "10n", "1.5M", "1MEG"). */
-function parseSI(s: string): number | null {
-  const t = s.trim();
-  if (t === "") return null;
-  const m = t.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zµ]*)/i);
-  if (!m) return null;
-  const base = parseFloat(m[1]);
-  if (!isFinite(base)) return null;
-  const suffix = m[2];
-  // "MEG"/"meg" (LTSpice) and a lone "M" both mean 1e6 here; a lone "m" is milli.
-  if (/^meg/i.test(suffix)) return base * 1e6;
-  return base * (SI_MULT[suffix[0] ?? ""] ?? 1);
-}
-
-/** Format a number with a compact SI prefix (no unit), e.g. 1000 → "1k". */
-function fmtSIShort(v: number): string {
-  if (!isFinite(v)) return "0";
-  if (v === 0) return "0";
-  const a = Math.abs(v);
-  const steps: [number, string][] = [
-    [1e9, "G"], [1e6, "MEG"], [1e3, "k"], [1, ""],
-    [1e-3, "m"], [1e-6, "µ"], [1e-9, "n"], [1e-12, "p"],
-  ];
-  for (const [f, suffix] of steps) {
-    if (a >= f) return `${+(v / f).toPrecision(4)}${suffix}`;
-  }
-  return `${+(v * 1e12).toPrecision(4)}p`;
-}
-
-/** Text input that accepts SI-prefixed values and emits a plain number. */
-function SIInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [text, setText] = useState(() => fmtSIShort(value));
+/**
+ * Text input for a component value: an SI-prefixed number (`4.7k`) or a
+ * parametric expression in braces (`{RM}`), emitted verbatim so the component
+ * stores it as its `valueExpr`.
+ *
+ * The same field serves both, on purpose. Rendering a number input and a text
+ * input depending on the *current* value would swap the element mid-word — the
+ * moment `{` is typed — and take the focus with it.
+ *
+ * A number commits as you type (as before); an expression only on Enter or blur,
+ * since a half-typed `{R` is not yet meaningful.
+ */
+function ValueField({ value, onChange }: { value: string | number; onChange: (v: number | string) => void }) {
+  const [text, setText] = useState(() => valueFieldText(value));
   const [focused, setFocused] = useState(false);
   const { darkMode } = useUIStore();
   // Reflect external changes while not actively editing.
   useEffect(() => {
-    if (!focused) setText(fmtSIShort(value));
+    if (!focused) setText(valueFieldText(value));
   }, [value, focused]);
+
+  /** Commit the current text; restore the stored value when it is not usable. */
+  const commit = () => {
+    const parsed = parseValueInput(text);
+    if (parsed) onChange(parsed.value);
+    else setText(valueFieldText(value));
+  };
 
   const dynFieldStyle: React.CSSProperties = {
     padding: "4px 6px",
@@ -62,13 +47,14 @@ function SIInput({ value, onChange }: { value: number; onChange: (v: number) => 
     <input
       type="text"
       value={text}
-      inputMode="decimal"
       onFocus={() => setFocused(true)}
-      onBlur={() => { setFocused(false); setText(fmtSIShort(value)); }}
+      onBlur={() => { setFocused(false); commit(); }}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
       onChange={(e) => {
         setText(e.target.value);
-        const n = parseSI(e.target.value);
-        if (n !== null) onChange(n);
+        // Live-commit plain numbers (as before); an expression waits for Enter/blur.
+        const parsed = parseValueInput(e.target.value);
+        if (parsed?.kind === "number") onChange(parsed.value);
       }}
       style={dynFieldStyle}
     />
@@ -184,9 +170,11 @@ export function PropertiesPanel() {
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
-            ) : prop.type === "number" ? (
-              <SIInput
-                value={Number(prop.value)}
+            ) : prop.type === "number" || isParametricValue(prop.value) ? (
+              // A parametric value arrives typed as a string; it is still the
+              // component's value field, so it keeps the same editor.
+              <ValueField
+                value={prop.value}
                 onChange={(n) => updateComponentProperty(component.id, prop.key, n)}
               />
             ) : (
