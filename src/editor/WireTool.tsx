@@ -10,6 +10,7 @@ import {
 import { getNodePins, GRID, type NodePin } from "./pinGeometry.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
+import { DRAG_TOUCH_ACTION, isDragPointer } from "./pointerDrag.js";
 
 export interface FlowPoint {
   x: number;
@@ -206,30 +207,49 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
 
   const reset = () => { setPoints([]); setStartTarget(null); };
 
-  const handleMove = (e: React.MouseEvent) => {
-    const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+  /**
+   * Where a screen position lands: snapped to a pin, to a point on an existing
+   * wire, or to the grid. Pure, so a tap can resolve its own position instead of
+   * relying on a hover that a stylus never produced.
+   */
+  const resolve = (clientX: number, clientY: number): { cursor: FlowPoint; target: WireTarget | null } => {
+    const flow = screenToFlowPosition({ x: clientX, y: clientY });
     const pin = findPin(flow);
     if (pin) {
-      setHoverTarget({ kind: "pin", nodeId: pin.nodeId, handleId: pin.handleId, point: { x: pin.x, y: pin.y } });
-      setCursor({ x: pin.x, y: pin.y });
-      return;
+      return {
+        cursor: { x: pin.x, y: pin.y },
+        target: { kind: "pin", nodeId: pin.nodeId, handleId: pin.handleId, point: { x: pin.x, y: pin.y } },
+      };
     }
     const wire = findWire(flow);
-    if (wire) {
-      setHoverTarget(wire);
-      setCursor(wire.point);
-      return;
-    }
-    setHoverTarget(null);
-    setCursor({ x: snap(flow.x), y: snap(flow.y) });
+    if (wire) return { cursor: wire.point, target: wire };
+    return { cursor: { x: snap(flow.x), y: snap(flow.y) }, target: null };
+  };
+
+  const handleMove = (e: React.PointerEvent) => {
+    const { cursor: c, target } = resolve(e.clientX, e.clientY);
+    setHoverTarget(target);
+    setCursor(c);
   };
 
   const sameTarget = (a: WireTarget, b: WireTarget) => a.nodeId === b.nodeId && a.handleId === b.handleId;
 
-  const handleClick = () => {
-    if (!cursor) return;
+  /**
+   * A pen or finger taps without hovering first, so the position is resolved
+   * from the event itself rather than read out of `cursor`/`hoverTarget` — those
+   * are set by the same gesture and would still be stale (or null) here.
+   */
+  const handleDown = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
+    const { cursor: cursorNow, target: hoverNow } = resolve(e.clientX, e.clientY);
+    setCursor(cursorNow);
+    setHoverTarget(hoverNow);
+    commit(cursorNow, hoverNow);
+  };
+
+  const commit = (cursor: FlowPoint, hoverTarget: WireTarget | null) => {
     if (!startTarget) {
-      // First click must dock onto a pin or an existing wire.
+      // First tap must dock onto a pin or an existing wire.
       if (hoverTarget) { setStartTarget(hoverTarget); setPoints([hoverTarget.point]); }
       return;
     }
@@ -277,11 +297,11 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
 
   return (
     <div
-      onMouseMove={handleMove}
-      onClick={handleClick}
+      onPointerMove={handleMove}
+      onPointerDown={handleDown}
       onContextMenu={handleContextMenu}
-      onMouseLeave={() => { setCursor(null); setHoverTarget(null); }}
-      style={{ position: "absolute", inset: 0, zIndex: 5, cursor: "none" }}
+      onPointerLeave={() => { setCursor(null); setHoverTarget(null); }}
+      style={{ ...DRAG_TOUCH_ACTION, position: "absolute", inset: 0, zIndex: 5, cursor: "none" }}
     >
       <svg width={width} height={height} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         {/* Crosshair */}

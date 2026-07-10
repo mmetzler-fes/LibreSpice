@@ -26,17 +26,22 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
-    const onMove = (e: MouseEvent) => {
+    // Pointer events so a stylus previews the placement while it hovers, and a
+    // finger while it is down. `pointerdown` seeds the ghost for a plain tap,
+    // which produces no move beforehand.
+    const onMove = (e: PointerEvent) => {
       const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       // Snap to the grid point where the node's center will land.
       setFlowPos({ x: Math.round(flow.x / GRID) * GRID, y: Math.round(flow.y / GRID) * GRID });
     };
     const onLeave = () => setFlowPos(null);
-    el.addEventListener("mousemove", onMove);
-    el.addEventListener("mouseleave", onLeave);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerdown", onMove);
+    el.addEventListener("pointerleave", onLeave);
     return () => {
-      el.removeEventListener("mousemove", onMove);
-      el.removeEventListener("mouseleave", onLeave);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerdown", onMove);
+      el.removeEventListener("pointerleave", onLeave);
     };
   }, [wrapperRef, screenToFlowPosition]);
 

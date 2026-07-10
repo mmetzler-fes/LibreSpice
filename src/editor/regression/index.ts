@@ -1,6 +1,7 @@
 import { runSvgExportTests } from "./svgExport.test.js";
 import { runSvgPositionTests } from "./svgPositions.test.js";
 import { runComponentValueTests } from "./componentValue.test.js";
+import { runPointerDragTests } from "./pointerDrag.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
@@ -11,6 +12,7 @@ export function runAllSuites(): Suite[] {
     { name: "SVG export", ...runSvgExportTests() },
     { name: "SVG positions", ...runSvgPositionTests() },
     { name: "Component values", ...runComponentValueTests() },
+    { name: "Pointer drag", ...runPointerDragTests() },
     { name: "Plot expressions", ...runExpressionTests() },
   ];
 }

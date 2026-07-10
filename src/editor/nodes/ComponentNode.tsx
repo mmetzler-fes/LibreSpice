@@ -23,6 +23,7 @@ import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 import { netLabelShape } from "../netLabelShape.js";
 import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
 
 export type ComponentType =
   | "resistor"
@@ -95,30 +96,28 @@ function MovableLabel({
   const [live, setLive] = useState<{ x: number; y: number } | null>(null);
   const off = live ?? offset ?? { x: 0, y: 0 };
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
     e.stopPropagation();
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY;
     const b = offset ?? { x: 0, y: 0 };
     const zoom = rf.getViewport().zoom || 1;
-    const at = (ev: MouseEvent) => ({ x: b.x + (ev.clientX - sx) / zoom, y: b.y + (ev.clientY - sy) / zoom });
-    const move = (ev: MouseEvent) => setLive(at(ev));
-    const up = (ev: MouseEvent) => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      setLive(null);
-      setLabelOffset(nodeId, kind, at(ev));
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    const at = (ev: PointerEvent) => ({ x: b.x + (ev.clientX - sx) / zoom, y: b.y + (ev.clientY - sy) / zoom });
+    trackPointerDrag(
+      e,
+      (ev) => setLive(at(ev)),
+      (ev) => { setLive(null); setLabelOffset(nodeId, kind, at(ev)); },
+    );
   };
 
   return (
     <div
       className="nodrag"
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       title="Drag to move label"
       style={{
+        ...DRAG_TOUCH_ACTION,
         position: "absolute",
         left: base.left + off.x,
         top: base.top + off.y,

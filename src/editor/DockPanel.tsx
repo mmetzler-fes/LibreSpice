@@ -4,6 +4,7 @@ import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopePlot } from "@simulation/OscilloscopePlot.js";
 import { LogPanel } from "@simulation/LogPanel.js";
 import { useUIStore, type DockTab } from "@store/uiStore.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: "netlist", label: "Netlist" },
@@ -17,21 +18,18 @@ export function DockPanel() {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const onResizeStart = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.PointerEvent) => {
+      if (!isDragPointer(e)) return;
       e.preventDefault();
       dragRef.current = { startY: e.clientY, startH: dockHeight };
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const delta = dragRef.current.startY - ev.clientY;
-        setDockHeight(dragRef.current.startH + delta);
-      };
-      const onUp = () => {
-        dragRef.current = null;
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      trackPointerDrag(
+        e,
+        (ev) => {
+          if (!dragRef.current) return;
+          setDockHeight(dragRef.current.startH + (dragRef.current.startY - ev.clientY));
+        },
+        () => { dragRef.current = null; },
+      );
     },
     [dockHeight, setDockHeight],
   );
@@ -81,8 +79,9 @@ export function DockPanel() {
     <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", height: dockHeight, minHeight: 120 }}>
       {/* Resize handle */}
       <div
-        onMouseDown={onResizeStart}
+        onPointerDown={onResizeStart}
         style={{
+          ...DRAG_TOUCH_ACTION,
           height: 5,
           cursor: "ns-resize",
           background: darkMode ? "#334155" : "#cbd5e1",

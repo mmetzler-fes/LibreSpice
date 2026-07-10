@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_LINE_HEIGHT,
   DIRECTIVE_PADDING_X, DIRECTIVE_PADDING_Y, DIRECTIVE_RADIUS, directiveLines, isDirectiveComment,
@@ -26,22 +27,20 @@ export function DirectiveBox() {
 
   if (!show || !directives.trim()) return null;
 
-  const startDrag = (e: React.MouseEvent) => {
+  const startDrag = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, zoom: vp.zoom };
-    const move = (ev: MouseEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      moveBox(d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
-    };
-    const up = () => {
-      drag.current = null;
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    trackPointerDrag(
+      e,
+      (ev) => {
+        const d = drag.current;
+        if (!d) return;
+        moveBox(d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
+      },
+      () => { drag.current = null; },
+    );
   };
 
   const left = vp.x + pos.x * vp.zoom;
@@ -51,10 +50,11 @@ export function DirectiveBox() {
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
       <div
-        onMouseDown={startDrag}
+        onPointerDown={startDrag}
         onDoubleClick={(e) => { e.stopPropagation(); toggleDirectiveModal(); }}
         title="SPICE directives — drag to move, double-click to edit"
         style={{
+          ...DRAG_TOUCH_ACTION,
           position: "absolute", left, top,
           transformOrigin: "top left", transform: `scale(${vp.zoom})`,
           pointerEvents: "auto", cursor: "move", userSelect: "none",

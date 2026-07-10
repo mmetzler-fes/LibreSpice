@@ -3,6 +3,7 @@ import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { formatDataFlag, analysisKind, type DataFlag } from "@core/circuit/dataExpr.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 /**
  * Renders the schematic's data-point annotations (LTSpice DATAFLAGs) at their
@@ -21,22 +22,20 @@ export function DataFlagLayer() {
 
   const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; zoom: number } | null>(null);
 
-  const startDrag = (e: React.MouseEvent, df: DataFlag) => {
+  const startDrag = (e: React.PointerEvent, df: DataFlag) => {
+    if (!isDragPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     drag.current = { id: df.id, sx: e.clientX, sy: e.clientY, ox: df.x, oy: df.y, zoom: vp.zoom };
-    const move = (ev: MouseEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      moveDataFlag(d.id, d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
-    };
-    const up = () => {
-      drag.current = null;
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    trackPointerDrag(
+      e,
+      (ev) => {
+        const d = drag.current;
+        if (!d) return;
+        moveDataFlag(d.id, d.ox + (ev.clientX - d.sx) / d.zoom, d.oy + (ev.clientY - d.sy) / d.zoom);
+      },
+      () => { drag.current = null; },
+    );
   };
 
   if (dataFlags.length === 0) return null;
@@ -61,9 +60,10 @@ export function DataFlagLayer() {
             }}
           >
             <span
-              onMouseDown={(e) => startDrag(e, df)}
+              onPointerDown={(e) => startDrag(e, df)}
               title="Datenpunkt verschieben"
               style={{
+                ...DRAG_TOUCH_ACTION,
                 display: "flex", alignItems: "center", padding: "0 3px", marginRight: 1,
                 color: "#94a3b8", cursor: "move", userSelect: "none",
                 borderRight: "1px solid #e2e8f0", letterSpacing: -1,

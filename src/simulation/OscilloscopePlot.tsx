@@ -9,6 +9,7 @@ import { inferUnit } from "./units.js";
 import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
 import { stripStepTag, applyPltText } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
 
 /** Trigger a browser download of a text payload. */
 function downloadText(content: string, filename: string, mime: string): void {
@@ -1263,58 +1264,45 @@ function PlotPanelView(props: PlotPanelViewProps) {
     setStamps((prev) => [...prev, { trace, t, top, left: null }]);
   };
 
-  /** Start dragging a readout box. Calls `onUpdate(newTop, newLeft)` on every mousemove. */
+  /** Start dragging a readout box. Calls `onUpdate(newTop, newLeft)` on every move. */
   const startDragReadout = (
-    e: React.MouseEvent,
+    e: React.PointerEvent,
     currentTop: number,
     currentLeft: number,
     onUpdate: (top: number, left: number) => void,
   ) => {
+    if (!isDragPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX, startY = e.clientY;
-    const move = (ev: MouseEvent) =>
-      onUpdate(currentTop + ev.clientY - startY, currentLeft + ev.clientX - startX);
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    trackPointerDrag(e, (ev) => onUpdate(currentTop + ev.clientY - startY, currentLeft + ev.clientX - startX));
   };
 
-  // Drag the cursor horizontally (this is the only mouse interaction; axis
+  // Drag the cursor horizontally (this is the only pointer interaction; axis
   // range is set exclusively through the settings menu).
-  const startCursorDrag = (e: React.MouseEvent) => {
+  const startCursorDrag = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const move = (ev: MouseEvent) => {
+    trackPointerDrag(e, (ev) => {
       const px = ev.clientX - rect.left - margin.left;
       const frac = Math.max(0, Math.min(1, px / plotW));
       const t = logX ? 10 ** (lxMin + frac * (lxMax - lxMin)) : vr.xMin + frac * (vr.xMax - vr.xMin);
       setCursor((c) => (c ? { ...c, t } : c));
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    });
   };
 
   // Drag the bottom edge to set this panel's height (independent of the others).
-  const startResize = (e: React.MouseEvent) => {
+  const startResize = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
     e.preventDefault();
     e.stopPropagation();
     const startY = e.clientY;
     const startH = panelRef.current?.getBoundingClientRect().height ?? dims.h;
-    const move = (ev: MouseEvent) => onUpdate({ height: Math.max(120, startH + (ev.clientY - startY)) });
-    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    trackPointerDrag(e, (ev) => onUpdate({ height: Math.max(120, startH + (ev.clientY - startY)) }));
   };
 
   return (
@@ -1508,8 +1496,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
                   <circle cx={cursorInfo.sx} cy={mkToSy(groupOf(cursor!.trace))(cursorInfo.value)} r={3.5} fill={cursorInfo.color} stroke={th.dot} strokeWidth={1} style={{ pointerEvents: "none" }} />
                 )}
                 {/* Draggable handle + hit area */}
-                <rect x={cursorInfo.sx - 5} y={0} width={10} height={plotH} fill="transparent" style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
-                <rect x={cursorInfo.sx - 4} y={2} width={8} height={9} rx={2} fill={cursorInfo.color} style={{ cursor: "ew-resize" }} onMouseDown={startCursorDrag} />
+                <rect x={cursorInfo.sx - 5} y={0} width={10} height={plotH} fill="transparent" style={{ ...DRAG_TOUCH_ACTION, cursor: "ew-resize" }} onPointerDown={startCursorDrag} />
+                <rect x={cursorInfo.sx - 4} y={2} width={8} height={9} rx={2} fill={cursorInfo.color} style={{ ...DRAG_TOUCH_ACTION, cursor: "ew-resize" }} onPointerDown={startCursorDrag} />
               </g>
             )}
             <rect x={0} y={0} width={plotW} height={plotH} fill="none" stroke={th.frame} strokeWidth={1} />
@@ -1546,14 +1534,13 @@ function PlotPanelView(props: PlotPanelViewProps) {
               borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96,
             }}>
               <div
-                onMouseDown={(e) => {
+                onPointerDown={(e) => {
+                  if (!isDragPointer(e)) return;
                   e.preventDefault(); e.stopPropagation();
                   const startY = e.clientY, origTop = boxTop;
-                  const move = (ev: MouseEvent) => setCursorManualTop(origTop + ev.clientY - startY);
-                  const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
-                  window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+                  trackPointerDrag(e, (ev) => setCursorManualTop(origTop + ev.clientY - startY));
                 }}
-                style={{ position: "absolute", top: 2, right: 4, cursor: "ns-resize", fontSize: 11,
+                style={{ ...DRAG_TOUCH_ACTION, position: "absolute", top: 2, right: 4, cursor: "ns-resize", fontSize: 11,
                   color: "#64748b", lineHeight: 1, userSelect: "none", pointerEvents: "auto" }}
                 title="Vertikal verschieben"
               >⠿</div>
@@ -1581,10 +1568,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
               borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96, opacity: 0.9,
             }}>
               <div
-                onMouseDown={(e) => startDragReadout(e, sTop, sLeft,
+                onPointerDown={(e) => startDragReadout(e, sTop, sLeft,
                   (top, left) => setStamps((prev) => prev.map((st, j) =>
                     j === s.i ? { ...st, top, left } : st)))}
-                style={{ position: "absolute", top: 2, right: 4, cursor: "move", fontSize: 11,
+                style={{ ...DRAG_TOUCH_ACTION, position: "absolute", top: 2, right: 4, cursor: "move", fontSize: 11,
                   color: "#64748b", lineHeight: 1, userSelect: "none", pointerEvents: "auto" }}
                 title="Verschieben"
               >⠿</div>
@@ -1700,9 +1687,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
       {/* Resize handle: drag the bottom edge to set this plot's height */}
       <div
-        onMouseDown={startResize}
+        onPointerDown={startResize}
         title="Drag to resize this plot"
-        style={{ height: 7, flexShrink: 0, cursor: "ns-resize", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}
+        style={{ ...DRAG_TOUCH_ACTION, height: 7, flexShrink: 0, cursor: "ns-resize", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}
       />
     </div>
   );
