@@ -41,6 +41,7 @@ import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from
 import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
+import { trackPointerDrag } from "./pointerDrag.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -56,6 +57,10 @@ function CanvasInner() {
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dragDefRef = useRef<ComponentDefinition | null>(null);
+  // Input kind of the last pointer that pressed the canvas. A touch/pen place is
+  // committed on pointerup (below), so onPaneClick must not also place then and
+  // create a duplicate; it stays the placement path for the mouse only.
+  const lastPointerTypeRef = useRef<string>("mouse");
 
   const {
     nodes, edges,
@@ -407,17 +412,48 @@ function CanvasInner() {
     [nodes, edges],
   );
 
+  // Screen → flow using the wrapper's *live* rect and the current viewport, so
+  // placement matches the ghost even on the very first click (ReactFlow's own
+  // cached container rect can still be stale then, landing the node offset).
+  const clientToFlow = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      const vp = reactFlowInstance.getViewport();
+      return {
+        x: (clientX - (rect?.left ?? 0) - vp.x) / vp.zoom,
+        y: (clientY - (rect?.top ?? 0) - vp.y) / vp.zoom,
+      };
+    },
+    [reactFlowInstance],
+  );
+
   /** Touch/pen long-press stands in for the right-click there is no way to make. */
   const onWrapperPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      lastPointerTypeRef.current = e.pointerType;
       if (!isLongPressPointer(e)) return;
+      // Placing a part: the ghost tracks the finger/stylus, so dropping it where
+      // the pointer lifts is the natural gesture. ReactFlow never delivers a
+      // pane click for touch, so without this the ghost could not be committed.
+      // (No long-press here — it would swallow the release that places the part.)
+      if (editorMode === "place") {
+        trackPointerDrag(e, () => {}, (ev) => {
+          // Drop only on a real lift; a cancel (palm rejection, system takeover)
+          // must not scatter a part where the gesture happened to abort.
+          if (ev.type !== "pointerup") return;
+          const pos = clientToFlow(ev.clientX, ev.clientY);
+          if (pendingLibraryPlacement) placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
+          else if (pendingPlaceType) placeComponent(pendingPlaceType, pos.x, pos.y);
+        });
+        return;
+      }
       trackLongPress(e, (x, y) => {
         const { node, edge } = hitTest(x, y);
         if (node) openNodeMenu(node, x, y);
         else if (edge) openEdgeMenu(edge, x, y);
       });
     },
-    [hitTest, openNodeMenu, openEdgeMenu],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu],
   );
 
   /** Add a component data-point (voltage across / current through). Placed just
@@ -479,25 +515,12 @@ function CanvasInner() {
     setNodeMenu(null);
   };
 
-  // Screen → flow using the wrapper's *live* rect and the current viewport, so
-  // placement matches the ghost even on the very first click (ReactFlow's own
-  // cached container rect can still be stale then, landing the node offset).
-  const clientToFlow = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = wrapperRef.current?.getBoundingClientRect();
-      const vp = reactFlowInstance.getViewport();
-      return {
-        x: (clientX - (rect?.left ?? 0) - vp.x) / vp.zoom,
-        y: (clientY - (rect?.top ?? 0) - vp.y) / vp.zoom,
-      };
-    },
-    [reactFlowInstance],
-  );
-
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
       setSelectedComponentId(null);
-      if (editorMode === "place") {
+      // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
+      // mouse commits its placement here, on the pane click.
+      if (editorMode === "place" && lastPointerTypeRef.current === "mouse") {
         const pos = clientToFlow(event.clientX, event.clientY);
         if (pendingLibraryPlacement) {
           placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
