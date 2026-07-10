@@ -131,7 +131,27 @@ export function getVoltageProbeForNet(circuit: Circuit, netId: string | null): s
   return [`V(${name})`, `v(${name})`];
 }
 
-/** Match a probe candidate to an actual variable name from simulation results. */
+/**
+ * Canonical key of a probe *request* (as opposed to a result variable). A bare
+ * name is a node, so `UBat` asks for `V(UBat)` — that is how a wire probe and
+ * an ngspice node reference are written.
+ */
+function requestKey(candidate: string): string | null {
+  const c = canonicalProbe(candidate);
+  if (c) return c.key;
+  const bare = candidate.trim();
+  return /^[A-Za-z_][\w.]*$/.test(bare) ? `V:${bare.toUpperCase()}` : null;
+}
+
+/**
+ * Match a probe candidate to an actual variable name from simulation results.
+ *
+ * Matching is by canonical probe identity, never by substring: ngspice writes
+ * one quantity several ways (`i(rl)`, `@rl[i]`, `rl#branch`), but a `V(...)`
+ * request must never resolve to a current. A substring fallback used to do
+ * exactly that — `V(Ri)` found `i(@ri[i])`, so a voltage trace silently showed
+ * the device's current (and dragged the volts axis to its magnitude).
+ */
 export function matchResultVariable(
   result: SimulationResult,
   candidates: string | string[],
@@ -146,11 +166,13 @@ export function matchResultVariable(
     const ci = result.variables.find((v) => v.toLowerCase() === lower);
     if (ci) return ci;
   }
-  // Fuzzy: match by node/component name inside parentheses
+  // Canonical: same quantity, different spelling. Prefer a non-`@` representative
+  // so the friendly `i(rl)` wins over `@rl[i]` (dedupeProbes relies on this order).
   for (const c of list) {
-    const inner = c.replace(/^[vViI]\(/, "").replace(/\)$/, "").toLowerCase();
-    const fuzzy = result.variables.find((v) => v.toLowerCase().includes(inner));
-    if (fuzzy) return fuzzy;
+    const key = requestKey(c);
+    if (!key) continue;
+    const same = result.variables.filter((v) => canonicalProbe(v)?.key === key);
+    if (same.length) return same.find((v) => !v.startsWith("@")) ?? same[0];
   }
   return null;
 }

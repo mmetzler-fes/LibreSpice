@@ -33,6 +33,12 @@ export interface PlotPanel {
   xMax?: number;
   xTicks?: number;
   logX?: boolean;
+  /**
+   * Parametric x-axis: plot the panel's traces against this trace instead of the
+   * sweep/time base (LTSpice's `Parametric:`), e.g. `I(RL)` for a source
+   * characteristic U_KL(I_RL). The x bounds then refer to that quantity.
+   */
+  xTrace?: string;
   /** y-axis: bottom bound, top bound, desired tick count (left/first axis). */
   yMin?: number;
   yMax?: number;

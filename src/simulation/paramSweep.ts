@@ -12,10 +12,20 @@ export interface StepSpec {
   values: number[];
   /** `.step V1 …` (a source's value) rather than `.step param NAME …`. */
   isSource?: boolean;
+  /** The sweep asked for more points than {@link MAX_STEPS}; `values` is cut short. */
+  truncated?: boolean;
 }
 
-/** Cap total runs so a broad sweep can't launch thousands of simulations. */
-const MAX_STEPS = 512;
+/**
+ * Cap the points of a single sweep. LTSpice has no such limit, so this only
+ * exists to stop a typo (`.step param R 1 1MEG 1`) from queueing a million runs.
+ * It has to be generous: `.step param Rvar 1p 1MEG 1k` is 1001 legitimate points,
+ * and silently cutting it at 512 truncated the x-axis at half the sweep.
+ */
+const MAX_STEPS = 4096;
+
+/** Cap the runs of a nested sweep (the cartesian product of all `.step` lines). */
+const MAX_RUNS = 4096;
 
 /**
  * Parse a `.step` sweep. Supported forms (LTSpice syntax):
@@ -45,18 +55,20 @@ function parseStepLine(raw: string): StepSpec | null {
   const list = rest.match(/^list\s+(.*)$/i);
   if (list) {
     const values = list[1].split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
-    return values.length ? { name, values: values.slice(0, MAX_STEPS), isSource } : null;
+    if (!values.length) return null;
+    return { name, values: values.slice(0, MAX_STEPS), isSource, truncated: values.length > MAX_STEPS };
   }
 
   const nums = rest.split(/[\s,]+/).map(parseSpiceNumber).filter((v): v is number => v != null);
   if (nums.length < 3) return null;
   const [start, stop, third] = nums;
   const values: number[] = [];
+  let wanted: number;
 
   if (kind === "lin") {
     if (third === 0) return null;
-    const steps = Math.floor((stop - start) / third + 1e-9);
-    for (let i = 0; i <= steps && values.length < MAX_STEPS; i++) {
+    wanted = Math.floor((stop - start) / third + 1e-9) + 1;
+    for (let i = 0; i < wanted && values.length < MAX_STEPS; i++) {
       values.push(Number((start + i * third).toPrecision(12)));
     }
   } else {
@@ -64,12 +76,12 @@ function parseStepLine(raw: string): StepSpec | null {
     if (start <= 0 || stop <= 0 || third <= 0) return null;
     const decades = kind === "dec" ? Math.log10(stop / start) : Math.log2(stop / start);
     const ratio = kind === "dec" ? Math.pow(10, 1 / third) : Math.pow(2, 1 / third);
-    const total = Math.max(0, Math.round(third * decades));
-    for (let i = 0; i <= total && values.length < MAX_STEPS; i++) {
+    wanted = Math.max(0, Math.round(third * decades)) + 1;
+    for (let i = 0; i < wanted && values.length < MAX_STEPS; i++) {
       values.push(Number((start * Math.pow(ratio, i)).toPrecision(12)));
     }
   }
-  return values.length ? { name, values, isSource } : null;
+  return values.length ? { name, values, isSource, truncated: wanted > MAX_STEPS } : null;
 }
 
 /** All `.step param` sweeps in the netlist (LTSpice allows several, nested). */
@@ -96,7 +108,7 @@ export interface StepCombo {
 
 /**
  * Cartesian product of several `.step` sweeps (LTSpice runs every combination),
- * capped at {@link MAX_STEPS} total runs so a broad nested sweep can't explode.
+ * capped at {@link MAX_RUNS} total runs so a broad nested sweep can't explode.
  */
 export function stepCombinations(specs: StepSpec[], fmt: (v: number) => string): StepCombo[] {
   let combos: { name: string; value: number }[][] = [[]];
@@ -107,7 +119,7 @@ export function stepCombinations(specs: StepSpec[], fmt: (v: number) => string):
         next.push([...combo, { name: spec.name, value }]);
       }
     }
-    combos = next.slice(0, MAX_STEPS);
+    combos = next.slice(0, MAX_RUNS);
   }
   return combos.map((assignments) => ({
     tag: assignments.map((a) => `${a.name}=${fmt(a.value)}`).join(" "),

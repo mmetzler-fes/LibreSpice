@@ -14,9 +14,31 @@ import { splitUnitAnnotation } from "./units.js";
  * (the power in R1) work. Parameter values come from the `params` map.
  */
 
+/** `V(a,b)` — the potential difference between two nodes, as LTSpice writes it. */
+const DIFF_RE = /^\s*v\s*\(\s*([^\s,()]+)\s*,\s*([^\s,()]+)\s*\)\s*$/i;
+
+/** Node voltage of a single node; the ground node `0` is identically zero. */
+function nodeVoltage(result: SimulationResult, node: string, length: number): Float64Array | null {
+  if (node === "0") return new Float64Array(length);
+  const match = matchResultVariable(result, [`V(${node})`]);
+  return match ? result.data[match] ?? null : null;
+}
+
 /** Resolve a single reference token (e.g. `V(out)`) to a data series. */
 export function resolveSeries(result: SimulationResult, ref: string): Float64Array | null {
   if (result.data[ref]) return result.data[ref];
+  // A differential probe has no result vector of its own — subtract the two
+  // node voltages. ngspice never emits `v(a,b)`, so this must happen app-side.
+  const diff = ref.match(DIFF_RE);
+  if (diff) {
+    const len = result.time?.length ?? 0;
+    const a = nodeVoltage(result, diff[1], len);
+    const b = nodeVoltage(result, diff[2], len);
+    if (!a || !b) return null;
+    const out = new Float64Array(Math.min(a.length, b.length));
+    for (let i = 0; i < out.length; i++) out[i] = a[i] - b[i];
+    return out;
+  }
   const match = matchResultVariable(result, [ref]);
   return match ? result.data[match] ?? null : null;
 }

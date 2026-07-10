@@ -45,8 +45,9 @@ export function applyPltText(text: string): boolean {
       const ax = pane.y[k];
       if (ax) yAxes[u] = { min: ax.low, max: ax.high, ticks: tickStep(ax) };
     });
+    const xTrace = pane.parametric ? resolveName(pane.parametric) : undefined;
     newPanels.push({
-      id,
+      id, xTrace,
       xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
       yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
       yAxes,
@@ -55,6 +56,11 @@ export function applyPltText(text: string): boolean {
       const name = resolveName(t);
       tracePanel[name] = id;
       if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
+    }
+    // The parametric x-axis needs its own series, so it has to be probed too —
+    // but it is not a y-trace, hence no `tracePanel` entry.
+    if (xTrace) {
+      if (looksLikeExpression(xTrace)) exprs.add(xTrace); else raw.add(xTrace);
     }
   });
 

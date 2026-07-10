@@ -509,12 +509,14 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     const doc: PltDoc = {
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
       panes: panels.map((panel): PltPane => {
-        const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
+        const traces = allTraces.filter((t) => panelForTrace(t) === panel.id && t !== panel.xTrace);
         const groups = applyYOverrides(groupByUnit(traces, seriesMap.map), panel);
         const y = groups.map((g) => axisFrom(g.yMin, g.yMax, g.ticks ?? panel.yTicks));
         if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks));
-        const x = axisFrom(panel.xMin ?? time[0], panel.xMax ?? time[time.length - 1], panel.xTicks);
-        return { traces, x, y, log: [!!panel.logX, false, false] };
+        // A parametric panel's x bounds describe its x-trace, not the time base.
+        const xs = (panel.xTrace ? seriesMap.map[panel.xTrace] : null) ?? time;
+        const x = axisFrom(panel.xMin ?? xs[0], panel.xMax ?? xs[xs.length - 1], panel.xTicks);
+        return { traces, x, y, log: [!!panel.logX, false, false], parametric: panel.xTrace };
       }),
     };
     const content = serializePlt(doc);
@@ -746,16 +748,19 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
         {panels.map((panel, i) => {
-          const traces = allTraces.filter((t) => panelForTrace(t) === panel.id);
+          // A parametric panel puts one trace on the x-axis, so it is not drawn
+          // as a curve; its series replaces the sweep/time base.
+          const xSeries = panel.xTrace ? seriesMap.map[panel.xTrace] : null;
+          const traces = allTraces.filter((t) => panelForTrace(t) === panel.id && t !== panel.xTrace);
           return (
             <PlotPanelView
               key={panel.id}
               panel={panel}
               traces={traces}
               seriesMap={seriesMap.map}
-              time={result.time!}
-              xLabel={result.xLabel}
-              xUnit={result.xUnit}
+              time={xSeries ?? result.time!}
+              xLabel={xSeries ? panel.xTrace : result.xLabel}
+              xUnit={xSeries ? inferUnit(panel.xTrace!) : result.xUnit}
               colorFor={colorFor}
               compact={compact}
               index={i}

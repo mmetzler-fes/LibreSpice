@@ -35,6 +35,12 @@ export interface PltPane {
   y: PltAxis[];
   /** [x, y0, y1] logarithmic flags. */
   log: [boolean, boolean, boolean];
+  /**
+   * `Parametric: "I(RL)"` — the pane plots its traces against this trace instead
+   * of the sweep/time axis (e.g. a source characteristic U_KL over I_RL). The
+   * `X:` bounds then refer to that quantity, not to the sweep.
+   */
+  parametric?: string;
 }
 
 export interface PltDoc {
@@ -77,6 +83,7 @@ export function serializePlt(doc: PltDoc): string {
     lines.push("   {");
     const toks = pane.traces.map((name, i) => `{${524290 + i},0,"${name}"}`).join(" ");
     lines.push(`      traces: ${pane.traces.length} ${toks}`);
+    if (pane.parametric) lines.push(`      Parametric: "${pane.parametric}"`);
     lines.push(`      X: ${fmtAxis(pane.x)}`);
     pane.y.forEach((y, yi) => lines.push(`      Y[${yi}]: ${fmtAxis(y)}`));
     lines.push(`      Log: ${pane.log.map((b) => (b ? 1 : 0)).join(" ")}`);
@@ -152,7 +159,11 @@ function parsePane(body: string): PltPane | null {
 
   const logM = body.match(/Log:\s*([\d ]+)/);
   const logs = logM ? logM[1].trim().split(/\s+/).map((v) => v === "1") : [];
-  return { traces, x, y, log: [!!logs[0], !!logs[1], !!logs[2]] };
+  // `Parametric:` names the trace used as the x-axis. Its own `{…,"name"}` token
+  // form is not used, so it never lands in `traces`.
+  const pm = body.match(/^[ \t]*Parametric:[ \t]*(.+?)[ \t]*$/m);
+  const parametric = pm ? pm[1].replace(/^"|"$/g, "") : undefined;
+  return { traces, x, y, log: [!!logs[0], !!logs[1], !!logs[2]], parametric };
 }
 
 export function parsePlt(text: string): PltDoc | null {

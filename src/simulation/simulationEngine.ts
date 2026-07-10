@@ -165,6 +165,15 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
     // App-side `.meas`: over a stepped `.op` the measurement domain is the swept
     // parameter itself (LTSpice semantics — `WHEN P=Pmax` yields the RM at which
     // the power peaks). Every other analysis measures per run, over its own axis.
+    // A truncated sweep silently shortens the x-axis, which looks like a wrong
+    // result rather than a cap — say so.
+    const cut = steps.filter((s) => s.truncated);
+    const warn = cut.length
+      ? `===== Warning =====\n${cut
+          .map((s) => `.step ${s.name}: sweep capped at ${s.values.length} points (last value ${s.values[s.values.length - 1]})`)
+          .join("\n")}\n\n`
+      : "";
+
     const appRows: string[] = [];
     if (appSide.length > 0) {
       if (sweep) {
@@ -177,7 +186,7 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
       }
     }
     setLog(
-      `${measBlock(`.step ${paramName}`, [...appRows, ...measRows])}` +
+      `${warn}${measBlock(`.step ${paramName}`, [...appRows, ...measRows])}` +
         `===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`,
     );
 
