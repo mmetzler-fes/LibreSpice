@@ -5,7 +5,7 @@ import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
 import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
-import { captionSvgPlacement, DEFAULT_HALF } from "./captionLayout.js";
+import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
@@ -103,16 +103,18 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   })();
 
   const showCaption = type !== "ground";
-  const labelPos = captionSvgPlacement("label", rotation, halfW, halfH, data.labelOffset);
-  const valuePos = captionSvgPlacement("value", rotation, halfW, halfH, data.valueOffset);
+  // Font sizes must match the editor's caption styles — the placement depends on
+  // them (the line box is CAPTION_LINE_HEIGHT × fontSize).
+  const labelPos = captionSvgPlacement("label", rotation, halfW, halfH, LABEL_FONT_SIZE, data.labelOffset);
+  const valuePos = captionSvgPlacement("value", rotation, halfW, halfH, VALUE_FONT_SIZE, data.valueOffset);
   return (
     <g transform={`translate(${x} ${y})`} color="#0f172a">
       {inner}
       {showCaption && (
-        <text x={labelPos.x} y={labelPos.y} textAnchor={labelPos.textAnchor} dominantBaseline={labelPos.baseline} fontSize={11} fontFamily="monospace" fill="#374151">{data.label}</text>
+        <text x={labelPos.x} y={labelPos.y} textAnchor={labelPos.textAnchor} dominantBaseline={labelPos.baseline} fontSize={LABEL_FONT_SIZE} fontFamily="monospace" fill="#374151">{data.label}</text>
       )}
       {showCaption && data.valueLabel && (
-        <text x={valuePos.x} y={valuePos.y} textAnchor={valuePos.textAnchor} dominantBaseline={valuePos.baseline} fontSize={10} fontFamily="monospace" fill="#6b7280">{data.valueLabel}</text>
+        <text x={valuePos.x} y={valuePos.y} textAnchor={valuePos.textAnchor} dominantBaseline={valuePos.baseline} fontSize={VALUE_FONT_SIZE} fontFamily="monospace" fill="#6b7280">{data.valueLabel}</text>
       )}
     </g>
   );

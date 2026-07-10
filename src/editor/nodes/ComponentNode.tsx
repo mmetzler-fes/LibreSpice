@@ -22,7 +22,7 @@ import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 import { netLabelShape } from "../netLabelShape.js";
-import { captionLayout, DEFAULT_HALF } from "../captionLayout.js";
+import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 
 export type ComponentType =
   | "resistor"
@@ -124,6 +124,9 @@ function MovableLabel({
         top: base.top + off.y,
         transform,
         fontSize, fontWeight, color,
+        // Pinned, not `normal`: the CSS `translate(…%)` above resolves against
+        // this box, and the SVG export has to reproduce it (see captionLayout).
+        lineHeight: CAPTION_LINE_HEIGHT,
         whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
         cursor: "move", zIndex: 12,
       }}
@@ -293,7 +296,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
       </svg>
       <MovableLabel
         nodeId={nodeId} kind="label" base={{ left: -6, top: height / 2 }} offset={data.labelOffset}
-        color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+        color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
       >
         {data.label}
       </MovableLabel>
@@ -365,7 +368,7 @@ function LibrarySymbolNode({
       {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {data.label}
         </MovableLabel>
@@ -482,7 +485,7 @@ function AsyComponentNode({
       {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {data.label}
         </MovableLabel>
@@ -490,7 +493,7 @@ function AsyComponentNode({
       {data.valueLabel && (() => { const l = captionLayout("value", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="value" base={l} transform={l.transform} offset={data.valueOffset}
-          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
+          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={VALUE_FONT_SIZE}
         >
           {data.valueLabel}
         </MovableLabel>
@@ -605,7 +608,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       {!isGround && (() => { const l = captionLayout("label", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="label" base={l} transform={l.transform} offset={nodeData.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={11} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {nodeData.label}
         </MovableLabel>
@@ -615,7 +618,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="value" base={l} transform={l.transform} offset={nodeData.valueOffset}
-          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={10}
+          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={VALUE_FONT_SIZE}
         >
           {nodeData.valueLabel}
         </MovableLabel>
