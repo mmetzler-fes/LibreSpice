@@ -1,4 +1,4 @@
-import { useMemo, useState, type RefObject } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import {
   BaseEdge,
   useReactFlow,
@@ -32,6 +32,9 @@ export interface WireData {
 const PIN_SNAP = 16;
 /** Snap distance to an existing wire segment, in flow units. */
 const WIRE_SNAP = 10;
+/** Perpendicular travel (flow units) a touch/pen drag must make off the current
+ *  segment's axis before that corner is locked in and a new segment begins. */
+const TURN_SNAP = GRID;
 
 function snap(v: number): number {
   return Math.round(v / GRID) * GRID;
@@ -161,6 +164,14 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   const [cursor, setCursor] = useState<FlowPoint | null>(null);
   const [hoverTarget, setHoverTarget] = useState<WireTarget | null>(null);
 
+  // A touch/pen wire is drawn as one continuous drag (no per-tap clicks). These
+  // hold the live gesture: whether a drag is in flight, the axis of the segment
+  // currently being drawn, and the committed vertices (mirrored from `points`
+  // so a rapid pointermove reads the latest without a stale closure).
+  const draggingRef = useRef(false);
+  const segDirRef = useRef<"h" | "v" | null>(null);
+  const pointsRef = useRef<FlowPoint[]>([]);
+
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const pins = useMemo(() => nodes.flatMap((n) => getNodePins(n, symbolNorm)), [nodes, symbolNorm]);
 
@@ -205,7 +216,13 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     return best;
   };
 
-  const reset = () => { setPoints([]); setStartTarget(null); };
+  const reset = () => {
+    setPoints([]); setStartTarget(null);
+    draggingRef.current = false; segDirRef.current = null; pointsRef.current = [];
+  };
+
+  /** Dominant axis of a delta: the direction an orthogonal segment would lead. */
+  const dirOf = (dx: number, dy: number): "h" | "v" => (Math.abs(dx) >= Math.abs(dy) ? "h" : "v");
 
   /**
    * Where a screen position lands: snapped to a pin, to a point on an existing
@@ -226,27 +243,9 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     return { cursor: { x: snap(flow.x), y: snap(flow.y) }, target: null };
   };
 
-  const handleMove = (e: React.PointerEvent) => {
-    const { cursor: c, target } = resolve(e.clientX, e.clientY);
-    setHoverTarget(target);
-    setCursor(c);
-  };
-
   const sameTarget = (a: WireTarget, b: WireTarget) => a.nodeId === b.nodeId && a.handleId === b.handleId;
 
-  /**
-   * A pen or finger taps without hovering first, so the position is resolved
-   * from the event itself rather than read out of `cursor`/`hoverTarget` — those
-   * are set by the same gesture and would still be stale (or null) here.
-   */
-  const handleDown = (e: React.PointerEvent) => {
-    if (!isDragPointer(e)) return;
-    const { cursor: cursorNow, target: hoverNow } = resolve(e.clientX, e.clientY);
-    setCursor(cursorNow);
-    setHoverTarget(hoverNow);
-    commit(cursorNow, hoverNow);
-  };
-
+  // ── Mouse: click to dock, click for each 90° bend, click to close. ──────────
   const commit = (cursor: FlowPoint, hoverTarget: WireTarget | null) => {
     if (!startTarget) {
       // First tap must dock onto a pin or an existing wire.
@@ -277,6 +276,87 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     setPoints((prev) => [...prev, { x: cursor.x, y: cursor.y }]);
   };
 
+  // ── Touch/pen (iPad, Surface, …): one continuous drag. ──────────────────────
+  // A stylus/finger has no hover-then-click, so wiring is a single gesture:
+  // press on a pin/wire to start, and every time the drag turns a corner that
+  // bend is *frozen* (it no longer re-routes), then release on a second pin/wire
+  // to close the wire with exactly those bends.
+  const touchDown = (e: React.PointerEvent) => {
+    const { cursor: c, target } = resolve(e.clientX, e.clientY);
+    if (!target) return; // a wire must start on a pin or an existing wire
+    setStartTarget(target);
+    setPoints([target.point]);
+    pointsRef.current = [target.point];
+    segDirRef.current = null;
+    draggingRef.current = true;
+    setHoverTarget(target);
+    setCursor(c);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const touchMove = (e: React.PointerEvent) => {
+    const { cursor: c, target } = resolve(e.clientX, e.clientY);
+    setHoverTarget(target);
+    const pts = pointsRef.current;
+    const L = pts[pts.length - 1];
+    const dx = c.x - L.x, dy = c.y - L.y;
+    if (segDirRef.current === null) {
+      // Adopt a lead axis only once the drag has clearly committed to one.
+      if (Math.abs(dx) >= TURN_SNAP || Math.abs(dy) >= TURN_SNAP) segDirRef.current = dirOf(dx, dy);
+    } else if ((segDirRef.current === "h" ? Math.abs(dy) : Math.abs(dx)) >= TURN_SNAP) {
+      // The drag has turned off the current axis: freeze the elbow at the end of
+      // this segment and continue along the other axis.
+      const corner = segDirRef.current === "h" ? { x: c.x, y: L.y } : { x: L.x, y: c.y };
+      pointsRef.current = [...pts, corner];
+      setPoints(pointsRef.current);
+      segDirRef.current = segDirRef.current === "h" ? "v" : "h";
+    }
+    setCursor(c);
+  };
+
+  const touchUp = (e: React.PointerEvent) => {
+    draggingRef.current = false;
+    const { target } = resolve(e.clientX, e.clientY);
+    if (startTarget && target && !sameTarget(target, startTarget)) {
+      const pts = pointsRef.current;
+      const L = pts[pts.length - 1];
+      const P = target.point;
+      let waypoints = pts.slice(1);
+      // Preserve the last drawn segment's orientation, so the finished wire
+      // keeps the shape the drag showed instead of a re-derived elbow.
+      if (segDirRef.current && L) {
+        const elbow = segDirRef.current === "h" ? { x: P.x, y: L.y } : { x: L.x, y: P.y };
+        const degenerate = (elbow.x === L.x && elbow.y === L.y) || (elbow.x === P.x && elbow.y === P.y);
+        if (!degenerate) waypoints = [...waypoints, elbow];
+      }
+      onCreateWire(
+        { source: startTarget.nodeId, sourceHandle: startTarget.handleId, target: target.nodeId, targetHandle: target.handleId },
+        { waypoints, sourceTap: startTarget.kind === "wire" ? startTarget.point : undefined, targetTap: target.kind === "wire" ? target.point : undefined },
+      );
+    }
+    reset(); // released off a target → discard the in-progress wire
+  };
+
+  const handleDown = (e: React.PointerEvent) => {
+    if (!isDragPointer(e)) return;
+    if (e.pointerType !== "mouse") { touchDown(e); return; }
+    const { cursor: cursorNow, target: hoverNow } = resolve(e.clientX, e.clientY);
+    setCursor(cursorNow);
+    setHoverTarget(hoverNow);
+    commit(cursorNow, hoverNow);
+  };
+
+  const handleMove = (e: React.PointerEvent) => {
+    if (draggingRef.current) { touchMove(e); return; }
+    const { cursor: c, target } = resolve(e.clientX, e.clientY);
+    setHoverTarget(target);
+    setCursor(c);
+  };
+
+  const handleUp = (e: React.PointerEvent) => {
+    if (draggingRef.current) touchUp(e);
+  };
+
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     reset();
@@ -289,8 +369,21 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   };
 
   const cursorLocal = cursor ? toLocal(cursor) : null;
-  const previewPts = cursor ? [...points, cursor] : points;
-  const previewPath = previewPts.length >= 2 ? orthoPath(previewPts.map(toLocal)) : "";
+  // Live preview. Mid touch/pen drag the last segment is forced along the active
+  // axis (segDirRef) so it can't flip while the finger moves; the mouse keeps
+  // the auto-routed last segment.
+  let previewChain: FlowPoint[] = points;
+  if (cursor) {
+    if (draggingRef.current && points.length >= 1 && segDirRef.current) {
+      const L = points[points.length - 1];
+      const elbow = segDirRef.current === "h" ? { x: cursor.x, y: L.y } : { x: L.x, y: cursor.y };
+      const degenerate = elbow.x === L.x && elbow.y === L.y;
+      previewChain = degenerate ? [...points, cursor] : [...points, elbow, cursor];
+    } else {
+      previewChain = [...points, cursor];
+    }
+  }
+  const previewPath = previewChain.length >= 2 ? orthoPath(previewChain.map(toLocal)) : "";
 
   const width = rect?.width ?? 0;
   const height = rect?.height ?? 0;
@@ -299,8 +392,9 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     <div
       onPointerMove={handleMove}
       onPointerDown={handleDown}
+      onPointerUp={handleUp}
       onContextMenu={handleContextMenu}
-      onPointerLeave={() => { setCursor(null); setHoverTarget(null); }}
+      onPointerLeave={() => { if (!draggingRef.current) { setCursor(null); setHoverTarget(null); } }}
       style={{ ...DRAG_TOUCH_ACTION, position: "absolute", inset: 0, zIndex: 5, cursor: "none" }}
     >
       <svg width={width} height={height} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
