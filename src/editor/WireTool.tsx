@@ -32,9 +32,13 @@ export interface WireData {
 const PIN_SNAP = 16;
 /** Snap distance to an existing wire segment, in flow units. */
 const WIRE_SNAP = 10;
-/** Perpendicular travel (flow units) a touch/pen drag must make off the current
- *  segment's axis before that corner is locked in and a new segment begins. */
-const TURN_SNAP = GRID;
+/** How far the pen may stray perpendicular to the current segment before it
+ *  turns a corner — measured in *screen* pixels (≈0.5 cm), using the raw pen
+ *  position rather than the grid-snapped one. Screen-space so zoom doesn't
+ *  change the feel; raw so a single grid cell can't jump the threshold and trip
+ *  a turn on the slightest drift (which made straight lines nearly impossible). */
+const PX_PER_CM = 96 / 2.54; // CSS px per centimetre (96 px = 1 inch)
+const TURN_DEVIATION_PX = 0.5 * PX_PER_CM;
 
 function snap(v: number): number {
   return Math.round(v / GRID) * GRID;
@@ -299,13 +303,18 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     setHoverTarget(target);
     const pts = pointsRef.current;
     const L = pts[pts.length - 1];
-    const dx = c.x - L.x, dy = c.y - L.y;
+    // Deviation from the segment's anchor in screen px, from the *raw* pen
+    // position (not the snapped cursor): the segment holds its direction until
+    // the pen strays TURN_DEVIATION_PX perpendicular to it.
+    const Ls = flowToScreenPosition(L);
+    const devX = e.clientX - Ls.x, devY = e.clientY - Ls.y;
     if (segDirRef.current === null) {
       // Adopt a lead axis only once the drag has clearly committed to one.
-      if (Math.abs(dx) >= TURN_SNAP || Math.abs(dy) >= TURN_SNAP) segDirRef.current = dirOf(dx, dy);
-    } else if ((segDirRef.current === "h" ? Math.abs(dy) : Math.abs(dx)) >= TURN_SNAP) {
-      // The drag has turned off the current axis: freeze the elbow at the end of
-      // this segment and continue along the other axis.
+      if (Math.hypot(devX, devY) >= TURN_DEVIATION_PX) segDirRef.current = dirOf(devX, devY);
+    } else if ((segDirRef.current === "h" ? Math.abs(devY) : Math.abs(devX)) >= TURN_DEVIATION_PX) {
+      // Turned off the current axis: freeze the elbow, back-computed from the
+      // pen's current position (the segment runs out to where the pen now is),
+      // and continue along the other axis.
       const corner = segDirRef.current === "h" ? { x: c.x, y: L.y } : { x: L.x, y: c.y };
       pointsRef.current = [...pts, corner];
       setPoints(pointsRef.current);
@@ -376,9 +385,10 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   if (cursor) {
     if (draggingRef.current && points.length >= 1 && segDirRef.current) {
       const L = points[points.length - 1];
-      const elbow = segDirRef.current === "h" ? { x: cursor.x, y: L.y } : { x: L.x, y: cursor.y };
-      const degenerate = elbow.x === L.x && elbow.y === L.y;
-      previewChain = degenerate ? [...points, cursor] : [...points, elbow, cursor];
+      // Draw the live segment straight along its axis — the sub-threshold
+      // perpendicular drift isn't shown, so a steady hand yields a straight line.
+      const end = segDirRef.current === "h" ? { x: cursor.x, y: L.y } : { x: L.x, y: cursor.y };
+      previewChain = [...points, end];
     } else {
       previewChain = [...points, cursor];
     }
