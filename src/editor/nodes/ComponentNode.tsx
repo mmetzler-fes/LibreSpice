@@ -23,7 +23,7 @@ import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
 import { netLabelShape } from "../netLabelShape.js";
 import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
-import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
+import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
 
 export type ComponentType =
   | "resistor"
@@ -519,7 +519,10 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
     ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
     : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
   return (
-    <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
+    <div
+      draggable={false}
+      style={{ ...NO_NATIVE_DRAG, position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}
+    >
       <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
         {isConnector && (
@@ -530,10 +533,12 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
         )}
       </svg>
       <div
+        draggable={false}
         style={{
+          ...NO_NATIVE_DRAG,
           position: "absolute", ...tagStyle,
           padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
-          userSelect: "none", background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
+          background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
           border: `1px solid ${selected ? "#2563eb" : "#94a3b8"}`,
         }}
       >

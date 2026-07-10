@@ -18,6 +18,23 @@
 export const DRAG_TOUCH_ACTION = { touchAction: "none" } as const;
 
 /**
+ * Kill iPadOS's native element drag on an HTML tag that we drag ourselves.
+ *
+ * A `<div>` with text + background (e.g. a net-label tag) is draggable content
+ * to WebKit: a touch-drag lifts a translucent *clone* and fires `pointercancel`,
+ * which both spoils the drag and aborts the long-press menu. Symbols made of
+ * `<svg>` never trip this, so only text tags need it. Purely touch/WebKit
+ * behaviour — mouse and desktop drag are unaffected.
+ */
+export const NO_NATIVE_DRAG = {
+  ...DRAG_TOUCH_ACTION,
+  WebkitUserDrag: "none",
+  WebkitTouchCallout: "none",
+  WebkitUserSelect: "none",
+  userSelect: "none",
+} as const;
+
+/**
  * True when this pointer should start a drag: the primary pointer, and for a
  * mouse only the left button (right/middle stay with the context menu).
  */
