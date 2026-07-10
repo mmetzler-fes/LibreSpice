@@ -201,6 +201,10 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
         merged.time = result.time;
         merged.data["time"] = result.time;
         merged.variables.push("time");
+        // Carry the x-axis labelling (e.g. frequency/Hz for `.ac`) onto the
+        // merged sweep so its plot names the axis just like a single run.
+        merged.xLabel = result.xLabel;
+        merged.xUnit = result.xUnit;
       }
       for (const v of result.variables) {
         if (v === "time" || v === "frequency") continue;
@@ -332,5 +336,12 @@ function convertResult(result: ResultType): SimulationResult {
   const keptData: Record<string, Float64Array> = {};
   for (const v of kept) if (data[v]) keptData[v] = data[v];
   if (time && !keptData["time"]) keptData["time"] = time;
-  return { variables: kept, data: keptData, time };
+  // An `.ac`/`.noise` run sweeps frequency, not time — ngspice names the scale
+  // vector "frequency" and returns it as the x-vector. Label it so the plot
+  // shows Hz instead of defaulting the unnamed axis to seconds.
+  const freqAxis = variables.includes("frequency");
+  return {
+    variables: kept, data: keptData, time,
+    ...(freqAxis ? { xLabel: "frequency", xUnit: "Hz" } : {}),
+  };
 }
