@@ -40,6 +40,7 @@ import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression
 import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
 import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
+import { isLongPressPointer, trackLongPress } from "./longPress.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -84,9 +85,9 @@ function CanvasInner() {
   const addExpression = usePlotStore((s) => s.addExpression);
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean } | null>(null);
   /** Right-click menu on a wire: annotate the net's potential / current. */
-  const [wireMenu, setWireMenu] = useState<{ netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
+  const [wireMenu, setWireMenu] = useState<{ edgeId: string; netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
   // Only auto-fit when the canvas already has content at mount. On an empty
   // canvas fitView would stay pending and first fire when the first node is
@@ -324,45 +325,99 @@ function CanvasInner() {
     [circuit, addProbeCandidates, setDockTab],
   );
 
+  // Open the component menu at a screen position. Shared by the right-click
+  // handler and the touch long-press, so both offer the same actions.
+  const openNodeMenu = useCallback(
+    (node: Node, clientX: number, clientY: number) => {
+      const f = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY });
+      const data = node.data as ComponentNodeData;
+      setWireMenu(null);
+      setSelectedComponentId(node.id);
+      // Net labels get their own menu (net label ↔ connector).
+      if (data?.componentType === "netlabel") {
+        setNodeMenu({ id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y, isNetlabel: true, connector: !!data.connector });
+        return;
+      }
+      const comp = circuit.components.get(node.id);
+      if (!comp) return;
+      // Ground carries no probes, but it must still be deletable without a
+      // keyboard — so it gets a menu too, with just that entry.
+      const isGround = comp.id.startsWith("ground");
+      setNodeMenu({ id: node.id, label: comp.label, x: clientX, y: clientY, fx: f.x, fy: f.y, isGround });
+    },
+    [circuit, setSelectedComponentId, reactFlowInstance],
+  );
+
+  const openEdgeMenu = useCallback(
+    (edge: Edge, clientX: number, clientY: number) => {
+      const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
+      const netId = port?.netId ?? null;
+      const f = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY });
+      setNodeMenu(null);
+      setWireMenu({
+        edgeId: edge.id,
+        netId,
+        vExpr: netVoltageExpr(circuit, netId),
+        iExpr: netCurrentExpr(circuit, netId),
+        x: clientX, y: clientY, fx: f.x, fy: f.y,
+      });
+    },
+    [circuit, reactFlowInstance],
+  );
+
   // Right-click a component → menu to view its current / voltage in the scope.
   const onNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
       event.preventDefault();
       const e = event as React.MouseEvent;
-      const f = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const data = node.data as ComponentNodeData;
-      // Net labels get their own menu (net label ↔ connector).
-      if (data?.componentType === "netlabel") {
-        setSelectedComponentId(node.id);
-        setWireMenu(null);
-        setNodeMenu({ id: node.id, label: data.label || "NET", x: e.clientX, y: e.clientY, fx: f.x, fy: f.y, isNetlabel: true, connector: !!data.connector });
-        return;
-      }
-      const comp = circuit.components.get(node.id);
-      if (!comp || comp.id.startsWith("ground")) return;
-      setSelectedComponentId(node.id);
-      setWireMenu(null);
-      setNodeMenu({ id: node.id, label: comp.label, x: e.clientX, y: e.clientY, fx: f.x, fy: f.y });
+      openNodeMenu(node as Node, e.clientX, e.clientY);
     },
-    [circuit, setSelectedComponentId, reactFlowInstance],
+    [openNodeMenu],
   );
 
   // Right-click a wire → menu to annotate the net's potential / current.
   const onEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: Edge) => {
       event.preventDefault();
-      const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
-      const netId = port?.netId ?? null;
-      const f = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      setNodeMenu(null);
-      setWireMenu({
-        netId,
-        vExpr: netVoltageExpr(circuit, netId),
-        iExpr: netCurrentExpr(circuit, netId),
-        x: event.clientX, y: event.clientY, fx: f.x, fy: f.y,
+      openEdgeMenu(edge, event.clientX, event.clientY);
+    },
+    [openEdgeMenu],
+  );
+
+  /**
+   * Map a screen point onto the node or wire under it. React Flow tags both with
+   * `data-id`; a port handle carries one too, so walk up until an id is one we
+   * know. Used by the long-press, which has no React Flow event to read.
+   */
+  const hitTest = useCallback(
+    (x: number, y: number): { node?: Node; edge?: Edge } => {
+      let el: Element | null = document.elementFromPoint(x, y);
+      while (el) {
+        const id = el.getAttribute("data-id");
+        if (id) {
+          const node = nodes.find((n) => n.id === id);
+          if (node) return { node };
+          const edge = edges.find((e) => e.id === id);
+          if (edge) return { edge };
+        }
+        el = el.parentElement;
+      }
+      return {};
+    },
+    [nodes, edges],
+  );
+
+  /** Touch/pen long-press stands in for the right-click there is no way to make. */
+  const onWrapperPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isLongPressPointer(e)) return;
+      trackLongPress(e, (x, y) => {
+        const { node, edge } = hitTest(x, y);
+        if (node) openNodeMenu(node, x, y);
+        else if (edge) openEdgeMenu(edge, x, y);
       });
     },
-    [circuit, reactFlowInstance],
+    [hitTest, openNodeMenu, openEdgeMenu],
   );
 
   /** Add a component data-point (voltage across / current through). Placed just
@@ -557,6 +612,22 @@ function CanvasInner() {
     editorMode === "wire"  ? "cell" :
     editorMode === "pan"   ? "grab" : "default";
 
+  /** Delete the part the menu was opened on (its wires go with it). */
+  const deleteMenuNode = useCallback(() => {
+    if (!nodeMenu) return;
+    removeComponent(nodeMenu.id);
+    setNodeMenu(null);
+    setTimeout(() => rebuildConnections(), 0);
+  }, [nodeMenu, removeComponent, rebuildConnections]);
+
+  /** Delete the wire the menu was opened on. */
+  const deleteMenuEdge = useCallback(() => {
+    if (!wireMenu) return;
+    setEdges(edges.filter((e) => e.id !== wireMenu.edgeId));
+    setWireMenu(null);
+    setTimeout(() => rebuildConnections(), 0);
+  }, [wireMenu, edges, setEdges, rebuildConnections]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
       <Toolbar />
@@ -568,6 +639,7 @@ function CanvasInner() {
           style={{ flex: 1, position: "relative", cursor: cursorStyle }}
           onDragOver={onDragOver}
           onDrop={onDrop}
+          onPointerDown={onWrapperPointerDown}
         >
           <ReactFlow
             nodes={nodes}
@@ -647,7 +719,7 @@ function CanvasInner() {
                   {nodeMenu.connector ? "✓ " : " "}Connector (Pfeil, verbindet entfernte Netze)
                 </button>
               </>
-            ) : (
+            ) : nodeMenu.isGround ? null : (
               <>
                 <button style={nodeMenuItem} onClick={() => addComponentDataFlag("V")}>Datenpunkt: Spannung U</button>
                 <button style={nodeMenuItem} onClick={() => addComponentDataFlag("I")}>Datenpunkt: Strom I</button>
@@ -656,6 +728,8 @@ function CanvasInner() {
                 <button style={nodeMenuItem} onClick={probeVoltageInScope}>View U({nodeMenu.label}) in scope</button>
               </>
             )}
+            <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+            <button style={dangerMenuItem} onClick={deleteMenuNode}>🗑 Löschen</button>
           </div>
         </>
       )}
@@ -681,12 +755,21 @@ function CanvasInner() {
             {wireMenu.iExpr
               ? <button style={nodeMenuItem} onClick={() => addWireDataFlag(wireMenu.iExpr!)}>Datenpunkt: Strom {wireMenu.iExpr}</button>
               : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Strom nur bei Reihenschaltung</div>}
+            <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+            <button style={dangerMenuItem} onClick={deleteMenuEdge}>🗑 Leitung löschen</button>
           </div>
         </>
       )}
     </div>
   );
 }
+
+/** Destructive entry: same shape as a normal one, warning colour. */
+const dangerMenuItem: React.CSSProperties = {
+  display: "block", width: "100%", padding: "5px 10px", textAlign: "left",
+  border: "none", background: "transparent", color: "#fca5a5", cursor: "pointer",
+  fontSize: 12, borderRadius: 4, whiteSpace: "nowrap",
+};
 
 const nodeMenuItem: React.CSSProperties = {
   display: "block", width: "100%", padding: "5px 10px", textAlign: "left",

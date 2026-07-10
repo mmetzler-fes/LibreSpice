@@ -65,7 +65,7 @@ await build({
 });
 
 const { runAllSuites } = await import(pathToFileURL(outfile).href);
-const suites = runAllSuites();
+const suites = await runAllSuites();
 
 let anyFailed = false;
 for (const s of suites) {

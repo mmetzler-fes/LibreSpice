@@ -100,6 +100,10 @@ export function Toolbar() {
 
   const isPlacing = (type: ComponentType) => editorMode === "place" && pendingPlaceType === type;
 
+  // A selected wire carries no `selectedComponentId`, so gating Delete on that
+  // alone left wires undeletable without a keyboard (no Del key on an iPad).
+  const hasSelection = !!selectedComponentId || nodes.some((n) => n.selected) || edges.some((e) => e.selected);
+
   const handlePlace = (type: ComponentType) => {
     if (isPlacing(type)) cancelPlacing();
     else startPlacing(type);
@@ -512,7 +516,7 @@ export function Toolbar() {
       <TBtn title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo()}>
         <Ico d="M15 14l5-5-5-5 M20 9H9a4 4 0 0 0 0 8h1" />
       </TBtn>
-      <TBtn title="Delete selected (Del)" onClick={deleteSelected} disabled={!selectedComponentId}>
+      <TBtn title="Delete selected (Del)" onClick={deleteSelected} disabled={!hasSelection}>
         <Ico d="M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       </TBtn>
 
