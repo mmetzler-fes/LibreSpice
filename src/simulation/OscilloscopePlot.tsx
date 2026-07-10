@@ -574,8 +574,11 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
   // Operating point (`.op`) — or any single-point result — has one DC value per
   // signal and no sweep/time axis to plot, so show the values as a table
-  // (LTSpice-style) instead of an empty graph.
-  if (analysisType === "op" || result.time?.length === 1) {
+  // (LTSpice-style) instead of an empty graph. An `.op` driven by `.step` does
+  // have an axis (the engine makes the swept param the x-axis), so it falls
+  // through and is plotted like any other sweep.
+  const hasSweepAxis = (result.time?.length ?? 0) > 1;
+  if (!hasSweepAxis && (analysisType === "op" || result.time?.length === 1)) {
     const rows = dedupeProbes(result.variables)
       .filter(({ raw }) => raw !== "time" && raw !== "frequency")
       .map(({ raw, display }) => ({ display, value: result.data[raw]?.[0] ?? NaN, unit: inferUnit(raw) }));

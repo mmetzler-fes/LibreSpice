@@ -4,10 +4,16 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import { formatSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import {
   parseStepDirectives, stepCombinations, stripStepDirectives, withParam, parseMeasurements, type Measurement,
-  parseDcSweep, withDcSource, type DcSweep,
+  parseDcSweep, withDcSource, type DcSweep, type StepSpec,
 } from "./paramSweep.js";
+import { splitMeasDirectives, evaluateMeasurements } from "./measure.js";
 
 let sim: Simulation | null = null;
+
+/** A swept source carries its own unit: `I…` is a current source, else voltage. */
+function sourceUnit(name: string): string {
+  return /^i/i.test(name) ? "A" : "V";
+}
 
 /**
  * X-axis label + unit for a plain single-source `.dc` sweep (the swept source's
@@ -18,11 +24,7 @@ let sim: Simulation | null = null;
 function dcSweepAxis(netlist: string): { label: string; unit: string } | null {
   for (const raw of netlist.split("\n")) {
     const m = raw.trim().match(/^\.dc\s+([A-Za-z][\w]*)/i);
-    if (m) {
-      const name = m[1];
-      const unit = /^i/i.test(name) ? "A" : "V";
-      return { label: name, unit };
-    }
+    if (m) return { label: m[1], unit: sourceUnit(m[1]) };
   }
   return null;
 }
@@ -89,8 +91,16 @@ async function runOnce(netlist: string): Promise<{ result: SimulationResult; log
   }
 }
 
-export async function runSimulation(netlist: string): Promise<SimulationResult> {
+/** Render app-side measurements as a log block, or "" when there are none. */
+function measBlock(title: string, rows: string[]): string {
+  return rows.length ? `===== Measurements (${title}) =====\n${rows.join("\n")}\n\n` : "";
+}
+
+export async function runSimulation(netlistIn: string): Promise<SimulationResult> {
   const setLog = useSimulationStore.getState().setLog;
+  // Pull out the `.meas` directives ngspice cannot run (see measure.ts) — left in
+  // the netlist they abort the run, and `runSim()` then never settles.
+  const { netlist, appSide } = splitMeasDirectives(netlistIn);
   const steps = parseStepDirectives(netlist);
   try {
     // A `.dc` with a `list` (or nested) second source can't run in ngspice, so
@@ -102,7 +112,8 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
       // Strip any (unparseable) `.step` too — ngspice can't execute it.
       const nl = stripStepDirectives(netlist);
       const { result, log } = await runOnce(nl);
-      setLog(`===== Netlist =====\n${nl.trim()}\n\n${log}`);
+      const rows = evaluateMeasurements(result, appSide).map((m) => `${m.name} = ${m.value}`);
+      setLog(`${measBlock("app-side", rows)}===== Netlist =====\n${nl.trim()}\n\n${log}`);
       // A `.dc` sweep's x-vector is the swept source value, not time (ngspice
       // still returns it as the scale/"time" vector). Label/unit it (V or A) so
       // the plot shows e.g. "5V" instead of "5s".
@@ -143,17 +154,34 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
     setProgress(null);
     const lastLog = runs[runs.length - 1]?.log ?? "";
     const paramName = steps.map((s) => s.name).join(", ");
-    const measBlock = measRows.length ? `===== Measurements (.step ${paramName}) =====\n${measRows.join("\n")}\n\n` : "";
-    setLog(`${measBlock}===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`);
 
     // An `.op` run yields a single value per signal (no time/frequency axis). For
     // such a sweep the natural plot is the swept parameter on the x-axis and the
     // signal on the y-axis, so build ONE curve over the first `.step` param, with
     // any further `.step` params producing separate curves (grouped by tag).
     const hasXAxis = (runs[0]?.result.time?.length ?? 0) > 1;
-    if (!hasXAxis && runs.length > 0) {
-      return buildParamSweep(runs, steps);
+    const sweep = !hasXAxis && runs.length > 0 ? buildParamSweep(runs, steps) : null;
+
+    // App-side `.meas`: over a stepped `.op` the measurement domain is the swept
+    // parameter itself (LTSpice semantics — `WHEN P=Pmax` yields the RM at which
+    // the power peaks). Every other analysis measures per run, over its own axis.
+    const appRows: string[] = [];
+    if (appSide.length > 0) {
+      if (sweep) {
+        appRows.push(...evaluateMeasurements(sweep, appSide).map((m) => `${m.name} = ${m.value}`));
+      } else {
+        for (const { combo, result } of runs) {
+          const meas = evaluateMeasurements(result, appSide);
+          if (meas.length) appRows.push(`${combo.tag}:  ${meas.map((m) => `${m.name} = ${m.value}`).join("   ")}`);
+        }
+      }
     }
+    setLog(
+      `${measBlock(`.step ${paramName}`, [...appRows, ...measRows])}` +
+        `===== Netlist (last step) =====\n${base.trim()}\n\n${lastLog}`,
+    );
+
+    if (sweep) return sweep;
 
     // Time/frequency analyses: keep each combination as its own curve over the
     // shared x-axis, suffixing every signal with the combination tag.
@@ -187,7 +215,7 @@ export async function runSimulation(netlist: string): Promise<SimulationResult> 
  */
 function buildParamSweep(
   runs: { combo: { assignments: { name: string; value: number }[] }; result: SimulationResult }[],
-  steps: { name: string; values: number[] }[],
+  steps: StepSpec[],
 ): SimulationResult {
   const first = steps[0];
   const idxOf = new Map(first.values.map((v, i) => [v, i] as const));
@@ -211,7 +239,13 @@ function buildParamSweep(
     }
   }
   const time = Float64Array.from(first.values);
-  const out: SimulationResult = { variables: ["time"], data: { time }, time, xLabel: first.name };
+  // `.step V1 …` sweeps a source, so the x-axis has that source's unit; a
+  // `.step param NAME …` sweeps an arbitrary quantity whose unit is unknowable
+  // from the netlist, so it stays unitless (bare numbers on the axis).
+  const out: SimulationResult = {
+    variables: ["time"], data: { time }, time,
+    xLabel: first.name, xUnit: first.isSource ? sourceUnit(first.name) : undefined,
+  };
   for (const [k, arr] of traceData) { out.data[k] = arr; out.variables.push(k); }
   if (outerTags.length > 0) {
     out.step = { param: steps.slice(1).map((s) => s.name).join(", "), values: outerTags };
@@ -230,7 +264,7 @@ async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => v
     .map((l) => (/^\s*\.dc\b/i.test(l) ? `.dc ${dc.primary}` : l))
     .join("\n");
   const merged: SimulationResult = {
-    variables: [], data: {}, time: undefined, xLabel: dc.primaryName, xUnit: /^i/i.test(dc.primaryName) ? "A" : "V",
+    variables: [], data: {}, time: undefined, xLabel: dc.primaryName, xUnit: sourceUnit(dc.primaryName),
     step: { param: dc.secondary.name, values: [] },
   };
   let lastLog = "";
