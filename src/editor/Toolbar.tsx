@@ -11,6 +11,7 @@ import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
+import { buildShareQrSvg } from "./qrExport.js";
 import { SymbolPreview } from "./SymbolPreview.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
@@ -275,13 +276,25 @@ export function Toolbar() {
   };
 
   const handleShareUrl = async () => {
-    const url = buildShareUrl(exportSnapshot());
+    const url = await buildShareUrl(exportSnapshot());
     try {
       await navigator.clipboard.writeText(url);
       alert("Share link copied to clipboard!");
     } catch {
       prompt("Copy this link to share your circuit:", url);
     }
+  };
+
+  const handleExportQr = async () => {
+    const svg = buildShareQrSvg(await buildShareUrl(exportSnapshot()));
+    if (!svg) {
+      alert(
+        "Die Schaltung ist zu groß für einen QR-Code (Grenze: 2953 Zeichen).\n" +
+          "Bitte den Share-Link direkt kopieren und weitergeben.",
+      );
+      return;
+    }
+    downloadBlob(svg, `${safeName}_QR-Code.svg`, "image/svg+xml");
   };
 
   return (
@@ -326,6 +339,14 @@ export function Toolbar() {
       </TBtn>
       <TBtn title="Copy Share URL" onClick={handleShareUrl}>
         <Ico d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </TBtn>
+      <TBtn title="Export share URL as QR code (SVG)" onClick={handleExportQr}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <path d="M14 14h3v3h-3z M20 14v0.01 M14 20v0.01 M20 20v0.01 M17 20v0.01 M20 17v0.01" />
+        </svg>
       </TBtn>
       <TBtn title="Export schematic as SVG" onClick={handleExportSvg}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

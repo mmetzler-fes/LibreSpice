@@ -24,15 +24,20 @@ export function App() {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    const fromUrl = getSnapshotFromUrl();
-    if (fromUrl) {
-      loadFromSnapshot(fromUrl);
-      return;
-    }
-    const saved = loadFromLocalStorage();
-    if (saved && saved.nodes.length > 0) {
-      loadFromSnapshot(saved);
-    }
+    // A compressed share link has to be inflated asynchronously, so the autosave
+    // fallback waits for it — otherwise a shared circuit would flash the last
+    // locally edited one first.
+    void (async () => {
+      const fromUrl = await getSnapshotFromUrl();
+      if (fromUrl) {
+        loadFromSnapshot(fromUrl);
+        return;
+      }
+      const saved = loadFromLocalStorage();
+      if (saved && saved.nodes.length > 0) {
+        loadFromSnapshot(saved);
+      }
+    })();
   }, [loadFromSnapshot]);
 
   return (

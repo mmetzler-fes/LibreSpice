@@ -4,7 +4,10 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
+/** Legacy share links: plain base64 of the snapshot JSON. Still decoded. */
 export const URL_HASH_PREFIX = "c=";
+/** Current share links: deflate-compressed snapshot JSON, base64url. */
+export const URL_HASH_PREFIX_Z = "z=";
 
 export interface CircuitSnapshot {
   version: 1;
@@ -55,9 +58,58 @@ export function encodeSnapshot(snapshot: CircuitSnapshot): string {
 export function decodeSnapshot(encoded: string): CircuitSnapshot | null {
   try {
     const json = decodeURIComponent(escape(atob(encoded)));
-    const parsed = JSON.parse(json) as CircuitSnapshot;
-    if (parsed.version !== 1 || !Array.isArray(parsed.nodes)) return null;
-    return parsed;
+    return validateSnapshot(json);
+  } catch {
+    return null;
+  }
+}
+
+function validateSnapshot(json: string): CircuitSnapshot | null {
+  const parsed = JSON.parse(json) as CircuitSnapshot;
+  if (parsed.version !== 1 || !Array.isArray(parsed.nodes)) return null;
+  return parsed;
+}
+
+// ── Compressed share payloads ────────────────────────────────────────────────
+// The snapshot JSON is highly repetitive (React Flow node/edge keys), so deflate
+// shrinks it ~3.5x. That is what makes a share link fit into a QR code at all:
+// a QR code holds at most 2953 bytes, and the plain base64 of even a small
+// circuit runs past 3000 characters.
+
+/** base64url — no `+`, `/` or `=`, so the payload survives a URL untouched. */
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(s: string): Uint8Array {
+  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function pipeThrough(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
+  const blob = new Blob([bytes as BlobPart]);
+  const piped = blob.stream().pipeThrough(stream as ReadableWritablePair<Uint8Array, Uint8Array>);
+  return new Uint8Array(await new Response(piped).arrayBuffer());
+}
+
+/** True when the browser can (de)compress — Safari/iOS gained this in 16.4. */
+export function supportsCompression(): boolean {
+  return typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
+}
+
+export async function encodeSnapshotCompressed(snapshot: CircuitSnapshot): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify(snapshot));
+  return bytesToBase64Url(await pipeThrough(json, new CompressionStream("deflate-raw")));
+}
+
+export async function decodeSnapshotCompressed(encoded: string): Promise<CircuitSnapshot | null> {
+  try {
+    const bytes = await pipeThrough(base64UrlToBytes(encoded), new DecompressionStream("deflate-raw"));
+    return validateSnapshot(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }
@@ -83,10 +135,13 @@ export function loadFromLocalStorage(): CircuitSnapshot | null {
   }
 }
 
-export function getSnapshotFromUrl(): CircuitSnapshot | null {
+export async function getSnapshotFromUrl(): Promise<CircuitSnapshot | null> {
   const hash = window.location.hash.slice(1);
   const params = new URLSearchParams(window.location.search);
 
+  if (hash.startsWith(URL_HASH_PREFIX_Z)) {
+    return await decodeSnapshotCompressed(hash.slice(URL_HASH_PREFIX_Z.length));
+  }
   let encoded: string | null = null;
   if (hash.startsWith(URL_HASH_PREFIX)) {
     encoded = hash.slice(URL_HASH_PREFIX.length);
@@ -97,13 +152,15 @@ export function getSnapshotFromUrl(): CircuitSnapshot | null {
   return decodeSnapshot(encoded);
 }
 
-export function buildShareUrl(snapshot: CircuitSnapshot): string {
-  const encoded = encodeSnapshot(snapshot);
+export async function buildShareUrl(snapshot: CircuitSnapshot): Promise<string> {
   // Point at the app's own base path (import.meta.env.BASE_URL, always trailing
   // "/") rather than the current pathname, so the link opens the app directly —
   // never the landing page that may sit next to it.
   const base = `${window.location.origin}${import.meta.env.BASE_URL}`;
-  return `${base}#${URL_HASH_PREFIX}${encoded}`;
+  if (supportsCompression()) {
+    return `${base}#${URL_HASH_PREFIX_Z}${await encodeSnapshotCompressed(snapshot)}`;
+  }
+  return `${base}#${URL_HASH_PREFIX}${encodeSnapshot(snapshot)}`;
 }
 
 export function collectComponentProps(
