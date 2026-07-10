@@ -3,3 +3,6 @@ library-archive
 
 # Host-specific container UID/GID — copy .env.example to .env and set your own
 .env
+
+# Ignorierte Beispielschaltungen
+examples/
