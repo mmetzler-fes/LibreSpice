@@ -49,9 +49,17 @@ export function runRegression(): RegressionReport {
       fail(`type mismatch: ${entry.type} ≠ ${tc.type}`);
       continue;
     }
-    if (entry.kind === "subckt" && tc.pinCount !== undefined && entry.pins.length !== tc.pinCount) {
-      fail(`pin count mismatch: ${entry.pins.length} ≠ ${tc.pinCount}`);
-      continue;
+    if (entry.kind === "subckt") {
+      if (tc.pinCount !== undefined && entry.pins.length !== tc.pinCount) {
+        fail(`pin count mismatch: ${entry.pins.length} ≠ ${tc.pinCount}`);
+        continue;
+      }
+      // A subcircuit whose devices were folded into its pin list still parses,
+      // it just ends up empty. Counting pins alone would not notice.
+      if (entry.body.trim() === "") {
+        fail("subcircuit has no body");
+        continue;
+      }
     }
 
     // Generate a netlist with the entry registered as a library definition.

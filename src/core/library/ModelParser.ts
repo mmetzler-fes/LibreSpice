@@ -188,6 +188,14 @@ export class ModelParser {
     if (unterminated) warnings.push(`Subcircuit "${name}" has no matching .ends – using text to end of input.`);
 
     const bodyLines = block.slice(1).filter((l) => !/^\.ends\b/i.test(l));
+    // Almost always a stray `+` on the body's first line: SPICE folds a
+    // continuation onto the header, so the devices are parsed as pin names and
+    // nothing is left to instantiate. Silently registering that would produce a
+    // subcircuit with a nonsense pin list.
+    if (bodyLines.length === 0) {
+      warnings.push(`Subcircuit "${name}" has an empty body – check for stray "+" continuation lines.`);
+    }
+
     return {
       kind: "subckt",
       name,

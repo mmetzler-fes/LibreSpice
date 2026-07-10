@@ -77,7 +77,10 @@ export const REGRESSION_CASES: RegressionCase[] = [
 
   // ── Multi-line (continuation) entries to exercise the `+` folding ─────────
   { src: ".model BIGNPN NPN(IS=1e-14 BF=200\n+ VAF=100 IKF=0.3 RB=10\n+ RC=1 RE=0.5 CJE=22p CJC=8p)", name: "BIGNPN", kind: "model", type: "NPN" },
-  { src: ".subckt BUFFER in out vdd vss\n+  M1 out in vdd vdd IRF9540\n+  M2 out in vss vss IRF540\n.ends BUFFER", name: "BUFFER", kind: "subckt", pinCount: 4 },
+  // `+` continues the *pin list*, as SPICE folds it onto the `.subckt` header.
+  // The body must stay on plain lines: a leading `+` would fold the devices into
+  // the pin list too (which is exactly what this case used to assert by accident).
+  { src: ".subckt BUFFER in out\n+ vdd vss\n  M1 out in vdd vdd IRF9540\n  M2 out in vss vss IRF540\n.ends BUFFER", name: "BUFFER", kind: "subckt", pinCount: 4 },
   { src: ".model SCHOTTKY D(IS=1u RS=0.02 N=1.0 ; inline comment\n+ CJO=100p M=0.5 BV=40)", name: "SCHOTTKY", kind: "model", type: "D" },
   { src: "* Power diode definition\n.model PWRDIODE D(IS=5u RS=0.01 N=1.6 BV=1000 TT=100n CJO=300p)", name: "PWRDIODE", kind: "model", type: "D" },
 ];
