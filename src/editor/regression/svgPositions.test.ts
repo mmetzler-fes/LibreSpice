@@ -3,6 +3,10 @@ import { buildSchematicSvg } from "../svgExport.js";
 import { orthoVertices, type FlowPoint } from "../WireTool.js";
 import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF } from "../captionLayout.js";
 import { NODE_SIZE, getNodePins } from "../pinGeometry.js";
+import {
+  DIRECTIVE_BORDER, DIRECTIVE_LINE_HEIGHT, DIRECTIVE_PADDING_X, DIRECTIVE_PADDING_Y,
+  directiveBoxGeometry, estimatedTextWidth, isDirectiveComment,
+} from "../directiveBoxLayout.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -119,6 +123,7 @@ interface SvgText {
   anchor: "start" | "middle" | "end";
   baseline: string;
   fontSize: number;
+  fill: string;
   content: string;
 }
 
@@ -138,6 +143,7 @@ function texts(svg: string): SvgText[] {
       anchor: (attr(a, "text-anchor") ?? "start") as SvgText["anchor"],
       baseline: attr(a, "dominant-baseline") ?? "",
       fontSize: Number(attr(a, "font-size")),
+      fill: attr(a, "fill") ?? "",
       content,
     });
   }
@@ -159,6 +165,26 @@ function polylinePoints(svg: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(svg)) !== null) out.push(m[1]);
   return out;
+}
+
+/** Every `<rect>` in `markup` (React does not self-close SVG elements). */
+function rects(markup: string): { x: number; y: number; width: number; height: number }[] {
+  const out: { x: number; y: number; width: number; height: number }[] = [];
+  const re = /<rect\b([^>]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(markup)) !== null) {
+    out.push({
+      x: Number(attr(m[1], "x")), y: Number(attr(m[1], "y")),
+      width: Number(attr(m[1], "width")), height: Number(attr(m[1], "height")),
+    });
+  }
+  return out;
+}
+
+/** The `<g class="spice-directives">` group's markup, or null when absent. */
+function directiveGroup(svg: string): string | null {
+  const m = /<g class="spice-directives">([\s\S]*?)<\/g>/.exec(svg);
+  return m ? m[1] : null;
 }
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -309,6 +335,118 @@ const CASES: Case[] = [
     name: `caption glyphs land where the editor draws them (${f.name})`,
     run: (fail: (r: string) => void) => checkGlyphs(fail, f),
   })),
+
+  // ── On-canvas SPICE directive box ─────────────────────────────────────────
+  {
+    name: "directive box is omitted unless 'Display in circuit' passes one",
+    run: (fail) => {
+      const svg = buildSchematicSvg([part("R1", 0, 0)], [], "default");
+      if (directiveGroup(svg) !== null) fail("directive box exported without an overlay");
+      // Enabled but empty must not draw a bare frame either.
+      const blank = buildSchematicSvg([part("R1", 0, 0)], [], "default", { text: "  \n\n", pos: { x: 0, y: 0 } });
+      if (directiveGroup(blank) !== null) fail("blank directives still drew a frame");
+    },
+  },
+  {
+    name: "directive box frame sits at the dragged position",
+    run: (fail) => {
+      const pos = { x: 130, y: -60 };
+      const text = ".tran 10m\n.ic V(out)=0";
+      const svg = buildSchematicSvg([part("R1", 0, 0)], [], "default", { text, pos });
+      const g = directiveGroup(svg);
+      if (!g) return fail("no directive group");
+      const frames = rects(g);
+      if (frames.length !== 1) return fail(`expected 1 frame, got ${frames.length}`);
+      const box = directiveBoxGeometry(text, pos);
+      const [f] = frames;
+      if (!near(f.x, pos.x) || !near(f.y, pos.y)) fail(`frame at ${f.x},${f.y} ≠ dragged ${pos.x},${pos.y}`);
+      if (!near(f.width, box.width) || !near(f.height, box.height)) {
+        fail(`frame ${f.width}×${f.height} ≠ geometry ${box.width}×${box.height}`);
+      }
+    },
+  },
+  {
+    name: "directive lines are stacked inside the box, one line box apart",
+    run: (fail) => {
+      const pos = { x: 40, y: 40 };
+      const text = "* comment\n.tran 10m\n.ic V(out)=0";
+      const svg = buildSchematicSvg([part("R1", 0, 0)], [], "default", { text, pos });
+      const g = directiveGroup(svg);
+      if (!g) return fail("no directive group");
+      const lines = texts(g);
+      if (lines.length !== 3) return fail(`expected 3 directive lines, got ${lines.length}`);
+      text.split("\n").forEach((want, i) => {
+        if (lines[i].content !== want) fail(`line ${i}: "${lines[i].content}" ≠ "${want}"`);
+      });
+
+      const contentX = pos.x + DIRECTIVE_BORDER + DIRECTIVE_PADDING_X;
+      const firstY = pos.y + DIRECTIVE_BORDER + DIRECTIVE_PADDING_Y + DIRECTIVE_LINE_HEIGHT / 2;
+      lines.forEach((l, i) => {
+        if (l.baseline !== "central") fail(`line ${i}: baseline "${l.baseline}" is font-dependent`);
+        if (!near(l.x, contentX)) fail(`line ${i}: x ${l.x} ≠ content left ${contentX}`);
+        if (!near(l.y, firstY + i * DIRECTIVE_LINE_HEIGHT)) {
+          fail(`line ${i}: y ${l.y} ≠ ${firstY + i * DIRECTIVE_LINE_HEIGHT}`);
+        }
+      });
+      // Every line box must fit between the paddings.
+      const box = directiveBoxGeometry(text, pos);
+      const last = lines[lines.length - 1];
+      if (last.y + DIRECTIVE_LINE_HEIGHT / 2 > box.y + box.height - DIRECTIVE_PADDING_Y) {
+        fail("last line overflows the box");
+      }
+    },
+  },
+  {
+    // CHAR_ADVANCE is exact for the named fonts but a fallback monospace can run
+    // wider, so the frame must leave room rather than clip the text.
+    name: "directive box leaves slack to the right of the longest line",
+    run: (fail) => {
+      const pos = { x: 0, y: 0 };
+      for (const text of [".op", ".tran 0 10m 0 1u\n.ic V(out)=0 V(mid)=2.5\n.four 1k V(out)"]) {
+        const box = directiveBoxGeometry(text, pos);
+        const inner = box.width - 2 * (DIRECTIVE_PADDING_X + DIRECTIVE_BORDER);
+        const exact = estimatedTextWidth(text);
+        if (inner <= exact) return fail(`no slack: inner ${inner} ≤ text ${exact}`);
+        // A fallback font 5% wider than the estimate must still fit.
+        if (inner < exact * 1.05) fail(`slack ${(inner - exact).toFixed(1)}px too tight for a 5% wider font`);
+      }
+    },
+  },
+  {
+    name: "the exported drawing grows to contain the directive box",
+    run: (fail) => {
+      const pos = { x: 400, y: 300 };
+      const text = ".tran 10m";
+      const svg = buildSchematicSvg([part("R1", 0, 0)], [], "default", { text, pos });
+      const vb = /viewBox="([^"]*)"/.exec(svg)?.[1].split(" ").map(Number);
+      if (!vb) return fail("no viewBox");
+      const [vx, vy, vw, vh] = vb;
+      const box = directiveBoxGeometry(text, pos);
+      if (box.x < vx || box.y < vy || box.x + box.width > vx + vw || box.y + box.height > vy + vh) {
+        fail(`box ${box.x},${box.y} ${box.width}×${box.height} clipped by viewBox ${vb.join(" ")}`);
+      }
+    },
+  },
+  {
+    name: "comment lines are dimmed, directive lines are not",
+    run: (fail) => {
+      if (!isDirectiveComment("* a comment") || !isDirectiveComment("; also a comment")) {
+        fail("isDirectiveComment does not recognise * / ;");
+      }
+      if (isDirectiveComment(".tran 10m")) fail("a directive was treated as a comment");
+
+      const svg = buildSchematicSvg([part("R1", 0, 0)], [], "default", {
+        text: "* a comment\n; also a comment\n.tran 10m",
+        pos: { x: 0, y: 0 },
+      });
+      const byContent = new Map(texts(directiveGroup(svg)!).map((t) => [t.content, t.fill]));
+      const dim = byContent.get("* a comment");
+      if (dim !== byContent.get("; also a comment")) fail("the two comment styles differ");
+      const live = byContent.get(".tran 10m");
+      if (!dim || !live) return fail(`missing directive lines: ${[...byContent.keys()].join(" | ")}`);
+      if (dim === live) fail(`comment and directive share fill ${dim}`);
+    },
+  },
 ];
 
 /**

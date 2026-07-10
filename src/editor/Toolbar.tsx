@@ -90,6 +90,7 @@ export function Toolbar() {
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
     circuitName, setCircuitName, dataFlags,
+    showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, darkMode } = useUIStore();
   const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
@@ -143,7 +144,10 @@ export function Toolbar() {
   const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
 
   const handleExportSvg = () => {
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    // "Display in circuit" puts the directives on the sheet, so they belong in
+    // the export too — at the spot the user dragged the box to.
+    const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {

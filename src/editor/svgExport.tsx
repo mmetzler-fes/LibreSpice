@@ -6,6 +6,10 @@ import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
 import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
 import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
+import {
+  DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
+  directiveBoxGeometry, type DirectiveBoxGeometry,
+} from "./directiveBoxLayout.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
@@ -120,8 +124,49 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   );
 }
 
+/**
+ * The on-schematic SPICE directive box ("Display in circuit"), at the position
+ * the user dragged it to. Colours follow the editor's light theme, since the
+ * export is always drawn on white.
+ */
+function DirectiveTextBox({ box }: { box: DirectiveBoxGeometry }) {
+  return (
+    // Named so the box can be selected as a unit in a vector editor.
+    <g className="spice-directives">
+      <rect
+        x={box.x} y={box.y} width={box.width} height={box.height} rx={DIRECTIVE_RADIUS}
+        fill="#ffffff" stroke="#94a3b8" strokeWidth={DIRECTIVE_BORDER}
+      />
+      {box.lines.map((l, i) => (
+        <text
+          key={i} x={l.x} y={l.y} dominantBaseline="central"
+          fontSize={DIRECTIVE_FONT_SIZE} fontFamily={DIRECTIVE_FONT_FAMILY}
+          // Directives are indentation-sensitive to read; keep leading spaces.
+          xmlSpace="preserve"
+          fill={l.comment ? "#64748b" : "#1e293b"}
+        >
+          {l.text}
+        </text>
+      ))}
+    </g>
+  );
+}
+
+/** The on-canvas directive box, when the user enabled "Display in circuit". */
+export interface DirectiveOverlay {
+  text: string;
+  pos: { x: number; y: number };
+}
+
 /** Serialise the current schematic to a standalone SVG string. */
-export function buildSchematicSvg(nodes: Node[], edges: Edge[], norm: SymbolNorm): string {
+export function buildSchematicSvg(
+  nodes: Node[],
+  edges: Edge[],
+  norm: SymbolNorm,
+  directives?: DirectiveOverlay,
+): string {
+  const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
+
   // Pin lookup for drawing wires.
   const pinMap = new Map<string, { x: number; y: number }>();
   for (const node of nodes) {
@@ -150,6 +195,12 @@ export function buildSchematicSvg(nodes: Node[], edges: Edge[], norm: SymbolNorm
   for (const n of nodes) { grow(n.position.x, n.position.y); grow(n.position.x + NODE_SIZE, n.position.y + NODE_SIZE); }
   for (const { x, y } of pinMap.values()) grow(x, y);
   for (const verts of wireVerts) for (const p of verts) grow(p.x, p.y);
+  // The directive box is usually dragged clear of the parts, so it drives the
+  // bounds as much as they do.
+  if (directiveBox) {
+    grow(directiveBox.x, directiveBox.y);
+    grow(directiveBox.x + directiveBox.width, directiveBox.y + directiveBox.height);
+  }
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_SIZE; maxY = NODE_SIZE; }
   const pad = 24;
   minX -= pad; minY -= pad; maxX += pad; maxY += pad;
@@ -167,6 +218,7 @@ export function buildSchematicSvg(nodes: Node[], edges: Edge[], norm: SymbolNorm
       <rect x={minX} y={minY} width={width} height={height} fill="#ffffff" />
       {wires}
       {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} />)}
+      {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>
   );
 

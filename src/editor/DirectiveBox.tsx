@@ -2,6 +2,10 @@ import { useRef } from "react";
 import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import {
+  DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_LINE_HEIGHT,
+  DIRECTIVE_PADDING_X, DIRECTIVE_PADDING_Y, DIRECTIVE_RADIUS, directiveLines, isDirectiveComment,
+} from "./directiveBoxLayout.js";
 
 /**
  * LTSpice-style on-schematic SPICE directive text box. Shown when "Display in
@@ -42,7 +46,7 @@ export function DirectiveBox() {
 
   const left = vp.x + pos.x * vp.zoom;
   const top = vp.y + pos.y * vp.zoom;
-  const lines = directives.replace(/\n+$/, "").split("\n");
+  const lines = directiveLines(directives);
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
@@ -54,15 +58,18 @@ export function DirectiveBox() {
           position: "absolute", left, top,
           transformOrigin: "top left", transform: `scale(${vp.zoom})`,
           pointerEvents: "auto", cursor: "move", userSelect: "none",
-          fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 12, lineHeight: "16px",
-          padding: "4px 8px", borderRadius: 4, whiteSpace: "pre",
+          // Geometry is shared with the SVG export (see directiveBoxLayout).
+          fontFamily: DIRECTIVE_FONT_FAMILY, fontSize: DIRECTIVE_FONT_SIZE,
+          lineHeight: `${DIRECTIVE_LINE_HEIGHT}px`,
+          padding: `${DIRECTIVE_PADDING_Y}px ${DIRECTIVE_PADDING_X}px`,
+          borderRadius: DIRECTIVE_RADIUS, whiteSpace: "pre",
           color: darkMode ? "#e2e8f0" : "#1e293b",
           background: darkMode ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.9)",
-          border: `1px solid ${darkMode ? "#334155" : "#94a3b8"}`,
+          border: `${DIRECTIVE_BORDER}px solid ${darkMode ? "#334155" : "#94a3b8"}`,
         }}
       >
         {lines.map((l, i) => (
-          <div key={i} style={{ color: l.trim().startsWith("*") ? "#64748b" : undefined }}>{l || " "}</div>
+          <div key={i} style={{ color: isDirectiveComment(l) ? "#64748b" : undefined }}>{l || " "}</div>
         ))}
       </div>
     </div>
