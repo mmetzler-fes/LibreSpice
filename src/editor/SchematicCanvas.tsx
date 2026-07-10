@@ -3,8 +3,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
-  MiniMap,
   addEdge,
   type Connection,
   type Node,
@@ -98,6 +96,10 @@ function CanvasInner() {
   // canvas fitView would stay pending and first fire when the first node is
   // placed, jerking the zoom (shrinking the ghost and offsetting placement).
   const [fitOnInit] = useState(() => nodes.length > 0);
+  // Freezes the canvas: no panning, no node dragging. On a touch device this
+  // stops the schematic sliding around under a stray finger while you read or
+  // draw. (Replaces React Flow's padlock, which did not respond to touch.)
+  const [canvasLocked, setCanvasLocked] = useState(false);
 
   // Reference designators already in use, for per-prefix auto-numbering.
   const existingLabels = () =>
@@ -683,8 +685,8 @@ function CanvasInner() {
             fitViewOptions={{ padding: 0.3 }}
             defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             deleteKeyCode={null}
-            panOnDrag={editorMode !== "wire"}
-            nodesDraggable={editorMode === "select"}
+            panOnDrag={!canvasLocked && editorMode !== "wire"}
+            nodesDraggable={!canvasLocked && editorMode === "select"}
             elementsSelectable={editorMode === "select"}
             connectionRadius={24}
             connectionMode={ConnectionMode.Loose}
@@ -694,9 +696,24 @@ function CanvasInner() {
             }}
           >
             <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color="#cbd5e1" />
-            <Controls position="bottom-right" fitViewOptions={{ padding: 0.3 }} />
-            <MiniMap position="bottom-left" pannable zoomable nodeStrokeWidth={3} />
           </ReactFlow>
+
+          {/* Custom zoom/fit/lock buttons. React Flow's own <Controls> did not
+              respond to touch; these live outside its subtree and stop the
+              pointerdown from reaching the canvas (place/long-press) handler. */}
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: "absolute", right: 12, bottom: 12, zIndex: 8, display: "flex", flexDirection: "column", gap: 6, touchAction: "manipulation" }}
+          >
+            <button style={canvasBtn} title="Vergrößern" onClick={() => reactFlowInstance.zoomIn()}>+</button>
+            <button style={canvasBtn} title="Verkleinern" onClick={() => reactFlowInstance.zoomOut()}>−</button>
+            <button style={canvasBtn} title="Einpassen" onClick={() => reactFlowInstance.fitView({ padding: 0.3 })}>▣</button>
+            <button
+              style={{ ...canvasBtn, color: canvasLocked ? "#2563eb" : "#334155" }}
+              title={canvasLocked ? "Ansicht entsperren" : "Ansicht sperren (kein Verschieben)"}
+              onClick={() => setCanvasLocked((v) => !v)}
+            >{canvasLocked ? "🔒" : "🔓"}</button>
+          </div>
 
           <DataFlagLayer />
           <DirectiveBox />
@@ -798,6 +815,13 @@ const nodeMenuItem: React.CSSProperties = {
   display: "block", width: "100%", padding: "5px 10px", textAlign: "left",
   border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer",
   fontSize: 12, borderRadius: 4, whiteSpace: "nowrap",
+};
+
+/** Touch-friendly square button for the on-canvas zoom / fit / lock controls. */
+const canvasBtn: React.CSSProperties = {
+  width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center",
+  border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", color: "#334155",
+  fontSize: 17, lineHeight: 1, cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
 };
 
 export function SchematicCanvas() {
