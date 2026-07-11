@@ -4,6 +4,17 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
+
+/**
+ * Identifier of the running build, injected by Vite (`define`) from the git
+ * commit or a build timestamp. Autosaved snapshots are stamped with it so a
+ * snapshot written by an older build is not silently restored after an update —
+ * its components may serialize differently (e.g. a source that has since gained
+ * a Sine waveform), which would otherwise resurrect a stale representation over
+ * a freshly opened file. Falls back to "dev" when the define is absent (tests).
+ */
+declare const __BUILD_ID__: string | undefined;
+export const BUILD_ID: string = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
 /** Legacy share links: plain base64 of the snapshot JSON. Still decoded. */
 export const URL_HASH_PREFIX = "c=";
 /** Current share links: deflate-compressed snapshot JSON, base64url. */
@@ -37,6 +48,13 @@ export interface CircuitSnapshot {
   showDirectivesOnCanvas?: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */
   directivesPos?: { x: number; y: number };
+  /**
+   * The {@link BUILD_ID} that wrote this snapshot. Stamped only on the
+   * localStorage autosave (not on share links, which must always open); used to
+   * skip auto-restoring a snapshot from a different build. Optional so older
+   * autosaves and share payloads without it still validate.
+   */
+  appVersion?: string;
 }
 
 export function createSnapshot(state: {
@@ -117,7 +135,7 @@ export async function decodeSnapshotCompressed(encoded: string): Promise<Circuit
 
 export function saveToLocalStorage(snapshot: CircuitSnapshot): void {
   try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ ...snapshot, appVersion: BUILD_ID }));
   } catch {
     /* quota exceeded – ignore */
   }
@@ -129,6 +147,12 @@ export function loadFromLocalStorage(): CircuitSnapshot | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CircuitSnapshot;
     if (parsed.version !== 1) return null;
+    // Don't silently restore an autosave from a different build: component
+    // serialization may have changed since (e.g. DC→Sine source), so restoring
+    // it would resurrect a stale representation. Skip it and start clean; the
+    // next autosave overwrites it stamped with the current build. The stored
+    // data is left untouched (not deleted), so nothing is hard-lost.
+    if (parsed.appVersion !== BUILD_ID) return null;
     return parsed;
   } catch {
     return null;
