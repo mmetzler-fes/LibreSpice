@@ -26,16 +26,18 @@ export function defaultColor(index: number): string {
   return PLOT_PALETTE[index % PLOT_PALETTE.length];
 }
 
-/** Colours used to draw the diagram itself (background, grid, axis text, …). */
+/**
+ * Colours used to draw the diagram itself (background, grid, axis text, …), in
+ * the on-screen (dark) and print/beamer (light) looks. The `axis` (tick/label)
+ * text is deliberately high-contrast against the plot background — near-white on
+ * dark, near-black on light — since the low-contrast slate before was hard to
+ * read on a beamer.
+ */
 export interface PlotDiagram {
   bg: string;
   plot: string;
   grid: string;
-  /**
-   * Tick/label text only (not gridlines), so it is set for high contrast against
-   * the plot background: near-white on dark, near-black on light — the
-   * low-contrast slate before was hard to read on a beamer.
-   */
+  /** Tick/label text only (not gridlines); high-contrast — see above. */
   axis: string;
   line: string;
   dot: string;
@@ -91,7 +93,7 @@ export interface PlotTheme {
   overlayBg2: string;
   /** Trace colours (legend picker + default assignment). */
   traces: string[];
-  /** Diagram drawing colours for the on-screen (dark) and print/beamer (light) looks. */
+  /** Diagram drawing colours (see {@link PlotDiagram}). */
   diagram: PlotDiagram;
 }
 
