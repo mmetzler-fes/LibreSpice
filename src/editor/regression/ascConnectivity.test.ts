@@ -30,6 +30,20 @@ const nodeBy = (nodes: Node[], pred: (d: { componentType?: string; label?: strin
 
 type Case = { name: string; run: (fail: (r: string) => void) => void };
 
+// A localized op-amp symbol (path-qualified + "_EN" suffix) must import as the
+// 5-pin op-amp, not fall back to a 2-pin resistor (Rechteckgenerator.asc).
+const ASC_OPAMP = `Version 4
+SHEET 1 880 680
+SYMBOL Opamps\\\\UniversalOpAmp2_EN 368 128 R0
+SYMATTR InstName U1
+`;
+
+// LTSpice stores a multi-line directive TEXT as one line with literal "\\n".
+const ASC_TEXT = `Version 4
+SHEET 1 880 680
+TEXT 0 0 Left 2 !.meas TRAN a TRIG 1\\n.meas TRAN b TRIG 2
+`;
+
 const CASES: Case[] = [
   { name: "flag-on-pin connects source terminals (no bridging wire)", run: (fail) => {
     const { nodes, edges } = LTSpiceParser.parse(ASC);
@@ -39,6 +53,20 @@ const CASES: Case[] = [
     if (!v1 || !vp || !gnd) { fail("missing imported node(s)"); return; }
     if (!linked(edges, v1.id, "p", vp.id, "t")) fail("source + terminal not connected to the VP flag");
     if (!linked(edges, v1.id, "n", gnd.id, "gnd")) fail("source - terminal not connected to ground");
+  } },
+  { name: "localized UniversalOpAmp2_EN imports as an op-amp", run: (fail) => {
+    const { nodes } = LTSpiceParser.parse(ASC_OPAMP);
+    const u1 = nodeBy(nodes, (d) => d.label === "U1");
+    if (!u1) { fail("U1 not imported"); return; }
+    if ((u1.data as { componentType?: string }).componentType !== "opamp") {
+      fail(`expected op-amp, got ${(u1.data as { componentType?: string }).componentType}`);
+    }
+  } },
+  { name: "multi-line TEXT splits its literal \\n into separate directives", run: (fail) => {
+    const { directives } = LTSpiceParser.parse(ASC_TEXT);
+    if (directives.includes("\\n")) fail("literal \\n left in directives");
+    const measLines = directives.split("\n").filter((l) => l.trim().startsWith(".meas"));
+    if (measLines.length !== 2) fail(`expected 2 .meas lines, got ${measLines.length}`);
   } },
 ];
 

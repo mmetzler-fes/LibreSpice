@@ -116,7 +116,10 @@ export class LTSpiceParser {
       } else if (cmd === "TEXT") {
         const textMatch = line.match(/TEXT\s+-?\d+\s+-?\d+\s+\w+\s+\d+\s+!(.*)/i);
         if (textMatch) {
-          directives += textMatch[1].trim() + "\n";
+          // LTSpice stores a multi-line directive TEXT as one physical line with
+          // literal "\n" separators (e.g. three chained .meas). Turn them into
+          // real newlines so each directive is its own line in the netlist.
+          directives += textMatch[1].replace(/\\n/g, "\n").trim() + "\n";
         }
       } else if (cmd === "DATAFLAG") {
         // DATAFLAG x y "expression" — a positioned data-point readout.

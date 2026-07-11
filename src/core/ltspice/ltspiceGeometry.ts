@@ -29,8 +29,15 @@ const SYMBOL_TO_TYPE_LC: Record<string, ComponentType> = Object.fromEntries(
  * case-insensitively, so path-qualified and mixed-case names still map.
  */
 export function symbolToType(symName: string): ComponentType | undefined {
-  const base = symName.split(/[\\/]/).pop() ?? symName;
-  return SYMBOL_TO_TYPE_LC[base.toLowerCase()];
+  const base = (symName.split(/[\\/]/).pop() ?? symName).toLowerCase();
+  const direct = SYMBOL_TO_TYPE_LC[base];
+  if (direct) return direct;
+  // LTSpice ships localized / suffixed variants of the generic op-amp symbol
+  // (UniversalOpAmp2_EN, _DE, …). They all use the same 5-pin `level2` model, so
+  // map any UniversalOpAmp* to the op-amp instead of silently falling back to a
+  // resistor (which drops three pins and breaks the whole circuit).
+  if (base.startsWith("universalopamp")) return "opamp";
+  return undefined;
 }
 
 export const TYPE_TO_SYMBOL: Record<string, string> = {
