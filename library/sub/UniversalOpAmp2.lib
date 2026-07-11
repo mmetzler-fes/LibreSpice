@@ -20,6 +20,11 @@
 .param GBW=10Meg
 .param Gm=1m
 .param Rout=100
+* Small input offset voltage: a real op-amp is never perfectly symmetric,
+* so astable comparator circuits (e.g. an op-amp square-wave generator) can
+* self-start. An ideal, perfectly balanced model sits forever at its unstable
+* equilibrium and never oscillates. 1 uV is negligible on linear circuits.
+.param Vos=1u
 .param Rgain={Avol/Gm}
 .param Cpole={Gm/(2*3.141592653589793*GBW)}
 * Keep the supply pins defined even if a rail is left unconnected.
@@ -27,7 +32,8 @@ Rvp 3 0 1G
 Rvn 4 0 1G
 * High-impedance differential input -> transconductor -> dominant-pole node.
 Rin 1 2 1G
-G1 0 ng 1 2 {Gm}
+Vos1 2 2a DC {Vos}
+G1 0 ng 1 2a {Gm}
 R1 ng 0 {Rgain}
 C1 ng 0 {Cpole}
 * Clamp the gain node to the rails so open-loop use saturates quickly.
