@@ -379,12 +379,18 @@ export class LTSpiceParser {
         if (pVals[2] !== undefined) (comp as any).frequency = pVals[2];
       }
     } else if (cType === "pulsesource") {
-       // Simplistic pulse parser
+       // PULSE(V1 V2 Tdelay Trise Tfall Ton Tperiod). Read every field — omitting
+       // delay/rise/fall left them at their defaults (a 1 ns edge), so a triangle
+       // like PULSE(0 10 0 10 10 0 20) collapsed to a 1 ns spike once the verbatim
+       // rawSpec was dropped (e.g. after any edit in the properties panel).
        const match = valueStr.match(/PULSE\(([^)]+)\)/i);
        if (match) {
          const pVals = match[1].split(/[\s,]+/).map(parseSI);
          if (pVals[0] !== undefined) (comp as any).initialValue = pVals[0];
          if (pVals[1] !== undefined) (comp as any).pulsedValue = pVals[1];
+         if (pVals[2] !== undefined) (comp as any).delay = pVals[2];
+         if (pVals[3] !== undefined) (comp as any).riseTime = pVals[3];
+         if (pVals[4] !== undefined) (comp as any).fallTime = pVals[4];
          if (pVals[5] !== undefined) (comp as any).pulseWidth = pVals[5];
          if (pVals[6] !== undefined) (comp as any).period = pVals[6];
        }

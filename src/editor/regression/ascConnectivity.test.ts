@@ -44,6 +44,19 @@ SHEET 1 880 680
 TEXT 0 0 Left 2 !.meas TRAN a TRIG 1\\n.meas TRAN b TRIG 2
 `;
 
+// PULSE(V1 V2 Tdelay Trise Tfall Ton Tperiod): every field must be read. Rise,
+// fall and delay were skipped, so a triangle PULSE(0V 10V 0s 10s 10s 0s 20s)
+// kept default 1 ns edges and collapsed to a spike once the verbatim rawSpec
+// was dropped (e.g. after any edit in the properties panel). Units (V/s) too.
+const ASC_PULSE = `Version 4
+SHEET 1 880 680
+FLAG 0 96 0
+FLAG 0 16 OUT
+SYMBOL voltage 0 0 R0
+SYMATTR InstName V2
+SYMATTR Value PULSE(0V 10V 0s 10s 10s 0s 20s)
+`;
+
 const CASES: Case[] = [
   { name: "flag-on-pin connects source terminals (no bridging wire)", run: (fail) => {
     const { nodes, edges } = LTSpiceParser.parse(ASC);
@@ -67,6 +80,16 @@ const CASES: Case[] = [
     if (directives.includes("\\n")) fail("literal \\n left in directives");
     const measLines = directives.split("\n").filter((l) => l.trim().startsWith(".meas"));
     if (measLines.length !== 2) fail(`expected 2 .meas lines, got ${measLines.length}`);
+  } },
+  { name: "PULSE reads rise/fall/delay (triangle, unit suffixes)", run: (fail) => {
+    const { components } = LTSpiceParser.parse(ASC_PULSE);
+    const v2 = components.find((c) => c.label === "V2");
+    if (!v2) { fail("V2 not imported"); return; }
+    const p = Object.fromEntries(v2.getProperties().map((x) => [x.key, x.value]));
+    if (p.riseTime !== 10) fail(`riseTime ${p.riseTime} != 10`);
+    if (p.fallTime !== 10) fail(`fallTime ${p.fallTime} != 10`);
+    if (p.pulseWidth !== 0) fail(`pulseWidth ${p.pulseWidth} != 0`);
+    if (p.period !== 20) fail(`period ${p.period} != 20`);
   } },
 ];
 
