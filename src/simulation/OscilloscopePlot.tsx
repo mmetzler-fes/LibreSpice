@@ -4,6 +4,7 @@ import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel, type YScale } from "./plotStore.js";
+import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
@@ -58,14 +59,15 @@ function svgReadoutBox(
 ): SVGGElement {
   const W = READOUT_W, PAD = 6, LH = 15;
   const H = PAD * 2 + LH * 3;
-  const fg = o.dark ? "#e2e8f0" : "#1e293b";
+  const th = plotThemeFor(!o.dark);
+  const fg = th.text;
   const g = doc.createElementNS(SVG_NS, "g");
   g.setAttribute("transform", `translate(${x},${y})`);
   const rect = doc.createElementNS(SVG_NS, "rect");
   rect.setAttribute("width", String(W));
   rect.setAttribute("height", String(H));
   rect.setAttribute("rx", "4");
-  rect.setAttribute("fill", o.dark ? "#1e293b" : "#ffffff");
+  rect.setAttribute("fill", th.cardBg);
   rect.setAttribute("fill-opacity", "0.92");
   rect.setAttribute("stroke", o.color);
   g.appendChild(rect);
@@ -290,6 +292,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     addExpression, updateExpression, toggleExpressionHidden, removeExpression, toggleSyncX,
   } = usePlotStore();
   const isDark = !svgLight;
+  const pt = plotThemeFor(svgLight);
   // Active palette: bright for dark backgrounds, deep for light backgrounds.
   const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
 
@@ -485,7 +488,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     const bg = document.createElementNS(SVG_NS, "rect");
     bg.setAttribute("width", String(width));
     bg.setAttribute("height", String(totalH));
-    bg.setAttribute("fill", svgLight ? "#ffffff" : "#0f172a");
+    bg.setAttribute("fill", plotThemeFor(svgLight).plotBg);
     root.appendChild(bg);
     let y = 0;
     parts.forEach((s, i) => {
@@ -568,7 +571,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   };
 
   const noData = (
-    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: isDark ? "#0f172a" : "#f8fafc" }}>
+    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: pt.panelBg }}>
       <p style={{ margin: 0, fontSize: compact ? 12 : 14 }}>No simulation data</p>
       <p style={{ margin: 0, fontSize: 11, color: "#475569" }}>Run simulation — double-click a component to probe</p>
     </div>
@@ -586,8 +589,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       .filter(({ raw }) => raw !== "time" && raw !== "frequency")
       .map(({ raw, display }) => ({ display, value: result.data[raw]?.[0] ?? NaN, unit: inferUnit(raw) }));
     return (
-      <div style={{ height: "100%", overflow: "auto", background: isDark ? "#0f172a" : "#f8fafc", padding: compact ? 12 : 20 }}>
-        <div style={{ fontSize: compact ? 12 : 14, fontWeight: 600, color: isDark ? "#e2e8f0" : "#1e293b", marginBottom: 10 }}>
+      <div style={{ height: "100%", overflow: "auto", background: pt.panelBg, padding: compact ? 12 : 20 }}>
+        <div style={{ fontSize: compact ? 12 : 14, fontWeight: 600, color: pt.text, marginBottom: 10 }}>
           {analysisType === "op" ? "Operating Point (.op)" : "DC bias values"}
         </div>
         {rows.length === 0 ? (
@@ -597,8 +600,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.display}>
-                  <td style={{ padding: "3px 24px 3px 0", color: isDark ? "#94a3b8" : "#475569", whiteSpace: "nowrap" }}>{r.display}</td>
-                  <td style={{ padding: "3px 0", textAlign: "right", color: isDark ? "#e2e8f0" : "#1e293b", whiteSpace: "nowrap" }}>{fmtVal(r.value, r.unit)}</td>
+                  <td style={{ padding: "3px 24px 3px 0", color: pt.heading, whiteSpace: "nowrap" }}>{r.display}</td>
+                  <td style={{ padding: "3px 0", textAlign: "right", color: pt.text, whiteSpace: "nowrap" }}>{fmtVal(r.value, r.unit)}</td>
                 </tr>
               ))}
             </tbody>
@@ -617,19 +620,19 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     // Scroll wrapper: under heavy browser zoom (Ctrl+wheel) the fixed-size
     // sidebar and min-height panels can grow past the viewport — scroll to reach
     // the rest instead of clipping it.
-    <div style={{ height: "100%", overflow: "auto", background: isDark ? "#0f172a" : "#f8fafc" }}>
+    <div style={{ height: "100%", overflow: "auto", background: pt.panelBg }}>
     <div style={{ height: "100%", minWidth: compact ? 320 : 480, minHeight: compact ? 180 : 300, display: "flex" }}>
       {/* ── Sidebar: probes, colours, expressions ── */}
       <div style={{
-        width: sidebarW, flexShrink: 0, borderRight: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
-        background: isDark ? undefined : "#fff",
+        width: sidebarW, flexShrink: 0, borderRight: `1px solid ${pt.border}`,
+        background: pt.sidebarBg,
         display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
-        <div style={{ padding: compact ? "6px 8px" : "10px 12px", borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, background: isDark ? undefined : "#fff" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: isDark ? "#64748b" : "#475569", textTransform: "uppercase" }}>Probes</span>
+        <div style={{ padding: compact ? "6px 8px" : "10px 12px", borderBottom: `1px solid ${pt.border}`, background: pt.sidebarBg }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: pt.heading, textTransform: "uppercase" }}>Probes</span>
           <label
             title="Add a component's current to the probes when you click it in the schematic"
-            style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, cursor: "pointer", color: isDark ? "#94a3b8" : "#64748b", fontSize: 10 }}
+            style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, cursor: "pointer", color: pt.textMuted, fontSize: 10 }}
           >
             <input type="checkbox" checked={autoProbeCurrent} onChange={toggleAutoProbeCurrent} style={{ cursor: "pointer" }} />
             Current on click
@@ -694,7 +697,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               })}
 
           {expressions.length > 0 && (
-            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase", padding: "2px 6px" }}>
+            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase", padding: "2px 6px" }}>
               Functions
             </div>
           )}
@@ -718,8 +721,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         </div>
 
         {/* Expression builder (requirement: arithmetic on probe variables) */}
-        <div style={{ padding: 6, borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 9, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase" }}>Add function</div>
+        <div style={{ padding: 6, borderTop: `1px solid ${pt.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase" }}>Add function</div>
           <div style={{ display: "flex", gap: 4 }}>
             <input
               value={exprInput}
@@ -729,15 +732,15 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
               style={{
                 flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
-                background: isDark ? "#0b1120" : "#fff",
-                color: isDark ? "#e2e8f0" : "#1e293b",
-                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                background: pt.inputBg,
+                color: pt.text,
+                border: `1px solid ${pt.borderStrong}`,
                 borderRadius: 4,
               }}
             />
             <button
               onClick={handleAddExpression}
-              style={{ padding: "3px 8px", fontSize: 10, background: isDark ? "#1e293b" : "#e2e8f0", color: isDark ? "#94a3b8" : "#475569", border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 4, cursor: "pointer" }}
+              style={{ padding: "3px 8px", fontSize: 10, background: pt.border, color: pt.heading, border: `1px solid ${pt.borderStrong}`, borderRadius: 4, cursor: "pointer" }}
             >
               +
             </button>
@@ -811,6 +814,7 @@ interface ProbeRowProps {
 function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStart, onSwatch, showPicker, onPick, onRemove, onEdit }: ProbeRowProps) {
   const svgLight = usePlotStore((s) => s.svgLight);
   const isDark = !svgLight;
+  const pt = plotThemeFor(svgLight);
   const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -833,7 +837,7 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
         style={{
           display: "flex", alignItems: "center", gap: 6,
           padding: "4px 6px", borderRadius: 4,
-          background: active ? (isDark ? "#1e293b" : "#e2e8f0") : "transparent",
+          background: active ? (pt.border) : "transparent",
           cursor: editing ? "text" : draggable ? "grab" : "pointer",
         }}
         title={editing ? undefined : draggable ? "Drag into a panel" : undefined}
@@ -844,7 +848,7 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
           style={{
             width: 12, height: 12, borderRadius: 3, flexShrink: 0, padding: 0,
             border: "1px solid #00000040", cursor: "pointer",
-            background: active ? color : (isDark ? "#334155" : "#94a3b8"),
+            background: active ? color : (pt.chipInactive),
           }}
         />
         {editing ? (
@@ -859,8 +863,8 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
             onBlur={commitEdit}
             style={{
               flex: 1, minWidth: 0, padding: "1px 4px", fontSize: 10, fontFamily: "monospace",
-              background: isDark ? "#0b1120" : "#fff", color: isDark ? "#e2e8f0" : "#1e293b",
-              border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+              background: pt.inputBg, color: pt.text,
+              border: `1px solid ${pt.borderStrong}`, borderRadius: 3,
             }}
           />
         ) : (
@@ -902,8 +906,8 @@ function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStar
           position: "absolute", zIndex: 20, top: 22, left: 6,
           display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4,
           padding: 6,
-          background: isDark ? "#1e293b" : "#fff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+          background: pt.cardBg,
+          border: `1px solid ${pt.borderMuted}`,
           borderRadius: 6,
           boxShadow: "0 4px 12px #00000060",
         }}>
@@ -976,6 +980,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const svgLight = usePlotStore((s) => s.svgLight);
   const toggleSvgLight = usePlotStore((s) => s.toggleSvgLight);
   const isDark = !svgLight;
+  const pt = plotThemeFor(svgLight);
   const th = svgLight ? PLOT_THEME.light : PLOT_THEME.dark;
 
   /** Merge a manual override into one unit's y-axis. */
@@ -984,22 +989,22 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
   const ctrlBtnStyle: React.CSSProperties = {
     padding: "2px 8px", fontSize: 10,
-    background: isDark ? "#1e293b" : "#f1f5f9",
-    color: isDark ? "#94a3b8" : "#475569",
-    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+    background: pt.activeBg,
+    color: pt.heading,
+    border: `1px solid ${pt.borderStrong}`,
     borderRadius: 4, cursor: "pointer", flexShrink: 0,
   };
   const menuItemStyle: React.CSSProperties = {
     display: "block", width: "100%", padding: "4px 10px", textAlign: "left",
     border: "none", background: "transparent",
-    color: isDark ? "#e2e8f0" : "#1e293b",
+    color: pt.text,
     cursor: "pointer", fontSize: 11, borderRadius: 4, whiteSpace: "nowrap",
   };
-  const menuDivider = { height: 1, background: isDark ? "#334155" : "#e2e8f0", margin: "4px 0" };
+  const menuDivider = { height: 1, background: pt.borderMuted, margin: "4px 0" };
   const menuPopup: React.CSSProperties = {
     position: "fixed", zIndex: 41,
-    background: isDark ? "#1e293b" : "#fff",
-    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+    background: pt.cardBg,
+    border: `1px solid ${pt.borderMuted}`,
     borderRadius: 6, padding: 4, fontSize: 11,
     boxShadow: "0 4px 12px #00000070",
   };
@@ -1217,7 +1222,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       g.setAttribute("transform", `translate(${gx},${gy})`);
       const box = doc.createElementNS(SVG_NS, "rect");
       box.setAttribute("width", String(legW)); box.setAttribute("height", String(traces.length * 15 + 8));
-      box.setAttribute("rx", "4"); box.setAttribute("fill", isDark ? "#0f172a" : "#ffffff");
+      box.setAttribute("rx", "4"); box.setAttribute("fill", pt.plotBg);
       box.setAttribute("fill-opacity", "0.85"); box.setAttribute("stroke", th.frame);
       g.appendChild(box);
       traces.forEach((t, i) => {
@@ -1226,7 +1231,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
         sw.setAttribute("x", "7"); sw.setAttribute("y", String(ry)); sw.setAttribute("width", "10");
         sw.setAttribute("height", "3"); sw.setAttribute("rx", "1"); sw.setAttribute("fill", colorFor(t));
         g.appendChild(sw);
-        g.appendChild(svgText(22, ry + 4, names[i], { fill: isDark ? "#e2e8f0" : "#1e293b" }));
+        g.appendChild(svgText(22, ry + 4, names[i], { fill: pt.text }));
       });
       clone.appendChild(g);
     }
@@ -1311,7 +1316,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       style={{
         flex: panel.height ? "0 0 auto" : "1 0 auto",
         height: panel.height, minHeight: compact ? 150 : 200, display: "flex", flexDirection: "column",
-        borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+        borderBottom: `1px solid ${pt.border}`,
         outline: dragOver ? "2px dashed #22d3ee" : "none", outlineOffset: -2,
       }}
       onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); setDragOver(true); } }}
@@ -1323,10 +1328,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
       }}
     >
       {/* Panel header: legend chips + controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: isDark ? "#0b1120" : "#f1f5f9", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: pt.toolbarBg, flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
           {traces.length === 0 && (
-            <span style={{ fontSize: 10, color: isDark ? "#475569" : "#94a3b8" }}>Drag a probe here…</span>
+            <span style={{ fontSize: 10, color: pt.placeholder }}>Drag a probe here…</span>
           )}
           {traces.map((t) => (
             <span
@@ -1339,8 +1344,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
                 display: "inline-flex", alignItems: "center", gap: 4,
                 padding: "1px 6px", borderRadius: 10,
                 background: cursor?.trace === t
-                  ? (isDark ? "#334155" : "#cbd5e1")
-                  : (isDark ? "#1e293b" : "#e2e8f0"),
+                  ? (pt.borderStrong)
+                  : (pt.border),
                 fontSize: 10, fontFamily: "monospace", color: colorFor(t), cursor: "grab",
               }}
             >
@@ -1349,7 +1354,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <button
                 onClick={() => onRemoveTrace(t)}
                 title="Remove from panel"
-                style={{ border: "none", background: "transparent", color: isDark ? "#64748b" : "#94a3b8", cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}
+                style={{ border: "none", background: "transparent", color: pt.labelDim, cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}
               >×</button>
             </span>
           ))}
@@ -1362,7 +1367,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
       {/* Axis configuration */}
       {showAxis && (
-        <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: pt.toolbarBg, borderTop: `1px solid ${pt.border}`, flexWrap: "wrap" }}>
           <AxisFields
             title="x-axis"
             min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={panel.xTicks}
@@ -1395,9 +1400,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
                     title="y-axis scale"
                     style={{
                       fontSize: 9, padding: "1px 2px",
-                      background: isDark ? "#0b1120" : "#fff",
-                      color: isDark ? "#e2e8f0" : "#1e293b",
-                      border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+                      background: pt.inputBg,
+                      color: pt.text,
+                      border: `1px solid ${pt.borderStrong}`, borderRadius: 3,
                     }}
                   >
                     <option value="linear">linear</option>
@@ -1513,10 +1518,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
           style={{
             position: "absolute", top: 2, left: 4, width: margin.left + 64,
             padding: "0 2px", fontSize: 10, fontFamily: "monospace", fontWeight: 600,
-            background: "transparent", color: isDark ? "#cbd5e1" : "#1e293b",
+            background: "transparent", color: pt.axisText,
             border: "1px solid transparent", borderRadius: 3, outline: "none",
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = isDark ? "#334155" : "#cbd5e1"; e.currentTarget.style.background = isDark ? "#0b1120" : "#fff"; }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = pt.borderStrong; e.currentTarget.style.background = pt.inputBg; }}
           onBlur={(e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "transparent"; }}
         />
         {cursorInfo && isFinite(cursorInfo.sx) && (() => {
@@ -1530,7 +1535,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
           return (
             <div style={{
               position: "absolute", top: boxTop, left: boxLeft,
-              padding: 6, background: isDark ? "#1e293be6" : "#ffffffee", border: `1px solid ${cursorInfo.color}`,
+              padding: 6, background: pt.overlayBg, border: `1px solid ${cursorInfo.color}`,
               borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96,
             }}>
               <div
@@ -1547,11 +1552,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <div style={{ color: cursorInfo.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(cursor!.trace)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>x</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtX(cursorInfo.sampleT)}</span>
+                <span style={{ color: pt.text, fontFamily: "monospace" }}>{fmtX(cursorInfo.sampleT)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>y</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtVal(cursorInfo.value)}</span>
+                <span style={{ color: pt.text, fontFamily: "monospace" }}>{fmtVal(cursorInfo.value)}</span>
               </div>
             </div>
           );
@@ -1563,7 +1568,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
           return (
             <div key={`readout-${s.i}`} style={{
               position: "absolute", top: sTop, left: sLeft,
-              padding: 6, background: isDark ? "#1e293be6" : "#ffffffee",
+              padding: 6, background: pt.overlayBg,
               border: `1px solid ${s.color}`,
               borderRadius: 4, fontSize: 10, pointerEvents: "none", minWidth: 96, opacity: 0.9,
             }}>
@@ -1578,11 +1583,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
               <div style={{ color: s.color, fontFamily: "monospace", marginBottom: 2, paddingRight: 14 }}>{displayVar(s.trace)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>x</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtX(s.sampleT)}</span>
+                <span style={{ color: pt.text, fontFamily: "monospace" }}>{fmtX(s.sampleT)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "#64748b" }}>y</span>
-                <span style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "monospace" }}>{fmtVal(s.value)}</span>
+                <span style={{ color: pt.text, fontFamily: "monospace" }}>{fmtVal(s.value)}</span>
               </div>
             </div>
           );
@@ -1599,7 +1604,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
               left: Math.min(dims.w - 16, margin.left + s.sx - 6),
               width: 14, height: 14, lineHeight: "12px", padding: 0,
               borderRadius: 3, fontSize: 11, cursor: "pointer",
-              background: isDark ? "#0f172acc" : "#ffffffdd", color: s.color, border: `1px solid ${s.color}`,
+              background: pt.overlayBg2, color: s.color, border: `1px solid ${s.color}`,
             }}
           >×</button>
         ) : null)}
@@ -1651,8 +1656,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
           }}>
             <button style={menuItemStyle} onClick={() => { onAddRelative("above"); setPaneMenu(null); }}>Add Plot Pane Above</button>
             <button style={menuItemStyle} onClick={() => { onAddRelative("below"); setPaneMenu(null); }}>Add Plot Pane Below</button>
-            <button style={{ ...menuItemStyle, color: index > 0 ? (isDark ? "#e2e8f0" : "#1e293b") : "#475569", cursor: index > 0 ? "pointer" : "default" }} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
-            <button style={{ ...menuItemStyle, color: index < count - 1 ? (isDark ? "#e2e8f0" : "#1e293b") : "#475569", cursor: index < count - 1 ? "pointer" : "default" }} disabled={index === count - 1} onClick={() => { onMove("down"); setPaneMenu(null); }}>Move Plot Pane Down</button>
+            <button style={{ ...menuItemStyle, color: index > 0 ? (pt.text) : "#475569", cursor: index > 0 ? "pointer" : "default" }} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
+            <button style={{ ...menuItemStyle, color: index < count - 1 ? (pt.text) : "#475569", cursor: index < count - 1 ? "pointer" : "default" }} disabled={index === count - 1} onClick={() => { onMove("down"); setPaneMenu(null); }}>Move Plot Pane Down</button>
             <button style={{ ...menuItemStyle, color: canRemove ? "#f87171" : "#475569", cursor: canRemove ? "pointer" : "default" }} disabled={!canRemove} onClick={() => { onRemovePanel(); setPaneMenu(null); }}>Delete this Pane</button>
             <div style={menuDivider} />
             <button style={menuItemStyle} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
@@ -1689,7 +1694,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       <div
         onPointerDown={startResize}
         title="Drag to resize this plot"
-        style={{ ...DRAG_TOUCH_ACTION, height: 7, flexShrink: 0, cursor: "ns-resize", background: isDark ? "#0b1120" : "#f1f5f9", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}
+        style={{ ...DRAG_TOUCH_ACTION, height: 7, flexShrink: 0, cursor: "ns-resize", background: pt.toolbarBg, borderTop: `1px solid ${pt.border}` }}
       />
     </div>
   );
@@ -1734,7 +1739,7 @@ function AxisFields({ title, min, max, ticks, minLabel, maxLabel, onMin, onMax, 
  * freely; the value is committed on blur / Enter.
  */
 function AxisInput({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
-  const isDark = !usePlotStore((s) => s.svgLight);
+  const pt = usePlotTheme();
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? (value === undefined || !isFinite(value) ? "" : siFormat(value));
 
@@ -1759,9 +1764,9 @@ function AxisInput({ label, value, onChange }: { label: string; value?: number; 
         onKeyDown={(e) => { if (e.key === "Enter") { commit(); (e.target as HTMLInputElement).blur(); } }}
         style={{
           width: 52, padding: "2px 4px", fontSize: 9,
-          background: isDark ? "#0b1120" : "#fff",
-          color: isDark ? "#e2e8f0" : "#1e293b",
-          border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, borderRadius: 3,
+          background: pt.inputBg,
+          color: pt.text,
+          border: `1px solid ${pt.borderStrong}`, borderRadius: 3,
         }}
       />
     </label>

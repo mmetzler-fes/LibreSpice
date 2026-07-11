@@ -9,7 +9,7 @@ import { useUIStore } from "@store/uiStore.js";
  * themes spread it in (so they "inherit" those) and only override what differs.
  * The light values are the historical originals — light mode is unchanged.
  */
-const common = {
+export const commonColors = {
   /** Primary accent (selection, focus, primary buttons). */
   accent: "#2563eb",
   /** Text/icon on an accent-filled surface. */
@@ -112,10 +112,10 @@ export interface Theme {
   serverText: string;
 }
 
-type FullTheme = Theme & typeof common;
+type FullTheme = Theme & typeof commonColors;
 
 export const lightTheme: FullTheme = {
-  ...common,
+  ...commonColors,
   text: "#1e293b",
   textStrong: "#0f172a",
   textMuted: "#64748b",
@@ -168,7 +168,7 @@ export const lightTheme: FullTheme = {
 };
 
 export const darkTheme: FullTheme = {
-  ...common,
+  ...commonColors,
   text: "#e2e8f0",
   textStrong: "#e2e8f0",
   textMuted: "#94a3b8",
