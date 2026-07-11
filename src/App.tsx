@@ -7,6 +7,7 @@ import { useUIStore, type ActiveTab } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { getSnapshotFromUrl, loadFromLocalStorage } from "@store/persistence.js";
 import { useAutosave } from "@store/useAutosave.js";
+import { useKeyboardViewport } from "./useKeyboardViewport.js";
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: "schematic", label: "Schematic" },
@@ -20,6 +21,7 @@ export function App() {
   const initialized = useRef(false);
 
   useAutosave();
+  useKeyboardViewport();
 
   useEffect(() => {
     if (initialized.current) return;
@@ -45,7 +47,7 @@ export function App() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100vh",
+        height: "var(--app-height, 100vh)",
         fontFamily: "system-ui, sans-serif",
         background: darkMode ? "#0f172a" : "#fff",
         color: darkMode ? "#e2e8f0" : "#1e293b",

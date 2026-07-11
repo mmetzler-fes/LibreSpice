@@ -84,8 +84,12 @@ function CanvasInner() {
     setDockTab, autoProbeCurrent,
   } = useUIStore();
 
+  const darkMode = useUIStore((s) => s.darkMode);
   const { result, addProbeCandidates } = useSimulationStore();
   const addExpression = usePlotStore((s) => s.addExpression);
+  // Non-selected wire color; matches WireEdge so drag-connected and hand-drawn
+  // wires read the same in each theme.
+  const wireStroke = darkMode ? "#94a3b8" : "#1e293b";
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
   const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean } | null>(null);
@@ -281,7 +285,7 @@ function CanvasInner() {
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges(addEdge(
-        { ...connection, type: "step", style: { stroke: "#1e293b", strokeWidth: 2 }, animated: false },
+        { ...connection, type: "step", style: { stroke: wireStroke, strokeWidth: 2 }, animated: false },
         edges,
       ));
       if (connection.source && connection.sourceHandle && connection.target && connection.targetHandle) {
@@ -291,7 +295,7 @@ function CanvasInner() {
       }
       regenerateNetlist();
     },
-    [edges, setEdges, connectPorts, regenerateNetlist],
+    [edges, setEdges, connectPorts, regenerateNetlist, wireStroke],
   );
 
   const onCreateWire = useCallback(
@@ -692,10 +696,10 @@ function CanvasInner() {
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{
               type: "step",
-              style: { stroke: "#1e293b", strokeWidth: 2 },
+              style: { stroke: wireStroke, strokeWidth: 2 },
             }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color="#cbd5e1" />
+            <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color={darkMode ? "#334155" : "#cbd5e1"} />
           </ReactFlow>
 
           {/* Custom zoom/fit/lock buttons. React Flow's own <Controls> did not

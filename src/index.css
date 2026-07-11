@@ -11,8 +11,25 @@ body {
 }
 
 #root {
-  height: 100vh;
+  height: var(--app-height, 100vh);
   width: 100vw;
+}
+
+/* iPad / touch text entry:
+   - `touch-action: manipulation` stops the double-tap-zoom delay and makes the
+     Apple Pencil behave like a plain pointer, so a tap sets the caret instead
+     of dropping straight into Scribble handwriting.
+   - the safe-area padding keeps fields off the very bottom edge where the
+     keyboard's shortcut bar likes to sit. */
+input,
+textarea,
+[contenteditable] {
+  touch-action: manipulation;
+}
+
+input,
+textarea {
+  scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
 }
 
 /* ReactFlow handle styling */

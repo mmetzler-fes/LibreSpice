@@ -79,6 +79,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const darkMode = useUIStore((s) => s.darkMode);
 
   // Exact pin centre for an endpoint. React Flow anchors an edge at the handle's
   // Position edge (e.g. the *top* of a Position.Top handle circle), which shows
@@ -116,7 +117,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         id={id}
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke: selected ? "#2563eb" : "#1e293b", strokeWidth: 2 }}
+        style={{ stroke: selected ? "#2563eb" : darkMode ? "#94a3b8" : "#1e293b", strokeWidth: 2 }}
       />
       {selected && netLabel && mid && (
         <g transform={`translate(${mid.x}, ${mid.y})`} style={{ pointerEvents: "none" }}>
@@ -177,6 +178,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   const pointsRef = useRef<FlowPoint[]>([]);
 
   const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const darkMode = useUIStore((s) => s.darkMode);
   const pins = useMemo(() => nodes.flatMap((n) => getNodePins(n, symbolNorm)), [nodes, symbolNorm]);
 
   const rect = wrapperRef.current?.getBoundingClientRect();
@@ -417,7 +419,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
         )}
         {/* Wire being drawn */}
         {previewPath && (
-          <path d={previewPath} fill="none" stroke="#1e293b" strokeWidth={2} strokeDasharray="6 3" />
+          <path d={previewPath} fill="none" stroke={darkMode ? "#94a3b8" : "#1e293b"} strokeWidth={2} strokeDasharray="6 3" />
         )}
         {/* Snap indicators */}
         {hoverTarget?.kind === "pin" && cursorLocal && (

@@ -135,6 +135,48 @@ function MovableLabel({
   );
 }
 
+/**
+ * Non-selected drawing colors for the two themes. The light values are the
+ * originals; dark flips strokes/text to light tints and swaps the white symbol
+ * fills for dark ones so parts actually read as dark-mode. Selected elements
+ * stay blue (#2563eb / #1d4ed8) in both themes and are handled at each call.
+ */
+function themeColors(dark: boolean) {
+  return dark
+    ? {
+        asyStroke: "#e2e8f0", // .asy + symbol strokes (currentColor)
+        label: "#cbd5e1",
+        value: "#94a3b8",
+        boxFill: "#1e293b",
+        boxFillSel: "#1e3a5f",
+        subStroke: "#94a3b8",
+        netlabelColor: "#cbd5e1",
+        netTagBg: "#334155",
+        netTagBgSel: "#1e3a5f",
+        netTagText: "#e2e8f0",
+        netTagBorder: "#475569",
+        badgeText: "#93c5fd",
+        badgeBg: "rgba(15,23,42,0.85)",
+        badgeBorder: "#1e40af",
+      }
+    : {
+        asyStroke: "#0f172a",
+        label: "#374151",
+        value: "#6b7280",
+        boxFill: "#f8fafc",
+        boxFillSel: "#eff6ff",
+        subStroke: "#475569",
+        netlabelColor: "#334155",
+        netTagBg: "#e2e8f0",
+        netTagBgSel: "#dbeafe",
+        netTagText: "#0f172a",
+        netTagBorder: "#94a3b8",
+        badgeText: "#1d4ed8",
+        badgeBg: "rgba(255,255,255,0.85)",
+        badgeBorder: "#bfdbfe",
+      };
+}
+
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   resistor: ResistorSymbol,
   capacitor: CapacitorSymbol,
@@ -244,7 +286,8 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
   const rowGap = 22;
   const height = rows * rowGap + 24;
   const width = 96;
-  const color = selected ? "#2563eb" : "#475569";
+  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const color = selected ? "#2563eb" : pal.subStroke;
 
   const rowTop = (index: number) => 18 + index * rowGap;
 
@@ -275,7 +318,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           width={width - 20}
           height={height - 8}
           rx={4}
-          fill={selected ? "#eff6ff" : "#f8fafc"}
+          fill={selected ? pal.boxFillSel : pal.boxFill}
           stroke={color}
           strokeWidth={1.6}
         />
@@ -295,7 +338,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
       </svg>
       <MovableLabel
         nodeId={nodeId} kind="label" base={{ left: -6, top: height / 2 }} offset={data.labelOffset}
-        color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
+        color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
       >
         {data.label}
       </MovableLabel>
@@ -323,6 +366,7 @@ function LibrarySymbolNode({
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
   const pins = data.pins ?? [];
+  const pal = themeColors(useUIStore((s) => s.darkMode));
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   const bounds = symbolBounds(sym);
@@ -350,7 +394,7 @@ function LibrarySymbolNode({
         width={NODE_SIZE}
         height={NODE_SIZE}
         style={{
-          color: selected ? "#2563eb" : "#0f172a",
+          color: selected ? "#2563eb" : pal.asyStroke,
           overflow: "visible",
           transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
@@ -367,7 +411,7 @@ function LibrarySymbolNode({
       {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {data.label}
         </MovableLabel>
@@ -382,6 +426,7 @@ function PinNetLabels({ nodeId, data }: { nodeId: string; data: ComponentNodeDat
   // Re-render when net assignments change (bumped on connect/rebuild).
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const pal = themeColors(useUIStore((s) => s.darkMode));
 
   const comp = circuit.components.get(nodeId);
   if (!comp) return null;
@@ -407,9 +452,9 @@ function PinNetLabels({ nodeId, data }: { nodeId: string; data: ComponentNodeDat
               fontSize: 9,
               lineHeight: "13px",
               fontFamily: "monospace",
-              color: "#1d4ed8",
-              background: "rgba(255,255,255,0.85)",
-              border: "1px solid #bfdbfe",
+              color: pal.badgeText,
+              background: pal.badgeBg,
+              border: `1px solid ${pal.badgeBorder}`,
               borderRadius: 3,
               whiteSpace: "nowrap",
               pointerEvents: "none",
@@ -439,6 +484,7 @@ function AsyComponentNode({
 }) {
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
+  const pal = themeColors(useUIStore((s) => s.darkMode));
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
@@ -466,7 +512,7 @@ function AsyComponentNode({
         width={NODE_SIZE}
         height={NODE_SIZE}
         style={{
-          color: selected ? "#2563eb" : "#0f172a",
+          color: selected ? "#2563eb" : pal.asyStroke,
           overflow: "visible",
           transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
@@ -484,7 +530,7 @@ function AsyComponentNode({
       {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {data.label}
         </MovableLabel>
@@ -492,7 +538,7 @@ function AsyComponentNode({
       {data.valueLabel && (() => { const l = captionLayout("value", rotation, halfW, halfH); return (
         <MovableLabel
           nodeId={nodeId} kind="value" base={l} transform={l.transform} offset={data.valueOffset}
-          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={VALUE_FONT_SIZE}
+          color={selected ? "#1d4ed8" : pal.value} fontSize={VALUE_FONT_SIZE}
         >
           {data.valueLabel}
         </MovableLabel>
@@ -508,7 +554,8 @@ function AsyComponentNode({
 function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: boolean }) {
   const c = NODE_SIZE / 2;
   const name = data.label || "NET";
-  const color = selected ? "#2563eb" : "#334155";
+  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const color = selected ? "#2563eb" : pal.netlabelColor;
   // "connector" = draw the direction arrow (joins distant parts on one net
   // without a wire); default = a plain net label that just names a wire.
   const isConnector = !!data.connector;
@@ -538,8 +585,8 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
           ...NO_NATIVE_DRAG,
           position: "absolute", ...tagStyle,
           padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
-          background: selected ? "#dbeafe" : "#e2e8f0", color: "#0f172a",
-          border: `1px solid ${selected ? "#2563eb" : "#94a3b8"}`,
+          background: selected ? pal.netTagBgSel : pal.netTagBg, color: pal.netTagText,
+          border: `1px solid ${selected ? "#2563eb" : pal.netTagBorder}`,
         }}
       >
         {name}
@@ -550,6 +597,7 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
 
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const pal = themeColors(useUIStore((s) => s.darkMode));
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "netlabel") {
     return <NetLabelNode data={nodeData} selected={selected} />;
@@ -612,7 +660,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       {!isGround && (() => { const l = captionLayout("label", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="label" base={l} transform={l.transform} offset={nodeData.labelOffset}
-          color={selected ? "#2563eb" : "#374151"} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
+          color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
         >
           {nodeData.label}
         </MovableLabel>
@@ -622,7 +670,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
         <MovableLabel
           nodeId={id} kind="value" base={l} transform={l.transform} offset={nodeData.valueOffset}
-          color={selected ? "#1d4ed8" : "#6b7280"} fontSize={VALUE_FONT_SIZE}
+          color={selected ? "#1d4ed8" : pal.value} fontSize={VALUE_FONT_SIZE}
         >
           {nodeData.valueLabel}
         </MovableLabel>
