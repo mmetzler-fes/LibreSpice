@@ -91,7 +91,7 @@ export interface PlotTheme {
   overlayBg2: string;
   /** Trace colours (legend picker + default assignment). */
   traces: string[];
-  /** Diagram drawing colours. */
+  /** Diagram drawing colours for the on-screen (dark) and print/beamer (light) looks. */
   diagram: PlotDiagram;
 }
 
