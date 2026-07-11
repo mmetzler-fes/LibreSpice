@@ -31,7 +31,11 @@ export interface PlotDiagram {
   bg: string;
   plot: string;
   grid: string;
-  /** Tick/label text; high-contrast against the plot background. */
+  /**
+   * Tick/label text only (not gridlines), so it is set for high contrast against
+   * the plot background: near-white on dark, near-black on light — the
+   * low-contrast slate before was hard to read on a beamer.
+   */
   axis: string;
   line: string;
   dot: string;
