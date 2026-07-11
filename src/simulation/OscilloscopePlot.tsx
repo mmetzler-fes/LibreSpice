@@ -5,6 +5,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
+import { ClampedMenu } from "../ClampedMenu.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
@@ -1601,16 +1602,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
       {/* Probe context menu: toggle the measurement cursor */}
       {menu && (
-        <>
-          <div
-            onClick={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 40 }}
-          />
-          <div style={{
-            position: "fixed", left: menu.x, top: menu.y, zIndex: 41,
-            ...menuPopup,
-          }}>
+        <ClampedMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} zIndex={41} backdropZIndex={40} style={menuPopup}>
             <button
               onClick={() => {
                 setCursor((c) => c?.trace === menu.trace ? null : { trace: menu.trace, t: (vr.xMin + vr.xMax) / 2 });
@@ -1627,22 +1619,12 @@ function PlotPanelView(props: PlotPanelViewProps) {
             >
               Position abdrucken
             </button>
-          </div>
-        </>
+        </ClampedMenu>
       )}
 
       {/* Pane context menu (LTSpice-style add/move/delete/sync) */}
       {paneMenu && (
-        <>
-          <div
-            onClick={() => setPaneMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setPaneMenu(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 40 }}
-          />
-          <div style={{
-            position: "fixed", left: paneMenu.x, top: paneMenu.y, zIndex: 41,
-            ...menuPopup, minWidth: 180,
-          }}>
+        <ClampedMenu x={paneMenu.x} y={paneMenu.y} onClose={() => setPaneMenu(null)} zIndex={41} backdropZIndex={40} style={{ ...menuPopup, minWidth: 180 }}>
             <button style={menuItemStyle} onClick={() => { onAddRelative("above"); setPaneMenu(null); }}>Add Plot Pane Above</button>
             <button style={menuItemStyle} onClick={() => { onAddRelative("below"); setPaneMenu(null); }}>Add Plot Pane Below</button>
             <button style={{ ...menuItemStyle, color: index > 0 ? (pt.text) : "#475569", cursor: index > 0 ? "pointer" : "default" }} disabled={index === 0} onClick={() => { onMove("up"); setPaneMenu(null); }}>Move Plot Pane Up</button>
@@ -1675,8 +1657,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             {count > 1 && (
               <button style={menuItemStyle} onClick={() => { onExportAll(); setPaneMenu(null); }}>Export All Diagrams (.svg)</button>
             )}
-          </div>
-        </>
+        </ClampedMenu>
       )}
 
       {/* Resize handle: drag the bottom edge to set this plot's height */}

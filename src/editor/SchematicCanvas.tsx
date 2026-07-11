@@ -31,6 +31,7 @@ import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
+import { ClampedMenu } from "../ClampedMenu.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
 import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
@@ -747,17 +748,7 @@ function CanvasInner() {
 
       {/* Component right-click menu: view current / voltage in the scope */}
       {nodeMenu && (
-        <>
-          <div
-            onClick={() => setNodeMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setNodeMenu(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 3000 }}
-          />
-          <div style={{
-            position: "fixed", left: nodeMenu.x, top: nodeMenu.y, zIndex: 3001,
-            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
-            padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 170,
-          }}>
+        <ContextMenu x={nodeMenu.x} y={nodeMenu.y} minWidth={170} onClose={() => setNodeMenu(null)}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
             {nodeMenu.isNetlabel ? (
               <>
@@ -779,23 +770,12 @@ function CanvasInner() {
             )}
             <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
             <button style={dangerMenuItem} onClick={deleteMenuNode}>🗑 Löschen</button>
-          </div>
-        </>
+        </ContextMenu>
       )}
 
       {/* Wire right-click menu: annotate the net's potential / current */}
       {wireMenu && (
-        <>
-          <div
-            onClick={() => setWireMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setWireMenu(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 3000 }}
-          />
-          <div style={{
-            position: "fixed", left: wireMenu.x, top: wireMenu.y, zIndex: 3001,
-            background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
-            padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth: 190,
-          }}>
+        <ContextMenu x={wireMenu.x} y={wireMenu.y} minWidth={190} onClose={() => setWireMenu(null)}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>Leitung</div>
             <button style={nodeMenuItem} onClick={nameWireNet}>🏷 Netz benennen…</button>
             {wireMenu.vExpr
@@ -806,8 +786,7 @@ function CanvasInner() {
               : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Strom nur bei Reihenschaltung</div>}
             <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
             <button style={dangerMenuItem} onClick={deleteMenuEdge}>🗑 Leitung löschen</button>
-          </div>
-        </>
+        </ContextMenu>
       )}
     </div>
   );
@@ -832,6 +811,25 @@ const canvasBtn: React.CSSProperties = {
   border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", color: "#334155",
   fontSize: 17, lineHeight: 1, cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
 };
+
+/** Right-click menu with the schematic's dark chrome; positioning + viewport
+ *  clamping are handled by {@link ClampedMenu}. */
+function ContextMenu({ x, y, minWidth, onClose, children }: {
+  x: number;
+  y: number;
+  minWidth?: number;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <ClampedMenu x={x} y={y} onClose={onClose} style={{
+      background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+      padding: 4, fontSize: 12, boxShadow: "0 4px 12px #00000070", minWidth,
+    }}>
+      {children}
+    </ClampedMenu>
+  );
+}
 
 export function SchematicCanvas() {
   return (
