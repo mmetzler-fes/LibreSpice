@@ -1,13 +1,15 @@
 import React from "react";
 import { useCircuitStore } from "@store/circuitStore.js";
+import { useTheme } from "../theme.js";
 
 // 1. Eine eigene Unterkomponente für das einzelne Eingabefeld
-function NetLabelInput({ id, initialLabel, onRename }: { 
-  id: string; 
-  initialLabel: string; 
-  onRename: (id: string, value: string) => void 
+function NetLabelInput({ id, initialLabel, onRename }: {
+  id: string;
+  initialLabel: string;
+  onRename: (id: string, value: string) => void
 }) {
   const [localValue, setLocalValue] = React.useState(initialLabel);
+  const theme = useTheme();
 
   // Synchronisiert das Feld, falls sich der Wert von außen ändert
   React.useEffect(() => {
@@ -30,12 +32,14 @@ function NetLabelInput({ id, initialLabel, onRename }: {
         }}
         style={{
           padding: "3px 6px",
-          border: "1px solid #cbd5e1",
+          border: `1px solid ${theme.border}`,
           borderRadius: 4,
           fontSize: 12,
           fontFamily: "monospace",
           width: "100%",
           boxSizing: "border-box",
+          background: theme.inputBg,
+          color: theme.text,
         }}
       />
     </label>
@@ -45,6 +49,9 @@ function NetLabelInput({ id, initialLabel, onRename }: {
 // 2. Die Hauptkomponente
 export function NetLabelsPanel() {
   const { circuit, selectedComponentId, renameNet, netVersion } = useCircuitStore();
+  const theme = useTheme();
+  const borderTop = theme.borderMuted;
+  const heading = theme.heading;
   void netVersion;
 
   // Collect only the nets connected to the selected component's pins.
@@ -64,16 +71,16 @@ export function NetLabelsPanel() {
 
   if (nets.length === 0) {
     return (
-      <div style={{ padding: "10px 16px", fontSize: 11, color: "#64748b", borderTop: "1px solid #e2e8f0" }}>
-        <strong style={{ display: "block", marginBottom: 4, color: "#475569" }}>Net Labels</strong>
+      <div style={{ padding: "10px 16px", fontSize: 11, color: theme.textMuted, borderTop: `1px solid ${borderTop}` }}>
+        <strong style={{ display: "block", marginBottom: 4, color: heading }}>Net Labels</strong>
         No nets yet – connect components to create nets.
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "10px 16px", borderTop: "1px solid #e2e8f0" }}>
-      <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: "#475569" }}>
+    <div style={{ padding: "10px 16px", borderTop: `1px solid ${borderTop}` }}>
+      <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: heading }}>
         Net Labels
       </strong>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

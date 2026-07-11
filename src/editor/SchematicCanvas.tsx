@@ -30,6 +30,7 @@ import { NetLabelsPanel } from "./NetLabelsPanel.js";
 import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
 import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
@@ -84,12 +85,16 @@ function CanvasInner() {
     setDockTab, autoProbeCurrent,
   } = useUIStore();
 
-  const darkMode = useUIStore((s) => s.darkMode);
+  const theme = useTheme();
   const { result, addProbeCandidates } = useSimulationStore();
   const addExpression = usePlotStore((s) => s.addExpression);
   // Non-selected wire color; matches WireEdge so drag-connected and hand-drawn
   // wires read the same in each theme.
-  const wireStroke = darkMode ? "#94a3b8" : "#1e293b";
+  const wireStroke = theme.wireStroke;
+  // On-canvas zoom/fit/lock controls, themed to sit on the dark canvas.
+  const canvasButton: React.CSSProperties = {
+    ...canvasBtn, background: theme.panelBg, color: theme.symPreview, border: `1px solid ${theme.border}`,
+  };
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
   const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean } | null>(null);
@@ -699,7 +704,7 @@ function CanvasInner() {
               style: { stroke: wireStroke, strokeWidth: 2 },
             }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color={darkMode ? "#334155" : "#cbd5e1"} />
+            <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color={theme.gridDot} />
           </ReactFlow>
 
           {/* Custom zoom/fit/lock buttons. React Flow's own <Controls> did not
@@ -709,11 +714,11 @@ function CanvasInner() {
             onPointerDown={(e) => e.stopPropagation()}
             style={{ position: "absolute", right: 12, bottom: 12, zIndex: 8, display: "flex", flexDirection: "column", gap: 6, touchAction: "manipulation" }}
           >
-            <button style={canvasBtn} title="Vergrößern" onClick={() => reactFlowInstance.zoomIn()}>+</button>
-            <button style={canvasBtn} title="Verkleinern" onClick={() => reactFlowInstance.zoomOut()}>−</button>
-            <button style={canvasBtn} title="Einpassen" onClick={() => reactFlowInstance.fitView({ padding: 0.3 })}>▣</button>
+            <button style={canvasButton} title="Vergrößern" onClick={() => reactFlowInstance.zoomIn()}>+</button>
+            <button style={canvasButton} title="Verkleinern" onClick={() => reactFlowInstance.zoomOut()}>−</button>
+            <button style={canvasButton} title="Einpassen" onClick={() => reactFlowInstance.fitView({ padding: 0.3 })}>▣</button>
             <button
-              style={{ ...canvasBtn, color: canvasLocked ? "#2563eb" : "#334155" }}
+              style={{ ...canvasButton, color: canvasLocked ? theme.accent : theme.symPreview }}
               title={canvasLocked ? "Ansicht entsperren" : "Ansicht sperren (kein Verschieben)"}
               onClick={() => setCanvasLocked((v) => !v)}
             >{canvasLocked ? "🔒" : "🔓"}</button>

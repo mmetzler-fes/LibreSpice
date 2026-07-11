@@ -4,6 +4,7 @@ import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopePlot } from "@simulation/OscilloscopePlot.js";
 import { LogPanel } from "@simulation/LogPanel.js";
 import { useUIStore, type DockTab } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 const TABS: { id: DockTab; label: string }[] = [
@@ -14,7 +15,8 @@ const TABS: { id: DockTab; label: string }[] = [
 ];
 
 export function DockPanel() {
-  const { dockOpen, dockHeight, dockTab, setDockHeight, setDockTab, toggleDock, darkMode } = useUIStore();
+  const { dockOpen, dockHeight, dockTab, setDockHeight, setDockTab, toggleDock } = useUIStore();
+  const theme = useTheme();
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const onResizeStart = useCallback(
@@ -39,8 +41,8 @@ export function DockPanel() {
       <div
         style={{
           flexShrink: 0,
-          borderTop: "1px solid #cbd5e1",
-          background: darkMode ? "#1e293b" : "#f1f5f9",
+          borderTop: `1px solid ${theme.border}`,
+          background: theme.panelBgAlt,
           display: "flex",
           alignItems: "center",
           padding: "0 8px",
@@ -55,9 +57,10 @@ export function DockPanel() {
             style={{
               padding: "2px 10px",
               fontSize: 11,
-              border: "1px solid #cbd5e1",
+              border: `1px solid ${theme.border}`,
               borderRadius: 3,
-              background: "#fff",
+              background: theme.inputBg,
+              color: theme.text,
               cursor: "pointer",
             }}
           >
@@ -84,7 +87,7 @@ export function DockPanel() {
           ...DRAG_TOUCH_ACTION,
           height: 5,
           cursor: "ns-resize",
-          background: darkMode ? "#334155" : "#cbd5e1",
+          background: theme.border,
           flexShrink: 0,
         }}
       />
@@ -94,9 +97,9 @@ export function DockPanel() {
           display: "flex",
           alignItems: "center",
           height: 30,
-          borderTop: "1px solid #cbd5e1",
-          borderBottom: "1px solid #cbd5e1",
-          background: darkMode ? "#1e293b" : "#f8fafc",
+          borderTop: `1px solid ${theme.border}`,
+          borderBottom: `1px solid ${theme.border}`,
+          background: theme.panelBgAlt,
           padding: "0 6px",
           flexShrink: 0,
         }}
@@ -128,7 +131,7 @@ export function DockPanel() {
         </button>
       </div>
       {/* Content */}
-      <div style={{ flex: 1, overflow: "hidden", background: darkMode ? "#0f172a" : "#fff" }}>
+      <div style={{ flex: 1, overflow: "hidden", background: theme.inputBg }}>
         {dockTab === "netlist" && <LiveNetlistPanel />}
         {dockTab === "simulation" && <SimulationPanel compact />}
         {dockTab === "waveform" && <OscilloscopePlot compact />}

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { getProbeCandidates, netLabel } from "@core/circuit/probeUtils.js";
 import { isParametricValue, parseValueInput, valueFieldText } from "@core/components/base/componentValue.js";
 
@@ -20,7 +21,7 @@ import { isParametricValue, parseValueInput, valueFieldText } from "@core/compon
 function ValueField({ value, onChange }: { value: string | number; onChange: (v: number | string) => void }) {
   const [text, setText] = useState(() => valueFieldText(value));
   const [focused, setFocused] = useState(false);
-  const { darkMode } = useUIStore();
+  const theme = useTheme();
   // Reflect external changes while not actively editing.
   useEffect(() => {
     if (!focused) setText(valueFieldText(value));
@@ -35,12 +36,12 @@ function ValueField({ value, onChange }: { value: string | number; onChange: (v:
 
   const dynFieldStyle: React.CSSProperties = {
     padding: "4px 6px",
-    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    border: `1px solid ${theme.border}`,
     borderRadius: 4,
     width: "100%",
     boxSizing: "border-box",
-    background: darkMode ? "#0f172a" : "#fff",
-    color: darkMode ? "#e2e8f0" : "#1e293b",
+    background: theme.inputBg,
+    color: theme.text,
   };
 
   return (
@@ -64,7 +65,8 @@ function ValueField({ value, onChange }: { value: string | number; onChange: (v:
 export function PropertiesPanel() {
   const { circuit, selectedComponentId, updateComponentProperty, propertyVersion } = useCircuitStore();
   const { addProbeCandidates } = useSimulationStore();
-  const { setDockTab, darkMode } = useUIStore();
+  const { setDockTab } = useUIStore();
+  const theme = useTheme();
   void propertyVersion;
 
   const component = selectedComponentId ? circuit.components.get(selectedComponentId) : null;
@@ -74,9 +76,9 @@ export function PropertiesPanel() {
       <aside
         style={{
           width: 220,
-          borderLeft: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`,
+          borderLeft: `1px solid ${theme.borderMuted}`,
           padding: 16,
-          background: darkMode ? "#1e293b" : "#fafafa",
+          background: theme.panelBg,
           fontSize: 12,
           color: "#94a3b8",
           display: "flex",
@@ -92,23 +94,23 @@ export function PropertiesPanel() {
   const properties = component.getProperties();
   const isGround = component.id.startsWith("ground_");
 
-  const dynBorder = darkMode ? "#334155" : "#e2e8f0";
+  const dynBorder = theme.borderMuted;
   const dynFieldStyle: React.CSSProperties = {
     padding: "4px 6px",
-    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    border: `1px solid ${theme.border}`,
     borderRadius: 4,
     width: "100%",
     boxSizing: "border-box",
-    background: darkMode ? "#0f172a" : "#fff",
-    color: darkMode ? "#e2e8f0" : "#1e293b",
+    background: theme.inputBg,
+    color: theme.text,
   };
   const dynProbeBtnStyle: React.CSSProperties = {
     padding: "5px 8px",
     fontSize: 11,
-    border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    border: `1px solid ${theme.border}`,
     borderRadius: 4,
-    background: darkMode ? "#0f172a" : "#fff",
-    color: darkMode ? "#e2e8f0" : "#1e293b",
+    background: theme.inputBg,
+    color: theme.text,
     cursor: "pointer",
     textAlign: "left",
   };
@@ -138,10 +140,10 @@ export function PropertiesPanel() {
         width: 220,
         borderLeft: `1px solid ${dynBorder}`,
         padding: 16,
-        background: darkMode ? "#1e293b" : "#fafafa",
+        background: theme.panelBg,
         overflowY: "auto",
         fontSize: 12,
-        color: darkMode ? "#e2e8f0" : "#1e293b",
+        color: theme.text,
       }}
     >
       <h3 style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 600 }}>
@@ -150,7 +152,7 @@ export function PropertiesPanel() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {properties.map((prop) => (
           <label key={prop.key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
+            <span style={{ color: theme.textMuted, fontWeight: 500 }}>
               {prop.label}
               {prop.unit && <span style={{ color: "#94a3b8" }}> ({prop.unit})</span>}
             </span>
@@ -160,10 +162,10 @@ export function PropertiesPanel() {
                 onChange={(e) => updateComponentProperty(component.id, prop.key, e.target.value)}
                 style={{
                   padding: "4px 6px",
-                  border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+                  border: `1px solid ${theme.border}`,
                   borderRadius: 4,
-                  background: darkMode ? "#0f172a" : "#fff",
-                  color: darkMode ? "#e2e8f0" : "#1e293b",
+                  background: theme.inputBg,
+                  color: theme.text,
                 }}
               >
                 {prop.options.map((opt) => (
@@ -191,7 +193,7 @@ export function PropertiesPanel() {
 
       {!isGround && (
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${dynBorder}` }}>
-          <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: darkMode ? "#94a3b8" : "#475569" }}>Probes</strong>
+          <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: theme.heading }}>Probes</strong>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <button
               type="button"

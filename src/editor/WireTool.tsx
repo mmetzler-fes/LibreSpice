@@ -9,6 +9,7 @@ import {
 } from "@xyflow/react";
 import { getNodePins, GRID, type NodePin } from "./pinGeometry.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { DRAG_TOUCH_ACTION, isDragPointer } from "./pointerDrag.js";
 
@@ -79,7 +80,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  const darkMode = useUIStore((s) => s.darkMode);
+  const theme = useTheme();
 
   // Exact pin centre for an endpoint. React Flow anchors an edge at the handle's
   // Position edge (e.g. the *top* of a Position.Top handle circle), which shows
@@ -117,7 +118,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         id={id}
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke: selected ? "#2563eb" : darkMode ? "#94a3b8" : "#1e293b", strokeWidth: 2 }}
+        style={{ stroke: selected ? theme.accent : theme.wireStroke, strokeWidth: 2 }}
       />
       {selected && netLabel && mid && (
         <g transform={`translate(${mid.x}, ${mid.y})`} style={{ pointerEvents: "none" }}>
@@ -178,7 +179,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   const pointsRef = useRef<FlowPoint[]>([]);
 
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  const darkMode = useUIStore((s) => s.darkMode);
+  const theme = useTheme();
   const pins = useMemo(() => nodes.flatMap((n) => getNodePins(n, symbolNorm)), [nodes, symbolNorm]);
 
   const rect = wrapperRef.current?.getBoundingClientRect();
@@ -419,7 +420,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
         )}
         {/* Wire being drawn */}
         {previewPath && (
-          <path d={previewPath} fill="none" stroke={darkMode ? "#94a3b8" : "#1e293b"} strokeWidth={2} strokeDasharray="6 3" />
+          <path d={previewPath} fill="none" stroke={theme.wireStroke} strokeWidth={2} strokeDasharray="6 3" />
         )}
         {/* Snap indicators */}
         {hoverTarget?.kind === "pin" && cursorLocal && (

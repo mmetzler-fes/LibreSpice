@@ -4,6 +4,7 @@ import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopeView } from "@simulation/OscilloscopeView.js";
 import { LiveNetlistPanel } from "@editor/LiveNetlistPanel.js";
 import { useUIStore, type ActiveTab } from "@store/uiStore.js";
+import { useTheme } from "./theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { getSnapshotFromUrl, loadFromLocalStorage } from "@store/persistence.js";
 import { useAutosave } from "@store/useAutosave.js";
@@ -17,6 +18,7 @@ const TABS: { id: ActiveTab; label: string }[] = [
 
 export function App() {
   const { activeTab, setActiveTab, toggleDarkMode, darkMode } = useUIStore();
+  const theme = useTheme();
   const loadFromSnapshot = useCircuitStore((s) => s.loadFromSnapshot);
   const initialized = useRef(false);
 
@@ -49,8 +51,8 @@ export function App() {
         flexDirection: "column",
         height: "var(--app-height, 100vh)",
         fontFamily: "system-ui, sans-serif",
-        background: darkMode ? "#0f172a" : "#fff",
-        color: darkMode ? "#e2e8f0" : "#1e293b",
+        background: theme.inputBg,
+        color: theme.text,
       }}
     >
       {/* Menu bar */}
@@ -58,11 +60,11 @@ export function App() {
         style={{
           display: "flex",
           alignItems: "center",
-          borderBottom: "1px solid #cbd5e1",
+          borderBottom: `1px solid ${theme.border}`,
           padding: "0 12px",
           height: 32,
           gap: 0,
-          background: darkMode ? "#1e293b" : "#e2e8f0",
+          background: theme.headerBg,
           flexShrink: 0,
         }}
       >
@@ -118,12 +120,13 @@ export function App() {
 }
 
 function NetlistView() {
+  const theme = useTheme();
   return (
     <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
       <div style={{ flex: 1, overflow: "hidden" }}>
         <LiveNetlistPanel />
       </div>
-      <div style={{ width: 280, borderLeft: "1px solid #e2e8f0", overflow: "auto" }}>
+      <div style={{ width: 280, borderLeft: `1px solid ${theme.borderMuted}`, overflow: "auto" }}>
         <SimulationPanel />
       </div>
     </div>

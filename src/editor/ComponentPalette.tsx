@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CATEGORIES, COMPONENT_DEFINITIONS, type ComponentDefinition } from "./componentDefinitions.js";
 import { useLibraryStore } from "@store/libraryStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { placementForEntry } from "./libraryPlacement.js";
 import { SymbolPreview } from "./SymbolPreview.js";
 
@@ -13,29 +14,8 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
   const [search, setSearch] = useState("");
   const [openCategory, setOpenCategory] = useState<string | null>("Passives");
   const { entries, removeEntry, setScope } = useLibraryStore();
-  const { toggleLibraryImport, startPlacing, startPlacingLibrary, pendingPlaceType, pendingLibraryPlacement, darkMode } = useUIStore();
-
-  // Light values are the originals; dark keeps the palette readable on the dark
-  // canvas theme (see themeColors in ComponentNode for the matching scheme).
-  const pal = darkMode
-    ? {
-        panelBg: "#1e293b", border: "#334155",
-        inputBg: "#0f172a", inputBorder: "#475569", inputText: "#e2e8f0",
-        importBg: "#1e3a5f", importBorder: "#2563eb", importText: "#93c5fd",
-        headerBg: "#334155", headerBorder: "#475569",
-        itemBorder: "#334155", itemActive: "#1e3a5f",
-        subText: "#94a3b8", removeText: "#64748b", symColor: "#cbd5e1",
-        localBg: "#14532d", localText: "#86efac", tempBg: "#713f12", tempText: "#fde68a",
-      }
-    : {
-        panelBg: "#fafafa", border: "#e2e8f0",
-        inputBg: "#fff", inputBorder: "#cbd5e1", inputText: "#1e293b",
-        importBg: "#eff6ff", importBorder: "#2563eb", importText: "#1d4ed8",
-        headerBg: "#e2e8f0", headerBorder: "#cbd5e1",
-        itemBorder: "#f1f5f9", itemActive: "#dbeafe",
-        subText: "#64748b", removeText: "#94a3b8", symColor: "#334155",
-        localBg: "#dcfce7", localText: "#166534", tempBg: "#fef9c3", tempText: "#854d0e",
-      };
+  const { toggleLibraryImport, startPlacing, startPlacingLibrary, pendingPlaceType, pendingLibraryPlacement } = useUIStore();
+  const pal = useTheme();
 
   const filtered = COMPONENT_DEFINITIONS.filter(
     (d) =>
@@ -47,7 +27,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
     <aside
       style={{
         width: 200,
-        borderRight: `1px solid ${pal.border}`,
+        borderRight: `1px solid ${pal.borderMuted}`,
         display: "flex",
         flexDirection: "column",
         background: pal.panelBg,
@@ -63,12 +43,12 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
           style={{
             width: "100%",
             padding: "6px 8px",
-            border: `1px solid ${pal.inputBorder}`,
+            border: `1px solid ${pal.border}`,
             borderRadius: 4,
             fontSize: 12,
             boxSizing: "border-box",
             background: pal.inputBg,
-            color: pal.inputText,
+            color: pal.text,
           }}
         />
         <button
@@ -76,7 +56,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
           title="Paste an LTSpice .model or .subckt"
           style={{
             width: "100%", marginTop: 6, padding: "6px 8px", fontSize: 12, fontWeight: 600,
-            border: `1px solid ${pal.importBorder}`, borderRadius: 4, background: pal.importBg, color: pal.importText,
+            border: `1px solid ${pal.accent}`, borderRadius: 4, background: pal.importBg, color: pal.importText,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}
         >
@@ -96,10 +76,10 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                   width: "100%",
                   textAlign: "left",
                   padding: "6px 12px",
-                  background: pal.headerBg,
+                  background: pal.categoryBg,
                   color: "inherit",
                   border: "none",
-                  borderBottom: `1px solid ${pal.headerBorder}`,
+                  borderBottom: `1px solid ${pal.border}`,
                   cursor: "pointer",
                   fontWeight: 600,
                   fontSize: 12,
@@ -122,15 +102,15 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                       padding: "6px 16px",
                       cursor: "grab",
                       fontSize: 12,
-                      borderBottom: `1px solid ${pal.itemBorder}`,
+                      borderBottom: `1px solid ${pal.rowBorder}`,
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
                       background: pendingPlaceType === def.type ? pal.itemActive : "transparent",
                     }}
                   >
-                    <SymbolPreview type={def.type} size={30} strokeWidth={1.1} color={pal.symColor} />
-                    <span style={{ fontFamily: "monospace", fontSize: 10, color: pal.subText, width: 14 }}>
+                    <SymbolPreview type={def.type} size={30} strokeWidth={1.1} color={pal.symPreview} />
+                    <span style={{ fontFamily: "monospace", fontSize: 10, color: pal.textMuted, width: 14 }}>
                       {def.defaultLabel[0]}
                     </span>
                     {def.label}
@@ -143,7 +123,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
         {/* Imported LTSpice library */}
         {entries.length > 0 && (
           <div>
-            <div style={{ padding: "6px 12px", background: pal.headerBg, borderBottom: `1px solid ${pal.headerBorder}`, fontWeight: 600, fontSize: 12 }}>
+            <div style={{ padding: "6px 12px", background: pal.categoryBg, borderBottom: `1px solid ${pal.border}`, fontWeight: 600, fontSize: 12 }}>
               Imported Library
             </div>
             {entries
@@ -163,7 +143,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                     style={{
                       padding: "6px 12px",
                       fontSize: 12,
-                      borderBottom: `1px solid ${pal.itemBorder}`,
+                      borderBottom: `1px solid ${pal.rowBorder}`,
                       display: "flex",
                       alignItems: "center",
                       gap: 6,
@@ -172,7 +152,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                       opacity: placeable ? 1 : 0.6,
                     }}
                   >
-                    <span style={{ fontFamily: "monospace", fontSize: 9, color: pal.subText, width: 34, flexShrink: 0 }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 9, color: pal.textMuted, width: 34, flexShrink: 0 }}>
                       {entry.kind === "subckt" ? "SUB" : entry.type}
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -192,7 +172,7 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                     <span
                       onClick={(ev) => { ev.stopPropagation(); removeEntry(entry.name); }}
                       title="Remove"
-                      style={{ color: pal.removeText, cursor: "pointer", fontSize: 14, flexShrink: 0 }}
+                      style={{ color: pal.textMuted, cursor: "pointer", fontSize: 14, flexShrink: 0 }}
                     >×</span>
                   </div>
                 );

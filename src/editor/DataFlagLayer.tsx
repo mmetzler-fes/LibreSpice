@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
+import { useTheme } from "../theme.js";
 import { formatDataFlag, analysisKind, type DataFlag } from "@core/circuit/dataExpr.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
@@ -17,6 +18,7 @@ export function DataFlagLayer() {
   const removeDataFlag = useCircuitStore((s) => s.removeDataFlag);
   const moveDataFlag = useCircuitStore((s) => s.moveDataFlag);
   const result = useSimulationStore((s) => s.result);
+  const theme = useTheme();
   // Re-render when net labels change so V(net) expressions stay resolvable.
   useCircuitStore((s) => s.netVersion);
 
@@ -54,8 +56,8 @@ export function DataFlagLayer() {
               position: "absolute", left, top, transform: "translate(-50%, -50%)",
               pointerEvents: "auto", display: "flex", alignItems: "stretch", gap: 2,
               padding: "2px 4px 2px 2px", fontFamily: "monospace", fontSize: 11, lineHeight: "14px",
-              color: "#0f172a", background: "rgba(255,255,255,0.92)",
-              border: "1px solid #93c5fd", borderRadius: 4, whiteSpace: "nowrap",
+              color: theme.textStrong, background: theme.flagBg,
+              border: `1px solid ${theme.flagBorder}`, borderRadius: 4, whiteSpace: "nowrap",
               boxShadow: "0 1px 3px #0000001f",
             }}
           >
@@ -66,13 +68,13 @@ export function DataFlagLayer() {
                 ...DRAG_TOUCH_ACTION,
                 display: "flex", alignItems: "center", padding: "0 3px", marginRight: 1,
                 color: "#94a3b8", cursor: "move", userSelect: "none",
-                borderRight: "1px solid #e2e8f0", letterSpacing: -1,
+                borderRight: `1px solid ${theme.borderMuted}`, letterSpacing: -1,
               }}
             >
               ⠿
             </span>
             <span style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontWeight: 600, color: value == null ? "#94a3b8" : "#1d4ed8" }}>
+              <span style={{ fontWeight: 600, color: value == null ? "#94a3b8" : theme.flagValue }}>
                 {value ?? "?"}{value != null && rms ? " (eff.)" : ""}
               </span>
               <span style={{ fontSize: 9, color: "#64748b" }}>{df.expr}</span>

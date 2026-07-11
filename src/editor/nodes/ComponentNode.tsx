@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import type { AsySymbol } from "@sym/asyParser.js";
 import {
@@ -135,48 +136,6 @@ function MovableLabel({
   );
 }
 
-/**
- * Non-selected drawing colors for the two themes. The light values are the
- * originals; dark flips strokes/text to light tints and swaps the white symbol
- * fills for dark ones so parts actually read as dark-mode. Selected elements
- * stay blue (#2563eb / #1d4ed8) in both themes and are handled at each call.
- */
-function themeColors(dark: boolean) {
-  return dark
-    ? {
-        asyStroke: "#e2e8f0", // .asy + symbol strokes (currentColor)
-        label: "#cbd5e1",
-        value: "#94a3b8",
-        boxFill: "#1e293b",
-        boxFillSel: "#1e3a5f",
-        subStroke: "#94a3b8",
-        netlabelColor: "#cbd5e1",
-        netTagBg: "#334155",
-        netTagBgSel: "#1e3a5f",
-        netTagText: "#e2e8f0",
-        netTagBorder: "#475569",
-        badgeText: "#93c5fd",
-        badgeBg: "rgba(15,23,42,0.85)",
-        badgeBorder: "#1e40af",
-      }
-    : {
-        asyStroke: "#0f172a",
-        label: "#374151",
-        value: "#6b7280",
-        boxFill: "#f8fafc",
-        boxFillSel: "#eff6ff",
-        subStroke: "#475569",
-        netlabelColor: "#334155",
-        netTagBg: "#e2e8f0",
-        netTagBgSel: "#dbeafe",
-        netTagText: "#0f172a",
-        netTagBorder: "#94a3b8",
-        badgeText: "#1d4ed8",
-        badgeBg: "rgba(255,255,255,0.85)",
-        badgeBorder: "#bfdbfe",
-      };
-}
-
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   resistor: ResistorSymbol,
   capacitor: CapacitorSymbol,
@@ -286,8 +245,8 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
   const rowGap = 22;
   const height = rows * rowGap + 24;
   const width = 96;
-  const pal = themeColors(useUIStore((s) => s.darkMode));
-  const color = selected ? "#2563eb" : pal.subStroke;
+  const pal = useTheme();
+  const color = selected ? "#2563eb" : pal.heading;
 
   const rowTop = (index: number) => 18 + index * rowGap;
 
@@ -366,7 +325,7 @@ function LibrarySymbolNode({
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
   const pins = data.pins ?? [];
-  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const pal = useTheme();
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   const bounds = symbolBounds(sym);
@@ -394,7 +353,7 @@ function LibrarySymbolNode({
         width={NODE_SIZE}
         height={NODE_SIZE}
         style={{
-          color: selected ? "#2563eb" : pal.asyStroke,
+          color: selected ? "#2563eb" : pal.symStroke,
           overflow: "visible",
           transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
@@ -426,7 +385,7 @@ function PinNetLabels({ nodeId, data }: { nodeId: string; data: ComponentNodeDat
   // Re-render when net assignments change (bumped on connect/rebuild).
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const pal = useTheme();
 
   const comp = circuit.components.get(nodeId);
   if (!comp) return null;
@@ -484,7 +443,7 @@ function AsyComponentNode({
 }) {
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
-  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const pal = useTheme();
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
@@ -512,7 +471,7 @@ function AsyComponentNode({
         width={NODE_SIZE}
         height={NODE_SIZE}
         style={{
-          color: selected ? "#2563eb" : pal.asyStroke,
+          color: selected ? "#2563eb" : pal.symStroke,
           overflow: "visible",
           transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
           transition: "transform 0.15s ease",
@@ -554,8 +513,8 @@ function AsyComponentNode({
 function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: boolean }) {
   const c = NODE_SIZE / 2;
   const name = data.label || "NET";
-  const pal = themeColors(useUIStore((s) => s.darkMode));
-  const color = selected ? "#2563eb" : pal.netlabelColor;
+  const pal = useTheme();
+  const color = selected ? "#2563eb" : pal.netLabelStroke;
   // "connector" = draw the direction arrow (joins distant parts on one net
   // without a wire); default = a plain net label that just names a wire.
   const isConnector = !!data.connector;
@@ -597,7 +556,7 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
 
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  const pal = themeColors(useUIStore((s) => s.darkMode));
+  const pal = useTheme();
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "netlabel") {
     return <NetLabelNode data={nodeData} selected={selected} />;

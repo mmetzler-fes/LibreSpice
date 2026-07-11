@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore, type EditorMode } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { applyPltText } from "@simulation/pltApply.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import { DirectiveModal } from "./DirectiveModal.js";
@@ -49,7 +50,7 @@ interface TBtnProps {
   children: React.ReactNode;
 }
 function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
-  const { darkMode } = useUIStore();
+  const theme = useTheme();
   return (
     <button
       title={title}
@@ -64,8 +65,8 @@ function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
         border: "1px solid",
         borderColor: active ? "#2563eb" : "transparent",
         borderRadius: 3,
-        background: active ? (darkMode ? "#1e3a5f" : "#dbeafe") : "transparent",
-        color: active ? (darkMode ? "#60a5fa" : "#1d4ed8") : disabled ? "#94a3b8" : "inherit",
+        background: active ? (theme.itemActive) : "transparent",
+        color: active ? (theme.flagValue) : disabled ? "#94a3b8" : "inherit",
         cursor: disabled ? "not-allowed" : "pointer",
         padding: 0,
       }}
@@ -76,9 +77,9 @@ function TBtn({ title, active, disabled, onClick, children }: TBtnProps) {
 }
 
 function Divider() {
-  const { darkMode } = useUIStore();
+  const theme = useTheme();
   return (
-    <div style={{ width: 1, height: 24, background: darkMode ? "#334155" : "#cbd5e1", margin: "0 4px", flexShrink: 0 }} />
+    <div style={{ width: 1, height: 24, background: theme.border, margin: "0 4px", flexShrink: 0 }} />
   );
 }
 
@@ -92,7 +93,8 @@ export function Toolbar() {
     circuitName, setCircuitName, dataFlags,
     showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, darkMode } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
+  const theme = useTheme();
   const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
 
   // When an opened folder holds several .asc files, let the user pick one.
@@ -313,9 +315,9 @@ export function Toolbar() {
         height: 36,
         padding: "0 6px",
         gap: 2,
-        background: darkMode ? "#1e293b" : "#f8fafc",
-        borderBottom: `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`,
-        color: darkMode ? "#e2e8f0" : "#1e293b",
+        background: theme.panelBgAlt,
+        borderBottom: `1px solid ${theme.border}`,
+        color: theme.text,
         flexShrink: 0,
         overflowX: "auto",
         userSelect: "none",
@@ -373,10 +375,10 @@ export function Toolbar() {
         placeholder="Diagram name"
         style={{
           height: 26, width: 140, fontSize: 12, padding: "0 8px",
-          border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+          border: `1px solid ${theme.border}`,
           borderRadius: 4,
-          background: darkMode ? "#0f172a" : "#fff",
-          color: darkMode ? "#e2e8f0" : "#334155",
+          background: theme.inputBg,
+          color: theme.icon,
         }}
       />
 
@@ -448,10 +450,10 @@ export function Toolbar() {
         onChange={(e) => setSymbolNorm(e.target.value as typeof symbolNorm)}
         style={{
           height: 28, fontSize: 12,
-          border: `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+          border: `1px solid ${theme.border}`,
           borderRadius: 4,
-          background: darkMode ? "#0f172a" : "#fff",
-          color: darkMode ? "#e2e8f0" : "#334155",
+          background: theme.inputBg,
+          color: theme.icon,
           padding: "0 4px", cursor: "pointer",
         }}
       >
@@ -549,8 +551,8 @@ export function Toolbar() {
           onClick={(e) => { if (e.target === e.currentTarget) setFolderPick(null); }}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
         >
-          <div style={{ background: darkMode ? "#1e293b" : "#fff", border: `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`, borderRadius: 8, width: 380, maxWidth: "90vw", maxHeight: "70vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 50px rgba(0,0,0,0.5)" }}>
-            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`, fontSize: 14, fontWeight: 600, color: darkMode ? "#e2e8f0" : "#1e293b" }}>
+          <div style={{ background: theme.modalBg, border: `1px solid ${theme.border}`, borderRadius: 8, width: 380, maxWidth: "90vw", maxHeight: "70vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 50px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${theme.borderMuted}`, fontSize: 14, fontWeight: 600, color: theme.text }}>
               Schaltung wählen
             </div>
             <div style={{ overflowY: "auto", padding: 6 }}>
@@ -558,8 +560,8 @@ export function Toolbar() {
                 <button
                   key={f.name}
                   onClick={() => openAscFromFolder(folderPick.dir, f.name, f.handle)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "transparent", color: darkMode ? "#e2e8f0" : "#1e293b", cursor: "pointer", fontSize: 13, borderRadius: 4, fontFamily: "monospace" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? "#334155" : "#f1f5f9")}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "transparent", color: theme.text, cursor: "pointer", fontSize: 13, borderRadius: 4, fontFamily: "monospace" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = theme.itemHover)}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   📄 {f.name}

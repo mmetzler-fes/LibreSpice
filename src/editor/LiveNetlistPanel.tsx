@@ -1,13 +1,13 @@
 import { useCircuitStore } from "@store/circuitStore.js";
-import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 
 export function LiveNetlistPanel() {
   const { netlist, spiceDirectives, setSpiceDirectives } = useCircuitStore();
-  const { darkMode } = useUIStore();
+  const theme = useTheme();
 
-  const bg = darkMode ? "#0f172a" : "#1e293b";
-  const fg = darkMode ? "#e2e8f0" : "#e2e8f0";
-  const border = darkMode ? "#334155" : "#334155";
+  const bg = theme.codeBg;
+  const fg = theme.codeText;
+  const border = theme.codeBorder;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -31,7 +31,7 @@ export function LiveNetlistPanel() {
         </pre>
       </div>
       <div style={{ padding: "8px 8px 0", flexShrink: 0 }}>
-        <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, display: "block", marginBottom: 4 }}>
           Custom SPICE Directives
         </label>
         <textarea
@@ -45,11 +45,11 @@ export function LiveNetlistPanel() {
             fontFamily: "'Cascadia Code', 'Fira Code', monospace",
             fontSize: 11,
             padding: 8,
-            border: "1px solid #cbd5e1",
+            border: `1px solid ${theme.border}`,
             borderRadius: 4,
             resize: "vertical",
-            background: darkMode ? "#1e293b" : "#fff",
-            color: darkMode ? "#e2e8f0" : "#1e293b",
+            background: theme.modalBg,
+            color: theme.text,
           }}
         />
         <p style={{ margin: "4px 0 8px", fontSize: 10, color: "#94a3b8" }}>

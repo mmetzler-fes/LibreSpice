@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useTheme } from "../theme.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_LINE_HEIGHT,
@@ -21,7 +22,7 @@ export function DirectiveBox() {
   const pos = useCircuitStore((s) => s.directivesPos);
   const moveBox = useCircuitStore((s) => s.moveDirectivesBox);
   const toggleDirectiveModal = useUIStore((s) => s.toggleDirectiveModal);
-  const darkMode = useUIStore((s) => s.darkMode);
+  const theme = useTheme();
 
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; zoom: number } | null>(null);
 
@@ -63,9 +64,9 @@ export function DirectiveBox() {
           lineHeight: `${DIRECTIVE_LINE_HEIGHT}px`,
           padding: `${DIRECTIVE_PADDING_Y}px ${DIRECTIVE_PADDING_X}px`,
           borderRadius: DIRECTIVE_RADIUS, whiteSpace: "pre",
-          color: darkMode ? "#e2e8f0" : "#1e293b",
-          background: darkMode ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.9)",
-          border: `${DIRECTIVE_BORDER}px solid ${darkMode ? "#334155" : "#94a3b8"}`,
+          color: theme.text,
+          background: theme.directiveBg,
+          border: `${DIRECTIVE_BORDER}px solid ${theme.directiveBorder}`,
         }}
       >
         {lines.map((l, i) => (
