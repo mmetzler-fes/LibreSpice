@@ -68,6 +68,21 @@ export abstract class SpiceComponent {
     return netId ?? "0";
   }
 
+  /**
+   * Reference designator with the SPICE device letter guaranteed. ngspice keys a
+   * device off the first letter of its name (R=resistor, C, L, V, I, D, Q, M,
+   * X…), so a component the user named against convention — e.g. a resistor
+   * labelled "U1" — must still emit a line starting with its own letter, or
+   * ngspice mis-parses it (here "U…" as a lossy/URC line) and the whole
+   * simulation fails. The letter is prepended only when the label doesn't
+   * already start with it, so conventional names (R1, C2, …) are unchanged.
+   */
+  protected spiceRef(prefix: string): string {
+    return this.label.toUpperCase().startsWith(prefix.toUpperCase())
+      ? this.label
+      : `${prefix}${this.label}`;
+  }
+
   /** Netlist value token: the raw expression if set, else the numeric value. */
   protected fmtVal(numeric: number | string): string {
     return this.valueExpr ?? String(numeric);

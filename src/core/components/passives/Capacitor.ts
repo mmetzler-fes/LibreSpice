@@ -20,7 +20,7 @@ export class Capacitor extends SpiceComponent {
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${p} ${n} ${this.fmtVal(this.capacitance)}`;
+    return `${this.spiceRef("C")} ${p} ${n} ${this.fmtVal(this.capacitance)}`;
   }
 
   getProperties(): Property[] {

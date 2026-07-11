@@ -25,7 +25,7 @@ export class Diode extends Semiconductor {
   getNetlistLine(): string {
     const a = this.nodeOrGnd(this.ports[0].netId);
     const k = this.nodeOrGnd(this.ports[1].netId);
-    return `${this.label} ${a} ${k} ${this.model}`;
+    return `${this.spiceRef("D")} ${a} ${k} ${this.model}`;
   }
 
   /** Generic silicon-diode fallback (1N4148-like) so a bare diode simulates. */
@@ -134,7 +134,7 @@ export class BJT extends Semiconductor {
     const c = this.nodeOrGnd(this.ports[0].netId);
     const b = this.nodeOrGnd(this.ports[1].netId);
     const e = this.nodeOrGnd(this.ports[2].netId);
-    return `${this.label} ${c} ${b} ${e} ${this.model}`;
+    return `${this.spiceRef("Q")} ${c} ${b} ${e} ${this.model}`;
   }
 
   /** Generic BJT fallback matching the selected polarity. */
@@ -189,7 +189,7 @@ export class MOSFET extends Semiconductor {
     const g = this.nodeOrGnd(this.ports[1].netId);
     const s = this.nodeOrGnd(this.ports[2].netId);
     const b = this.nodeOrGnd(this.ports[3].netId);
-    return `${this.label} ${d} ${g} ${s} ${b} ${this.model}`;
+    return `${this.spiceRef("M")} ${d} ${g} ${s} ${b} ${this.model}`;
   }
 
   /** Generic MOSFET fallback matching the selected polarity. */
