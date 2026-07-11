@@ -168,6 +168,23 @@ const HANDLE_STYLE = {
   zIndex: 10,
 };
 
+/** Props spread onto a connector (Handle) for the tap-to-rotate gesture. */
+type TapProps = { onClick?: (e: React.MouseEvent) => void };
+
+/**
+ * Connector tap-to-rotate: in *select* mode, a plain tap/click on a component's
+ * connector rotates it 90° left — a touch/pen-friendly alternative to Ctrl+R,
+ * since the component body is used for dragging. A drag from a connector (to draw
+ * a wire) fires no click, so wiring is unaffected. Outside select mode it returns
+ * empty props, leaving the connector's normal behavior intact.
+ */
+function useRotateTapProps(nodeId: string): TapProps {
+  const editorMode = useUIStore((s) => s.editorMode);
+  const rotateComponent = useCircuitStore((s) => s.rotateComponent);
+  if (editorMode !== "select") return {};
+  return { onClick: (e) => { e.stopPropagation(); rotateComponent(nodeId); } };
+}
+
 const TWO_PORT_TYPES: ComponentType[] = [
   "resistor", "capacitor", "capacitor_polarized", "inductor", "diode", "led",
   "vsource", "isource", "sinesource", "pulsesource",
@@ -182,7 +199,7 @@ const SOURCE_SYMBOLS: Record<string, React.FC> = {
   Pulse: PulseSourceSymbol,
 };
 
-function getHandles(type: ComponentType, mirrored = false) {
+function getHandles(type: ComponentType, mirrored = false, tap: TapProps = {}) {
   // Ground: one source handle at the top (ConnectionMode.Loose allows source↔source)
   if (type === "ground") {
     // Dock at the top of the vertical line (symbol y=-20 → local 20 in the 80px box).
@@ -192,6 +209,7 @@ function getHandles(type: ComponentType, mirrored = false) {
         position={Position.Top}
         id="gnd"
         style={{ ...HANDLE_STYLE, left: 40, top: 20, transform: "translate(-50%, -50%)" }}
+        {...tap}
       />
     );
   }
@@ -199,16 +217,16 @@ function getHandles(type: ComponentType, mirrored = false) {
     // Dock at the terminal tips (symbol terminals at y -30/+30 → local 10/70).
     return (
       <>
-        <Handle type="source" position={Position.Top} id="p" style={{ ...HANDLE_STYLE, left: 40, top: 10, transform: "translate(-50%, -50%)" }} />
-        <Handle type="source" position={Position.Bottom} id="n" style={{ ...HANDLE_STYLE, left: 40, top: 70, transform: "translate(-50%, -50%)" }} />
+        <Handle type="source" position={Position.Top} id="p" style={{ ...HANDLE_STYLE, left: 40, top: 10, transform: "translate(-50%, -50%)" }} {...tap} />
+        <Handle type="source" position={Position.Bottom} id="n" style={{ ...HANDLE_STYLE, left: 40, top: 70, transform: "translate(-50%, -50%)" }} {...tap} />
       </>
     );
   }
   if (TWO_PORT_TYPES.includes(type)) {
     return (
       <>
-        <Handle type="source" position={Position.Top} id="p" style={HANDLE_STYLE} />
-        <Handle type="source" position={Position.Bottom} id="n" style={HANDLE_STYLE} />
+        <Handle type="source" position={Position.Top} id="p" style={HANDLE_STYLE} {...tap} />
+        <Handle type="source" position={Position.Bottom} id="n" style={HANDLE_STYLE} {...tap} />
       </>
     );
   }
@@ -222,9 +240,9 @@ function getHandles(type: ComponentType, mirrored = false) {
     // the handle tracks the flipped symbol.
     return (
       <>
-        <Handle type="source" position={Position.Top} id={top} style={HANDLE_STYLE} />
-        <Handle type="source" position={mirrored ? Position.Right : Position.Left} id={left} style={HANDLE_STYLE} />
-        <Handle type="source" position={Position.Bottom} id={bottom} style={HANDLE_STYLE} />
+        <Handle type="source" position={Position.Top} id={top} style={HANDLE_STYLE} {...tap} />
+        <Handle type="source" position={mirrored ? Position.Right : Position.Left} id={left} style={HANDLE_STYLE} {...tap} />
+        <Handle type="source" position={Position.Bottom} id={bottom} style={HANDLE_STYLE} {...tap} />
       </>
     );
   }
@@ -246,6 +264,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
   const height = rows * rowGap + 24;
   const width = 96;
   const pal = useTheme();
+  const tap = useRotateTapProps(nodeId);
   const color = selected ? "#2563eb" : pal.heading;
 
   const rowTop = (index: number) => 18 + index * rowGap;
@@ -259,6 +278,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           position={Position.Left}
           id={name}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
+          {...tap}
         />
       ))}
       {right.map((name, i) => (
@@ -268,6 +288,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           position={Position.Right}
           id={name}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
+          {...tap}
         />
       ))}
       <svg width={width} height={height} style={{ overflow: "visible", color }}>
@@ -326,6 +347,7 @@ function LibrarySymbolNode({
   const mirrored = !!data.mirrored;
   const pins = data.pins ?? [];
   const pal = useTheme();
+  const tap = useRotateTapProps(nodeId);
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   const bounds = symbolBounds(sym);
@@ -346,6 +368,7 @@ function LibrarySymbolNode({
             position={Position.Top}
             id={handleId}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
+            {...tap}
           />
         );
       })}
@@ -444,6 +467,7 @@ function AsyComponentNode({
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
   const pal = useTheme();
+  const tap = useRotateTapProps(nodeId);
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
@@ -464,6 +488,7 @@ function AsyComponentNode({
             position={Position.Top}
             id={handleForOrder(data.componentType, pin.order)}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
+            {...tap}
           />
         );
       })}
@@ -510,10 +535,11 @@ function AsyComponentNode({
  * Net-label terminal (LTSpice `FLAG name`): a single connection point with the
  * net name in a tag. Placing two with the same name connects those nets.
  */
-function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: boolean }) {
+function NetLabelNode({ nodeId, data, selected }: { nodeId: string; data: ComponentNodeData; selected?: boolean }) {
   const c = NODE_SIZE / 2;
   const name = data.label || "NET";
   const pal = useTheme();
+  const tap = useRotateTapProps(nodeId);
   const color = selected ? "#2563eb" : pal.netLabelStroke;
   // "connector" = draw the direction arrow (joins distant parts on one net
   // without a wire); default = a plain net label that just names a wire.
@@ -529,7 +555,7 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
       draggable={false}
       style={{ ...NO_NATIVE_DRAG, position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}
     >
-      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
+      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} {...tap} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
         {isConnector && (
           <>
@@ -557,9 +583,10 @@ function NetLabelNode({ data, selected }: { data: ComponentNodeData; selected?: 
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const pal = useTheme();
+  const tap = useRotateTapProps(id);
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "netlabel") {
-    return <NetLabelNode data={nodeData} selected={selected} />;
+    return <NetLabelNode nodeId={id} data={nodeData} selected={selected} />;
   }
   if (nodeData.componentType === "subcircuit") {
     const libSym = nodeData.symbolName ? symbolByName(nodeData.symbolName, symbolNorm) : undefined;
@@ -594,7 +621,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       }}
     >
       {selected && <PinNetLabels nodeId={id} data={nodeData} />}
-      {getHandles(nodeData.componentType, mirrored)}
+      {getHandles(nodeData.componentType, mirrored, tap)}
       <svg
         width="80"
         height="80"

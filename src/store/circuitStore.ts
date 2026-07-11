@@ -74,6 +74,8 @@ interface CircuitActions {
   canUndo: () => boolean;
   canRedo: () => boolean;
   rotateSelected: () => void;
+  /** Rotate a specific component 90° left (used by the on-canvas connector tap). */
+  rotateComponent: (id: string) => void;
   mirrorSelected: () => void;
   deleteSelected: () => void;
   rebuildConnections: () => void;
@@ -331,17 +333,24 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   canRedo: () => get()._future.length > 0,
 
   rotateSelected: () => {
-    const { selectedComponentId, circuit } = get();
-    if (!selectedComponentId) return;
-    const comp = circuit.components.get(selectedComponentId);
+    const { selectedComponentId, rotateComponent } = get();
+    if (selectedComponentId) rotateComponent(selectedComponentId);
+  },
+
+  rotateComponent: (id) => {
+    const { circuit } = get();
+    const comp = circuit.components.get(id);
     if (!comp) return;
+    const snap = { nodes: get().nodes, edges: get().edges };
     comp.rotate(270); // 270° CW == 90° counter-clockwise (rotate left)
     set((state) => ({
       nodes: state.nodes.map((n) =>
-        n.id === selectedComponentId
+        n.id === id
           ? { ...n, data: { ...n.data, rotation: comp.rotation } }
           : n,
       ),
+      _history: [...state._history, snap],
+      _future: [],
     }));
   },
 

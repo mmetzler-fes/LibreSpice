@@ -67,7 +67,7 @@ function CanvasInner() {
     addComponent, removeComponent, setNodes, setEdges,
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
-    rotateSelected, mirrorSelected, deleteSelected, rebuildConnections,
+    rotateSelected, rotateComponent, mirrorSelected, deleteSelected, rebuildConnections,
     circuit, addDataFlag, renameNet, viewFitNonce, updateNodeData,
   } = useCircuitStore();
 
@@ -769,6 +769,7 @@ function CanvasInner() {
               </>
             )}
             <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+            <button style={nodeMenuItem} onClick={() => { rotateComponent(nodeMenu.id); setNodeMenu(null); }}>↻ Drehen 90°</button>
             <button style={dangerMenuItem} onClick={deleteMenuNode}>🗑 Löschen</button>
         </ContextMenu>
       )}
