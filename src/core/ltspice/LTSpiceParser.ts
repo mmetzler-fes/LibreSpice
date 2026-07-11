@@ -188,6 +188,22 @@ export class LTSpiceParser {
       p.netId = bestNetId || nextNetId++;
     }
 
+    // Fuse pins that share the same point but aren't bridged by a wire. LTSpice
+    // connects a terminal, ground or net-label flag dropped directly onto
+    // another pin (no wire in between); the wire-only assignment above leaves
+    // each on its own net, which e.g. left a supply source with both terminals
+    // floating to ground and ngspice reporting a "shorted VSRC".
+    for (let i = 0; i < pins.length; i++) {
+      for (let j = i + 1; j < pins.length; j++) {
+        if (pins[i].netId === pins[j].netId) continue;
+        if (Math.hypot(pins[i].x - pins[j].x, pins[i].y - pins[j].y) <= PIN_TOL) {
+          const oldId = pins[j].netId;
+          const newId = pins[i].netId;
+          for (const p of pins) if (p.netId === oldId) p.netId = newId;
+        }
+      }
+    }
+
     // Named FLAGs are imported as NetLabel terminals (see the FLAG handler). As a
     // robust backup, also resolve each flag to a *real* component pin on its net,
     // so the store can label that net directly — this keeps the naming correct

@@ -4,6 +4,7 @@ import { runComponentValueTests } from "./componentValue.test.js";
 import { runPointerDragTests } from "./pointerDrag.test.js";
 import { runLongPressTests } from "./longPress.test.js";
 import { runNetlistPrefixTests } from "./netlistPrefix.test.js";
+import { runAscConnectivityTests } from "./ascConnectivity.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
@@ -19,5 +20,6 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Long press", ...(await runLongPressTests()) },
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Netlist prefixes", ...runNetlistPrefixTests() },
+    { name: "ASC connectivity", ...runAscConnectivityTests() },
   ];
 }
