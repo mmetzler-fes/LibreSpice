@@ -1,27 +1,6 @@
 import { create } from "zustand";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 
-/**
- * Colour palette offered in the legend colour picker. The first entries double
- * as the default trace colours (assigned by order when no override is set).
- * DARK: vivid/bright colours for dark backgrounds.
- * LIGHT: deeper/darker variants of the same hues for light backgrounds.
- */
-export const PLOT_PALETTE = [
-  "#22d3ee", "#a78bfa", "#34d399", "#fb923c",
-  "#f472b6", "#facc15", "#60a5fa", "#f87171",
-  "#2dd4bf", "#c084fc", "#4ade80", "#f59e0b",
-  "#e879f9", "#38bdf8", "#fca5a5", "#a3e635",
-];
-
-/** Same hue families as {@link PLOT_PALETTE} but darker, for light backgrounds. */
-export const PLOT_PALETTE_LIGHT = [
-  "#0891b2", "#7c3aed", "#059669", "#c2410c",
-  "#be185d", "#a16207", "#2563eb", "#dc2626",
-  "#0f766e", "#9333ea", "#16a34a", "#b45309",
-  "#c026d3", "#0369a1", "#e11d48", "#65a30d",
-];
-
 /** How the y-axis maps data values to screen: linear, log10, or decibel (20·log10|v|). */
 export type YScale = "linear" | "log" | "db";
 
@@ -277,9 +256,4 @@ function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Partial<T
   const out: Partial<T> = {};
   for (const k of keys) if (k in obj) out[k] = obj[k];
   return out;
-}
-
-/** Default (unoverridden) colour for a trace, by its index in the trace list. */
-export function defaultColor(index: number): string {
-  return PLOT_PALETTE[index % PLOT_PALETTE.length];
 }

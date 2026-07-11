@@ -3,7 +3,7 @@ import { useSimulationStore, type SimulationResult } from "@store/simulationStor
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
-import { usePlotStore, PLOT_PALETTE, PLOT_PALETTE_LIGHT, type PlotPanel, type YScale } from "./plotStore.js";
+import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
@@ -291,10 +291,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
     addExpression, updateExpression, toggleExpressionHidden, removeExpression, toggleSyncX,
   } = usePlotStore();
-  const isDark = !svgLight;
   const pt = plotThemeFor(svgLight);
   // Active palette: bright for dark backgrounds, deep for light backgrounds.
-  const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
+  const palette = pt.traces;
 
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const [exprInput, setExprInput] = useState("");
@@ -813,9 +812,8 @@ interface ProbeRowProps {
 
 function ProbeRow({ label, color, active, draggable, error, onToggle, onDragStart, onSwatch, showPicker, onPick, onRemove, onEdit }: ProbeRowProps) {
   const svgLight = usePlotStore((s) => s.svgLight);
-  const isDark = !svgLight;
   const pt = plotThemeFor(svgLight);
-  const palette = isDark ? PLOT_PALETTE : PLOT_PALETTE_LIGHT;
+  const palette = pt.traces;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
   // Set on Escape so the ensuing blur discards instead of committing.
@@ -957,15 +955,6 @@ interface PlotPanelViewProps {
   onExportAll: () => void;
 }
 
-/** Diagram colours for the on-screen (dark) and print/beamer (light) looks. */
-const PLOT_THEME = {
-  // `axis` styles only the tick/label text (not gridlines), so it is set for
-  // high contrast against the plot background: near-white on dark, near-black on
-  // light — the low-contrast slate before was hard to read on a beamer.
-  dark:  { bg: "#0f172a", plot: "#0b1120", grid: "#1e293b", axis: "#cbd5e1", line: "#334155", dot: "#0f172a", frame: "#334155" },
-  light: { bg: "#ffffff", plot: "#ffffff", grid: "#e2e8f0", axis: "#1e293b", line: "#94a3b8", dot: "#ffffff", frame: "#cbd5e1" },
-};
-
 function PlotPanelView(props: PlotPanelViewProps) {
   const { panel, traces, seriesMap, time, xLabel, xUnit, colorFor, compact, index, count, syncX,
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate,
@@ -981,7 +970,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const toggleSvgLight = usePlotStore((s) => s.toggleSvgLight);
   const isDark = !svgLight;
   const pt = plotThemeFor(svgLight);
-  const th = svgLight ? PLOT_THEME.light : PLOT_THEME.dark;
+  const th = pt.diagram;
 
   /** Merge a manual override into one unit's y-axis. */
   const setYAxis = (unit: string, patch: { min?: number; max?: number; ticks?: number }) =>

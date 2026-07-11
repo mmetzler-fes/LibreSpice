@@ -2,6 +2,43 @@ import { commonColors } from "../theme.js";
 import { usePlotStore } from "./plotStore.js";
 
 /**
+ * Trace colour palette offered in the legend colour picker; the first entries
+ * double as the default trace colours (assigned by order when no override set).
+ * DARK: vivid colours for dark backgrounds. LIGHT: deeper variants of the same
+ * hues for light/print backgrounds.
+ */
+export const PLOT_PALETTE = [
+  "#22d3ee", "#a78bfa", "#34d399", "#fb923c",
+  "#f472b6", "#facc15", "#60a5fa", "#f87171",
+  "#2dd4bf", "#c084fc", "#4ade80", "#f59e0b",
+  "#e879f9", "#38bdf8", "#fca5a5", "#a3e635",
+];
+
+export const PLOT_PALETTE_LIGHT = [
+  "#0891b2", "#7c3aed", "#059669", "#c2410c",
+  "#be185d", "#a16207", "#2563eb", "#dc2626",
+  "#0f766e", "#9333ea", "#16a34a", "#b45309",
+  "#c026d3", "#0369a1", "#e11d48", "#65a30d",
+];
+
+/** Default (unoverridden) trace colour by its index in the trace list. */
+export function defaultColor(index: number): string {
+  return PLOT_PALETTE[index % PLOT_PALETTE.length];
+}
+
+/** Colours used to draw the diagram itself (background, grid, axis text, …). */
+export interface PlotDiagram {
+  bg: string;
+  plot: string;
+  grid: string;
+  /** Tick/label text; high-contrast against the plot background. */
+  axis: string;
+  line: string;
+  dot: string;
+  frame: string;
+}
+
+/**
  * Color theme for the oscilloscope/plot UI. It shares the accent/status base
  * ({@link commonColors}) with the main app theme, but is switched by the plot's
  * OWN `svgLight` flag (the ☀/🌙 button), independent of the app-wide dark mode —
@@ -48,6 +85,10 @@ export interface PlotTheme {
   overlayBg: string;
   /** Translucent legend background. */
   overlayBg2: string;
+  /** Trace colours (legend picker + default assignment). */
+  traces: string[];
+  /** Diagram drawing colours. */
+  diagram: PlotDiagram;
 }
 
 type FullPlotTheme = PlotTheme & typeof commonColors;
@@ -73,6 +114,8 @@ export const plotDark: FullPlotTheme = {
   chipInactive: "#334155",
   overlayBg: "#1e293be6",
   overlayBg2: "#0f172acc",
+  traces: PLOT_PALETTE,
+  diagram: { bg: "#0f172a", plot: "#0b1120", grid: "#1e293b", axis: "#cbd5e1", line: "#334155", dot: "#0f172a", frame: "#334155" },
 };
 
 export const plotLight: FullPlotTheme = {
@@ -96,6 +139,8 @@ export const plotLight: FullPlotTheme = {
   chipInactive: "#94a3b8",
   overlayBg: "#ffffffee",
   overlayBg2: "#ffffffdd",
+  traces: PLOT_PALETTE_LIGHT,
+  diagram: { bg: "#ffffff", plot: "#ffffff", grid: "#e2e8f0", axis: "#1e293b", line: "#94a3b8", dot: "#ffffff", frame: "#cbd5e1" },
 };
 
 /** Plot theme for an explicit light flag — for non-component (hook-less) helpers. */
