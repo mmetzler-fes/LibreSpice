@@ -57,6 +57,19 @@ SYMATTR InstName V2
 SYMATTR Value PULSE(0V 10V 0s 10s 10s 0s 20s)
 `;
 
+// A localized AC current source (current_EN) carrying a SINE waveform must
+// import as a current source (not fall back to a resistor) AND keep its
+// frequency/amplitude in the netlist (RLC_Reihenschwingkreis.asc). Before the
+// fix, current_EN mapped to a resistor and CurrentSource dropped the SINE spec.
+const ASC_ISINE = `Version 4
+SHEET 1 880 680
+FLAG 0 96 0
+FLAG 0 16 U
+SYMBOL current_EN 0 0 R0
+SYMATTR InstName I1
+SYMATTR Value SINE(0 1.414 50Hz)
+`;
+
 const CASES: Case[] = [
   { name: "flag-on-pin connects source terminals (no bridging wire)", run: (fail) => {
     const { nodes, edges } = LTSpiceParser.parse(ASC);
@@ -80,6 +93,22 @@ const CASES: Case[] = [
     if (directives.includes("\\n")) fail("literal \\n left in directives");
     const measLines = directives.split("\n").filter((l) => l.trim().startsWith(".meas"));
     if (measLines.length !== 2) fail(`expected 2 .meas lines, got ${measLines.length}`);
+  } },
+  { name: "localized SINE current source keeps its frequency in the netlist", run: (fail) => {
+    const { nodes, components } = LTSpiceParser.parse(ASC_ISINE);
+    const i1n = nodeBy(nodes, (d) => d.label === "I1");
+    if (i1n && (i1n.data as { componentType?: string }).componentType !== "isource") {
+      fail(`expected isource, got ${(i1n.data as { componentType?: string }).componentType}`);
+    }
+    const i1 = components.find((c) => c.label === "I1");
+    if (!i1) { fail("I1 not imported"); return; }
+    const line = i1.getNetlistLine();
+    if (!/SIN\(/i.test(line) || !/50/.test(line) || !/1\.414/.test(line)) {
+      fail(`SINE spec/frequency missing from netlist: ${line}`);
+    }
+    const p = Object.fromEntries(i1.getProperties().map((x) => [x.key, x.value]));
+    if (p.sFreq !== 50) fail(`sFreq ${p.sFreq} != 50`);
+    if (p.sAmpl !== 1.414) fail(`sAmpl ${p.sAmpl} != 1.414`);
   } },
   { name: "PULSE reads rise/fall/delay (triangle, unit suffixes)", run: (fail) => {
     const { components } = LTSpiceParser.parse(ASC_PULSE);

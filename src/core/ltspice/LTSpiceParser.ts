@@ -378,6 +378,20 @@ export class LTSpiceParser {
         if (pVals[1] !== undefined) (comp as any).amplitude = pVals[1];
         if (pVals[2] !== undefined) (comp as any).frequency = pVals[2];
       }
+    } else if (cType === "isource" && /^\s*sine?\s*\(/i.test(valueStr)) {
+      // A SINE current source: fill the structured sine fields and flag the
+      // waveform so it survives a later UI edit that clears the verbatim spec.
+      const match = valueStr.match(/SINE?\(([^)]+)\)/i);
+      if (match) {
+        (comp as any).sourceType = "Sine";
+        const pVals = match[1].split(/[\s,]+/).map(parseSI);
+        if (pVals[0] !== undefined) (comp as any).sOffset = pVals[0];
+        if (pVals[1] !== undefined) (comp as any).sAmpl = pVals[1];
+        if (pVals[2] !== undefined) (comp as any).sFreq = pVals[2];
+        if (pVals[3] !== undefined) (comp as any).sTd = pVals[3];
+        if (pVals[4] !== undefined) (comp as any).sTheta = pVals[4];
+        if (pVals[5] !== undefined) (comp as any).sPhi = pVals[5];
+      }
     } else if (cType === "pulsesource") {
        // PULSE(V1 V2 Tdelay Trise Tfall Ton Tperiod). Read every field — omitting
        // delay/rise/fall left them at their defaults (a 1 ns edge), so a triangle

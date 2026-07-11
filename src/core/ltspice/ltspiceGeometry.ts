@@ -37,6 +37,11 @@ export function symbolToType(symName: string): ComponentType | undefined {
   // map any UniversalOpAmp* to the op-amp instead of silently falling back to a
   // resistor (which drops three pins and breaks the whole circuit).
   if (base.startsWith("universalopamp")) return "opamp";
+  // LTSpice ships localized copies of the generic symbols with a locale suffix
+  // (e.g. `current_EN`, `voltage_DE`). Strip a trailing `_XX` and retry so they
+  // don't fall through to the resistor default, dropping their waveform/pins.
+  const stripped = base.replace(/_[a-z]{2}$/, "");
+  if (stripped !== base && SYMBOL_TO_TYPE_LC[stripped]) return SYMBOL_TO_TYPE_LC[stripped];
   return undefined;
 }
 

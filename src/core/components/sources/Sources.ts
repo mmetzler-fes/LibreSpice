@@ -172,8 +172,23 @@ export class VoltageSource extends Source {
 }
 
 export class CurrentSource extends Source {
+  sourceType: "DC" | "Sine" = "DC";
+  // Sine parameters (offset/amplitude/frequency mirror the voltage source).
+  sOffset = 0; sAmpl = 1e-3; sFreq = 50; sTd = 0; sTheta = 0; sPhi = 0;
+  /** Verbatim SPICE spec (e.g. an imported `SIN(0 1.414 50)`), see VoltageSource.rawSpec. */
+  rawSpec = "";
+
   constructor(id: string, label: string, position?: Point, dcValue = 1e-3) {
     super(id, label, position, dcValue);
+  }
+
+  /** The SPICE source specification (after the node names). */
+  protected spec(): string {
+    if (this.rawSpec) return this.rawSpec;
+    if (this.sourceType === "Sine") {
+      return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
+    }
+    return `DC ${this.dcValue} AC ${this.acAmplitude}`;
   }
 
   getNetlistLine(): string {
@@ -181,27 +196,58 @@ export class CurrentSource extends Source {
     const n = this.nodeOrGnd(this.ports[1].netId);
     // ngspice keys the device type off the first letter (see VoltageSource.vref).
     const ref = /^i/i.test(this.label) ? this.label : `I${this.label}`;
-    return `${ref} ${p} ${n} DC ${this.dcValue} AC ${this.acAmplitude}`;
+    return `${ref} ${p} ${n} ${this.spec()}`;
   }
 
   getProperties(): Property[] {
-    return [
+    const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "dcValue", label: "DC Current", value: this.dcValue, unit: "A", type: "number" },
-      { key: "acAmplitude", label: "AC Amplitude", value: this.acAmplitude, unit: "A", type: "number" },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine"] },
     ];
+    if (this.sourceType === "Sine") {
+      props.push(
+        { key: "sOffset", label: "DC offset", value: this.sOffset, unit: "A", type: "number" },
+        { key: "sAmpl", label: "Amplitude", value: this.sAmpl, unit: "A", type: "number" },
+        { key: "sFreq", label: "Frequency", value: this.sFreq, unit: "Hz", type: "number" },
+        { key: "sTd", label: "Tdelay", value: this.sTd, unit: "s", type: "number" },
+        { key: "sTheta", label: "Theta", value: this.sTheta, unit: "1/s", type: "number" },
+        { key: "sPhi", label: "Phi", value: this.sPhi, unit: "°", type: "number" },
+      );
+    } else {
+      props.push(
+        { key: "dcValue", label: "DC Current", value: this.dcValue, unit: "A", type: "number" },
+        { key: "acAmplitude", label: "AC Amplitude", value: this.acAmplitude, unit: "A", type: "number" },
+      );
+    }
+    return props;
   }
 
   setProperty(key: string, value: string | number): void {
-    if (key === "label") this.label = String(value);
-    if (key === "dcValue") this.dcValue = Number(value);
-    if (key === "acAmplitude") this.acAmplitude = Number(value);
+    const num = Number(value);
+    // Editing a waveform field abandons any verbatim imported spec.
+    if (key !== "label") this.rawSpec = "";
+    switch (key) {
+      case "label": this.label = String(value); break;
+      case "sourceType": this.sourceType = value === "Sine" ? "Sine" : "DC"; break;
+      case "dcValue": this.dcValue = num; break;
+      case "acAmplitude": this.acAmplitude = num; break;
+      case "sOffset": this.sOffset = num; break;
+      case "sAmpl": this.sAmpl = num; break;
+      case "sFreq": this.sFreq = num; break;
+      case "sTd": this.sTd = num; break;
+      case "sTheta": this.sTheta = num; break;
+      case "sPhi": this.sPhi = num; break;
+    }
   }
 
   clone(): CurrentSource {
     const i = new CurrentSource(this.id, this.label, { ...this.position }, this.dcValue);
-    i.acAmplitude = this.acAmplitude;
-    i.rotation = this.rotation;
+    Object.assign(i, {
+      acAmplitude: this.acAmplitude, sourceType: this.sourceType,
+      sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
+      sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
+      rawSpec: this.rawSpec, rotation: this.rotation,
+    });
     return i;
   }
 }
