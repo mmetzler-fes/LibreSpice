@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LibreSpice</title>
+    <script>
+      // Deep-link forwarding for share links / QR codes. Older ones were made
+      // when the app was hosted at the site root ("/#z=…"); the app now lives
+      // under "app/". Any URL that carries a circuit payload (hash "#z=…"/"#c=…"
+      // or a "?circuit=…" query) is forwarded to the app with the payload kept
+      // intact — so existing links and QR codes still open their circuit. A
+      // plain visit (no payload) stays on this landing page. The redirect is
+      // relative ("app/"), so it works whatever subpath the site is mounted at.
+      (function () {
+        var h = location.hash;   // e.g. "#z=…" / "#c=…"
+        var s = location.search; // e.g. "?circuit=…"
+        if (/^#(z=|c=)/.test(h) || /[?&]circuit=/.test(s)) {
+          location.replace("app/" + s + h);
+        }
+      })();
+    </script>
     <style>
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
