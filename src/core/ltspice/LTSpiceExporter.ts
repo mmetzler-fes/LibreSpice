@@ -200,6 +200,10 @@ export class LTSpiceExporter {
     // from import), made orthogonal, so re-importing matches the pins back to
     // these wires and rebuilds the same nets. Following the waypoints keeps the
     // route off other terminals — a naive L-bend can cross a neighbouring pin.
+    // Overlapping edges (a tap, a wire re-drawn over another) yield the very same
+    // segment twice. Emit each one once — duplicates piled up with every save, so
+    // the file grew on every round-trip.
+    const wireSeen = new Set<string>();
     const wireLines: string[] = [];
     for (const edge of edges) {
       const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
@@ -209,15 +213,29 @@ export class LTSpiceExporter {
       const verts = orthoVertices([a, ...wps, b]);
       for (let i = 0; i < verts.length - 1; i++) {
         const p = verts[i], q = verts[i + 1];
-        if (p.x !== q.x || p.y !== q.y) wireLines.push(`WIRE ${p.x} ${p.y} ${q.x} ${q.y}`);
+        if (p.x === q.x && p.y === q.y) continue;
+        // A segment and its reverse are the same wire.
+        const fwd = `${p.x} ${p.y} ${q.x} ${q.y}`, rev = `${q.x} ${q.y} ${p.x} ${p.y}`;
+        if (wireSeen.has(fwd) || wireSeen.has(rev)) continue;
+        wireSeen.add(fwd);
+        wireLines.push(`WIRE ${fwd}`);
       }
     }
 
-    // Named nets → FLAGs, placed on a terminal of the net so LTSpice (and our
-    // re-import) label the same node. Skip ground and unlabelled nets.
+    // Named nets → FLAGs, for a net whose name is *not* already carried by a
+    // net-label terminal (which wrote its own FLAG above). Emitting one here as
+    // well gave every labelled net two flags, and each save/load cycle stacked
+    // another label on the same spot — the file grew and the schematic collected
+    // invisible duplicates.
     if (circuit?.nets) {
+      const labelledNets = new Set<string>();
+      for (const node of nodes) {
+        if ((node.data as { componentType?: ComponentType }).componentType !== "netlabel") continue;
+        const netId = circuit.components.get(node.id)?.ports?.[0]?.netId;
+        if (netId) labelledNets.add(netId);
+      }
       for (const [netId, net] of circuit.nets as Map<string, { nodeLabel: string; connectedPortIds: Set<string> }>) {
-        if (netId === "0" || net.nodeLabel === netId) continue;
+        if (netId === "0" || net.nodeLabel === netId || labelledNets.has(netId)) continue;
         for (const portId of net.connectedPortIds) {
           const c = pinCoord.get(portId);
           if (c) { flagLines.push(`FLAG ${c.x} ${c.y} ${net.nodeLabel}`); break; }

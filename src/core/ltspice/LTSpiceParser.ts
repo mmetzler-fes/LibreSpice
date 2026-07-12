@@ -59,6 +59,8 @@ export class LTSpiceParser {
     // Named-flag positions, so we can also anchor the net name on a real
     // component pin (robust even if the terminal's edge is dropped at runtime).
     const namedFlags: { name: string; x: number; y: number }[] = [];
+    /** Flags already imported, keyed x,y,name — see the FLAG handler. */
+    const seenFlags = new Set<string>();
     let directives = "";
     
     let currentSymbol: any = null;
@@ -98,6 +100,14 @@ export class LTSpiceParser {
         const x = parseInt(parts[1], 10);
         const y = parseInt(parts[2], 10);
         const flagName = parts[3];
+        // The same flag at the same point is redundant — and files written by
+        // older builds collected stacked copies (the exporter wrote one per label
+        // *and* one per named net). Import each spot once, or the schematic keeps
+        // invisible duplicates piled on top of each other.
+        const flagKey = `${x},${y},${flagName}`;
+        if (seenFlags.has(flagKey)) continue;
+        seenFlags.add(flagKey);
+
         if (flagName === "0") {
           const id = `ground_${compIdCounter++}`;
           const gx = x - GROUND_PIN.dx, gy = y - GROUND_PIN.dy;
