@@ -638,7 +638,40 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           </label>
         </div>
 
-        <div style={{ padding: 6, display: "flex", flexDirection: "column", gap: 2, flex: 1, overflow: "auto" }}>
+        {/* Expression builder (arithmetic on probe variables). Deliberately *above*
+            the list: anchored at the bottom, iPadOS covered it with the keyboard's
+            autofill/shortcut bar — a bar that does not shrink the visual viewport,
+            so no measurement can compensate for it. Up here it is out of reach of
+            any on-screen keyboard, and it also stops drifting down as the probe
+            list grows. */}
+        <div style={{ padding: 6, borderBottom: `1px solid ${pt.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase" }}>Add function</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input
+              value={exprInput}
+              onChange={(e) => { setExprInput(e.target.value); setExprError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleAddExpression(); }}
+              placeholder="V(a)-V(b)  ·  {R1}*I(D2) [V]"
+              title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
+              style={{
+                flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
+                background: pt.inputBg,
+                color: pt.text,
+                border: `1px solid ${pt.borderStrong}`,
+                borderRadius: 4,
+              }}
+            />
+            <button
+              onClick={handleAddExpression}
+              style={{ padding: "3px 8px", fontSize: 10, background: pt.border, color: pt.heading, border: `1px solid ${pt.borderStrong}`, borderRadius: 4, cursor: "pointer" }}
+            >
+              +
+            </button>
+          </div>
+          {exprError && <div style={{ fontSize: 9, color: "#f87171" }}>{exprError}</div>}
+        </div>
+
+        <div className="keyboard-safe" style={{ padding: 6, display: "flex", flexDirection: "column", gap: 2, flex: 1, overflow: "auto" }}>
           {probeGroups
             ? probeGroups.map((g) => {
                 const key = g.members[0].raw;
@@ -719,33 +752,6 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           ))}
         </div>
 
-        {/* Expression builder (requirement: arithmetic on probe variables) */}
-        <div style={{ padding: 6, borderTop: `1px solid ${pt.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase" }}>Add function</div>
-          <div style={{ display: "flex", gap: 4 }}>
-            <input
-              value={exprInput}
-              onChange={(e) => { setExprInput(e.target.value); setExprError(null); }}
-              onKeyDown={(e) => { if (e.key === "Enter") handleAddExpression(); }}
-              placeholder="V(a)-V(b)  ·  {R1}*I(D2) [V]"
-              title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
-              style={{
-                flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
-                background: pt.inputBg,
-                color: pt.text,
-                border: `1px solid ${pt.borderStrong}`,
-                borderRadius: 4,
-              }}
-            />
-            <button
-              onClick={handleAddExpression}
-              style={{ padding: "3px 8px", fontSize: 10, background: pt.border, color: pt.heading, border: `1px solid ${pt.borderStrong}`, borderRadius: 4, cursor: "pointer" }}
-            >
-              +
-            </button>
-          </div>
-          {exprError && <div style={{ fontSize: 9, color: "#f87171" }}>{exprError}</div>}
-        </div>
       </div>
 
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}

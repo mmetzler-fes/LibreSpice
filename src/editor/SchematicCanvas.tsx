@@ -733,7 +733,9 @@ function CanvasInner() {
         </div>
 
         {showPropertiesPanel && (
-          <aside style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
+          // keyboard-safe: its fields (component values, net names) can sit at the
+          // bottom, where iPadOS' autofill bar would cover them (see index.css).
+          <aside className="keyboard-safe" style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
             <PropertiesPanel />
             <NetLabelsPanel />
           </aside>

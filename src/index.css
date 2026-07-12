@@ -15,6 +15,15 @@ body {
   width: 100vw;
 }
 
+/* While a text field has focus, keep the bottom of a scrollable panel reachable.
+   iPadOS draws the keyboard's autofill/shortcut bar (key · card · location) over
+   the page *without* shrinking the visual viewport, so `--app-height` cannot
+   account for it — this padding is what lets a field at the bottom be scrolled
+   clear of it. The class is toggled in useKeyboardViewport. */
+body.kb-open .keyboard-safe {
+  padding-bottom: 56px;
+}
+
 /* iPad / touch text entry:
    - `touch-action: manipulation` stops the double-tap-zoom delay and makes the
      Apple Pencil behave like a plain pointer, so a tap sets the caret instead

@@ -45,6 +45,12 @@ export function useKeyboardViewport(): void {
     const onFocusIn = (e: FocusEvent) => {
       const target = e.target as Element | null;
       if (!isTextEntry(target)) return;
+      // iPadOS lays its autofill/shortcut bar (key · card · location) *over* the
+      // page without shrinking the visual viewport, so `--app-height` cannot see
+      // it and no measurement can compensate. While typing, pad the bottom of
+      // scrollable panels (`.keyboard-safe`) so a field down there can still be
+      // scrolled clear of that bar.
+      document.body.classList.add("kb-open");
       window.setTimeout(() => {
         // Re-read after the keyboard has (mostly) settled.
         setAppHeight();
@@ -52,7 +58,13 @@ export function useKeyboardViewport(): void {
       }, 300);
     };
 
+    const onFocusOut = (e: FocusEvent) => {
+      if (!isTextEntry(e.target as Element | null)) return;
+      document.body.classList.remove("kb-open");
+    };
+
     document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
 
     return () => {
       if (vv) {
@@ -62,6 +74,8 @@ export function useKeyboardViewport(): void {
       window.removeEventListener("resize", setAppHeight);
       window.removeEventListener("orientationchange", setAppHeight);
       document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      document.body.classList.remove("kb-open");
     };
   }, []);
 }
