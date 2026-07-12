@@ -4,7 +4,7 @@ import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel, createSpiceComponent } from "@editor/componentFactory.js";
+import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
@@ -254,6 +254,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     const newCircuit = new Circuit();
     for (const comp of components) {
+      // A library part is referenced by name in the `.asc` (as in LTSpice); the
+      // `.subckt` body itself lives in the library, so re-link it here. Without
+      // it the netlist line would point at an undefined subcircuit.
+      const sub = comp as unknown as { spiceModel?: string; label: string };
+      if (sub.spiceModel === "") {
+        const name = String((nodes.find((n) => n.id === comp.id)?.data as { subName?: string })?.subName ?? "");
+        const entry = name ? useLibraryStore.getState().findByName(name)?.entry : undefined;
+        if (entry?.kind === "subckt") sub.spiceModel = entry.raw;
+      }
       newCircuit.addComponent(comp);
     }
 
@@ -460,11 +469,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   exportSnapshot: () => {
     const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags, showDirectivesOnCanvas, directivesPos } = get();
     const componentProps: Record<string, Record<string, string | number>> = {};
-    for (const [id, comp] of circuit.components) {
-      const props: Record<string, string | number> = {};
-      for (const p of comp.getProperties()) props[p.key] = p.value;
-      componentProps[id] = props;
-    }
+    // serialize(), not getProperties(): the property list only holds the fields
+    // the UI currently shows, so a source in DC mode would save no sine fields
+    // and lose e.g. a configured phase on reload.
+    for (const [id, comp] of circuit.components) componentProps[id] = comp.serialize();
     const netLabels: Record<string, string> = {};
     // Anchor custom net names to a stable port id as well: net ids are
     // re-assigned when the circuit is rebuilt on load, so the net-id map alone
@@ -489,11 +497,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       if (!type) continue;
       const label = String((node.data as { label?: string }).label ?? node.id);
       const { x, y } = node.position;
-      const comp = createSpiceComponent(type, node.id, label, x, y);
       const props = snapshot.componentProps[node.id];
-      if (props) {
-        for (const [key, val] of Object.entries(props)) comp.setProperty(key, val);
-      }
+      // A library part's ports are its own external pins — createSpiceComponent
+      // would give it the generic in/out/gnd trio, whose port ids no edge handle
+      // matches, silently disconnecting the part on every share-link reload.
+      const subPins = (node.data as { pins?: string[] }).pins;
+      const comp = type === "subcircuit"
+        ? createSubcircuitComponent(node.id, label, x, y, String(props?.spiceModel ?? ""), subPins ?? [])
+        : createSpiceComponent(type, node.id, label, x, y);
+      if (props) comp.deserialize(props);
       const rotation = (node.data as { rotation?: number }).rotation;
       if (rotation) {
         const steps = (rotation / 90) % 4;

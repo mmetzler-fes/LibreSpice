@@ -1,4 +1,5 @@
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
+import { symbolByName } from "@sym/asyParser.js";
 
 /**
  * Shared LTSpice symbol geometry used by both the parser (`.asc` → schematic)
@@ -12,7 +13,7 @@ export const CENTER = 40;
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   res: "resistor", cap: "capacitor", polcap: "capacitor_polarized", ind: "inductor",
   europeanpolcap: "capacitor_polarized",
-  diode: "diode", LED: "led",
+  diode: "diode", LED: "led", zener: "zener", schottky: "schottky",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
   voltage: "vsource", current: "isource",
@@ -47,7 +48,9 @@ export function symbolToType(symName: string): ComponentType | undefined {
 
 export const TYPE_TO_SYMBOL: Record<string, string> = {
   resistor: "res", capacitor: "cap", capacitor_polarized: "polcap", inductor: "ind",
-  diode: "diode", led: "LED",
+  // Zener/Schottky are diodes with their own LTSpice symbols; without an entry
+  // here they fell back to "res" and came back from a saved file as resistors.
+  diode: "diode", led: "LED", zener: "zener", schottky: "schottky",
   bjt_npn: "npn", bjt_pnp: "pnp",
   mosfet_n: "nmos", mosfet_p: "pmos",
   vsource: "voltage", isource: "current",
@@ -70,6 +73,8 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   inductor: [{ handle: "p", dx: 16, dy: 16 }, { handle: "n", dx: 16, dy: 96 }],
   diode: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   led: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
+  zener: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
+  schottky: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   vsource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
   // LTSpice's current.asy puts "+" (SpiceOrder 1) at the bottom, "-" at the top.
   isource: [{ handle: "p", dx: 0, dy: 80 }, { handle: "n", dx: 0, dy: 0 }],
@@ -110,9 +115,42 @@ export function rotStr(deg: number): string {
   return "R0";
 }
 
+/**
+ * LTSpice-local pin offsets for a library part / `.subckt` instance, whose pins
+ * come from its own `.asy` symbol rather than a fixed table. Falls back to the
+ * generic box layout (pins down the left edge, then the right) that
+ * `SubcircuitBox` draws when the part has no symbol. Handles are the external
+ * pin names, in declared order — matching the node's handles.
+ */
+export function subcircuitPinOffsets(pinNames: string[], symbolName?: string): PinOffset[] {
+  const sym = symbolName ? symbolByName(symbolName) : undefined;
+  if (sym && sym.pins.length > 0) {
+    return [...sym.pins]
+      .sort((a, b) => a.order - b.order)
+      .map((p, i) => ({ handle: pinNames[i] ?? `pin${p.order}`, dx: p.x, dy: p.y }));
+  }
+  const leftCount = Math.ceil(pinNames.length / 2);
+  return pinNames.map((name, i) =>
+    i < leftCount
+      ? { handle: name, dx: 0, dy: 16 + i * 32 }
+      : { handle: name, dx: 96, dy: 16 + (i - leftCount) * 32 },
+  );
+}
+
+/** Pin offsets for any node, including library parts (which have no fixed table). */
+export function offsetsForNode(type: string, deg: number, pinNames?: string[], symbolName?: string): PinOffset[] {
+  const base = type === "subcircuit"
+    ? subcircuitPinOffsets(pinNames ?? [], symbolName)
+    : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
+  return rotateOffsets(base, deg);
+}
+
 /** Pin offsets after applying an LTSpice rotation about the symbol origin. */
 export function rotatedOffsets(type: string, deg: number): PinOffset[] {
-  const base = PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"];
+  return rotateOffsets(PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"], deg);
+}
+
+function rotateOffsets(base: PinOffset[], deg: number): PinOffset[] {
   return base.map((p) => {
     let dx = p.dx, dy = p.dy;
     if (deg === 90) { dx = -p.dy; dy = p.dx; }
@@ -135,7 +173,9 @@ export function centeringFor(type: string): Centering {
   // Multi-pin, asymmetric .asy symbols (op-amp, transistors) centre on the pin
   // bounding box to match mapSymbol's native-scale rendering; 2-pin parts have
   // mean == bbox so the default is fine.
-  return type === "opamp" || type.startsWith("bjt_") || type.startsWith("mosfet_") ? "bbox" : "mean";
+  return type === "opamp" || type === "subcircuit" || type.startsWith("bjt_") || type.startsWith("mosfet_")
+    ? "bbox"
+    : "mean";
 }
 
 function centre(offsets: PinOffset[], mode: Centering): { mx: number; my: number } {

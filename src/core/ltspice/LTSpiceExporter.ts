@@ -2,7 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import {
-  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, rotatedOffsets, nodeToSymbol, centeringFor,
+  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
@@ -17,6 +17,97 @@ const winCoord = (def: { left: number; top: number }, off: Offset) => ({
 });
 
 interface Pt { x: number; y: number }
+
+/**
+ * The SYMATTR lines that carry a component's parameters. LTSpice splits them:
+ * the waveform/value in `Value`, the small-signal AC magnitude in `Value2`, and
+ * a source's parasitics in `SpiceLine` (`Rser=… Cpar=…`). `LibreSpice` is our
+ * own attribute for state LTSpice has no slot for (currently only display
+ * flags); LTSpice ignores attributes it doesn't know.
+ */
+interface SymAttrs { value?: string; value2?: string; spiceLine?: string; extra?: string }
+
+/** LTSpice source spec. Same fields as the netlist, but LTSpice spells it SINE, not SIN. */
+function sourceSpec(c: any): string {
+  if (c.rawSpec) return String(c.rawSpec).replace(/^(\s*)sin(?=\s*\()/i, "$1SINE");
+  // SINE's Ncycles is an LTSpice-only 7th field; ngspice's SIN takes six. It is
+  // persisted in the LibreSpice attribute instead, so re-importing our own file
+  // doesn't smuggle a 7th field into the netlist via the verbatim rawSpec.
+  if (c.sourceType === "Sine") {
+    return `SINE(${c.sOffset} ${c.sAmpl} ${c.sFreq} ${c.sTd} ${c.sTheta} ${c.sPhi})`;
+  }
+  if (c.sourceType === "Pulse") {
+    const ncyc = c.pNp > 0 ? ` ${c.pNp}` : "";
+    return `PULSE(${c.pV1} ${c.pV2} ${c.pTd} ${c.pTr} ${c.pTf} ${c.pPw} ${c.pPer}${ncyc})`;
+  }
+  return `DC ${c.dcValue ?? 0}`;
+}
+
+/**
+ * A library part / `.subckt` instance. `Value` names the subcircuit (LTSpice's
+ * own convention), and the external pin order — which the `.asc` has no slot for
+ * — goes into our attribute, so the handles are rebuilt exactly. The subcircuit
+ * *body* is not embedded: like LTSpice, the file references the model by name
+ * and it is re-linked from the loaded library (see circuitStore.loadFromASC).
+ */
+function subcircuitAttrs(comp: any, data: { subName?: string; pins?: string[]; label: string }): SymAttrs {
+  const subckt =
+    data.subName ||
+    String(comp?.spiceModel ?? "").match(/\.subckt\s+(\S+)/i)?.[1] ||
+    "";
+  const pins = data.pins ?? comp?.portNames ?? [];
+  return {
+    ...(subckt ? { value: subckt } : {}),
+    ...(pins.length ? { extra: `pins=${pins.join(",")}` } : {}),
+  };
+}
+
+/**
+ * Every parameter a component holds, as `.asc` attributes — so a saved file can
+ * rebuild it exactly. Previously only a bare number (or a 3-field SINE) was
+ * written, which silently dropped the source type, phase, AC amplitude,
+ * parasitics and semiconductor model on every save.
+ */
+function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs {
+  if (!comp) return { value: fallback };
+  if (comp.valueExpr) return { value: comp.valueExpr };
+
+  // Legacy import-only source types (a plain 3-/7-field waveform, no AC or
+  // parasitics); the generalized V/I source below is what the editor places.
+  if (type === "sinesource") {
+    return { value: comp.rawSpec ? sourceSpec(comp) : `SINE(${comp.offset} ${comp.amplitude} ${comp.frequency})` };
+  }
+  if (type === "pulsesource") {
+    return {
+      value: comp.rawSpec ? sourceSpec(comp)
+        : `PULSE(${comp.initialValue} ${comp.pulsedValue} ${comp.delay} ${comp.riseTime} ${comp.fallTime} ${comp.pulseWidth} ${comp.period})`,
+    };
+  }
+
+  if (comp.sourceType !== undefined) {
+    const a: SymAttrs = { value: sourceSpec(comp) };
+    if (comp.acAmplitude) a.value2 = `AC ${comp.acAmplitude}`;
+    const par: string[] = [];
+    if (comp.seriesR > 0) par.push(`Rser=${comp.seriesR}`);
+    if (comp.parallelC > 0) par.push(`Cpar=${comp.parallelC}`);
+    if (par.length) a.spiceLine = par.join(" ");
+    const extra: string[] = [];
+    if (comp.showParasitics === "yes") extra.push("showParasitics=yes");
+    if (comp.sourceType === "Sine" && comp.sNcycles > 0) extra.push(`sNcycles=${comp.sNcycles}`);
+    if (extra.length) a.extra = extra.join(";");
+    return a;
+  }
+
+  // Semiconductors and the op-amp carry a model name instead of a value.
+  if (typeof comp.model === "string") {
+    return { value: comp.model, ...(comp.color ? { extra: `color=${comp.color}` } : {}) };
+  }
+  if (comp.resistance !== undefined) return { value: String(comp.resistance) };
+  if (comp.capacitance !== undefined) return { value: String(comp.capacitance) };
+  if (comp.inductance !== undefined) return { value: String(comp.inductance) };
+  if (comp.dcValue !== undefined) return { value: String(comp.dcValue) };
+  return { value: fallback };
+}
 
 /** Expand a vertex list into an orthogonal (right-angle) path — mirrors WireTool. */
 function orthoVertices(points: Pt[]): Pt[] {
@@ -47,6 +138,8 @@ export class LTSpiceExporter {
       const data = node.data as {
         componentType: ComponentType; label: string; valueLabel?: string; rotation?: number;
         labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
+        /** Library part / `.subckt`: its own `.asy` symbol, subcircuit name and pin order. */
+        symbolName?: string; subName?: string; pins?: string[];
       };
 
       if (data.componentType === "ground") {
@@ -67,11 +160,16 @@ export class LTSpiceExporter {
       }
 
       const deg = data.rotation ?? 0;
-      const rotated = rotatedOffsets(data.componentType, deg);
+      // A library part / `.subckt` has no fixed symbol: it carries its own `.asy`
+      // name and pin list. Writing it as "res" (the old fallback) turned it into
+      // a resistor on reload and dropped every wire attached to it.
+      const isSub = data.componentType === "subcircuit";
+      const subSymbol = data.symbolName || data.subName || data.label;
+      const rotated = offsetsForNode(data.componentType, deg, data.pins, isSub ? subSymbol : undefined);
       const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));
       for (const p of rotated) pinCoord.set(`${node.id}-${p.handle}`, { x: symX + p.dx, y: symY + p.dy });
 
-      const symName = TYPE_TO_SYMBOL[data.componentType] || "res";
+      const symName = isSub ? subSymbol : (TYPE_TO_SYMBOL[data.componentType] || "res");
       symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg)}`);
 
       // Persist caption positions so LTSpice (and our own re-import) keep them.
@@ -84,26 +182,13 @@ export class LTSpiceExporter {
 
       symbolLines.push(`SYMATTR InstName ${data.label}`);
 
-      let val = data.valueLabel || "";
-      const comp = circuit.components.get(node.id);
-      if (comp?.valueExpr) {
-        val = comp.valueExpr;
-      } else if (comp) {
-        if (data.componentType === "sinesource") {
-          val = `SINE(${comp.offset || 0} ${comp.amplitude || 1} ${comp.frequency || 1000})`;
-        } else if (data.componentType === "pulsesource") {
-          val = `PULSE(${comp.initialValue || 0} ${comp.pulsedValue || 5} 0 1n 1n ${comp.pulseWidth || 0.0005} ${comp.period || 0.001})`;
-        } else if (comp.resistance !== undefined) {
-          val = comp.resistance.toString();
-        } else if (comp.capacitance !== undefined) {
-          val = comp.capacitance.toString();
-        } else if (comp.inductance !== undefined) {
-          val = comp.inductance.toString();
-        } else if (comp.dcValue !== undefined) {
-          val = comp.dcValue.toString();
-        }
-      }
-      if (val) symbolLines.push(`SYMATTR Value ${val}`);
+      const attrs = isSub
+        ? subcircuitAttrs(circuit.components.get(node.id), data)
+        : symbolAttrs(circuit.components.get(node.id), data.componentType, data.valueLabel || "");
+      if (attrs.value) symbolLines.push(`SYMATTR Value ${attrs.value}`);
+      if (attrs.value2) symbolLines.push(`SYMATTR Value2 ${attrs.value2}`);
+      if (attrs.spiceLine) symbolLines.push(`SYMATTR SpiceLine ${attrs.spiceLine}`);
+      if (attrs.extra) symbolLines.push(`SYMATTR LibreSpice ${attrs.extra}`);
     }
 
     // Wires: route each edge through its stored waypoints (the original path

@@ -132,7 +132,8 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
       return `${fmtSI(v.dcValue, "V")} DC`;
     }
     case "isource":   {
-      const i = component as unknown as { dcValue: number };
+      const i = component as unknown as { sourceType?: string; dcValue: number; sAmpl: number; sFreq: number };
+      if (i.sourceType === "Sine") return `${fmtSI(i.sAmpl, "A")} ${fmtSI(i.sFreq, "Hz")}`;
       return `${fmtSI(i.dcValue, "A")} DC`;
     }
     case "sinesource": {

@@ -158,6 +158,19 @@ export class VoltageSource extends Source {
     }
   }
 
+  /** All waveform fields, not just the ones the current sourceType shows. */
+  serialize(): Record<string, string | number> {
+    return {
+      label: this.label, sourceType: this.sourceType,
+      dcValue: this.dcValue, acAmplitude: this.acAmplitude,
+      pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
+      sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
+      seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
+      ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
+      ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
+    };
+  }
+
   clone(): VoltageSource {
     const v = new VoltageSource(this.id, this.label, { ...this.position }, this.dcValue);
     Object.assign(v, {
@@ -240,6 +253,18 @@ export class CurrentSource extends Source {
     }
   }
 
+  /** All waveform fields, not just the ones the current sourceType shows. */
+  serialize(): Record<string, string | number> {
+    return {
+      label: this.label, sourceType: this.sourceType,
+      dcValue: this.dcValue, acAmplitude: this.acAmplitude,
+      sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
+      sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
+      ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
+      ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
+    };
+  }
+
   clone(): CurrentSource {
     const i = new CurrentSource(this.id, this.label, { ...this.position }, this.dcValue);
     Object.assign(i, {
@@ -286,6 +311,13 @@ export class SineSource extends VoltageSource {
     if (key === "amplitude") this.amplitude = Number(value);
     if (key === "frequency") this.frequency = Number(value);
     if (key === "offset") this.offset = Number(value);
+  }
+
+  serialize(): Record<string, string | number> {
+    return {
+      label: this.label, amplitude: this.amplitude, frequency: this.frequency, offset: this.offset,
+      ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
+    };
   }
 
   clone(): SineSource {
@@ -357,6 +389,15 @@ export class PulseSource extends VoltageSource {
     if (key === "riseTime") this.riseTime = num;
     if (key === "fallTime") this.fallTime = num;
     if (key === "delay") this.delay = num;
+  }
+
+  serialize(): Record<string, string | number> {
+    return {
+      label: this.label, initialValue: this.initialValue, pulsedValue: this.pulsedValue,
+      delay: this.delay, riseTime: this.riseTime, fallTime: this.fallTime,
+      pulseWidth: this.pulseWidth, period: this.period,
+      ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
+    };
   }
 
   clone(): PulseSource {

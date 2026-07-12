@@ -1,9 +1,11 @@
 import type { Node, Edge } from "@xyflow/react";
-import { createSpiceComponent } from "@editor/componentFactory.js";
+import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { symbolToType, CENTER, rotDeg, rotatedOffsets, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, rotDeg, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
+import { symbolByName } from "@sym/asyParser.js";
+import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 
 
 /** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
@@ -32,6 +34,15 @@ function parseSI(val: string): number {
   const num = parseFloat(t);
   if (isNaN(num)) return 0;
   return num * siMult(t.replace(/^[-\d.]+/, ""));
+}
+
+/**
+ * Numeric value of a source's main attribute, e.g. `5`, `DC 5`, `DC 5 AC 1`.
+ * A bare parseSI would read "DC 5" as NaN→0 and lose the DC level.
+ */
+function parseDC(val: string): number {
+  const m = val.replace(/\bAC\b.*$/i, "").match(/[-+]?[\d.]+(?:e[-+]?\d+)?\s*[a-zµ]*/i);
+  return m ? parseSI(m[0]) : 0;
 }
 
 interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number }
@@ -331,7 +342,6 @@ export class LTSpiceParser {
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
-    let cType = symbolToType(sym.name) || "resistor";
     const label = sym.attrs["InstName"] || sym.name;
     // LTSpice writes an empty source value as `""`; treat it as blank.
     let valueStr = (sym.attrs["Value"] || "").trim();
@@ -339,16 +349,30 @@ export class LTSpiceParser {
     // A source's small-signal AC spec lives in a separate attribute
     // (SYMATTR Value2, e.g. "AC 1"), often with the main Value left empty.
     const value2 = (sym.attrs["Value2"] || "").trim();
-
-    if (cType === "vsource") {
-      if (valueStr.toUpperCase().startsWith("SINE")) cType = "sinesource";
-      if (valueStr.toUpperCase().startsWith("PULSE")) cType = "pulsesource";
+    // Our own attribute for state the .asc format has no slot for (see the
+    // exporter's SymAttrs): `pins=a,b,c`, display flags, SINE Ncycles.
+    const lsAttrs: Record<string, string> = {};
+    for (const kv of (sym.attrs["LibreSpice"] || "").split(";")) {
+      const [k, v] = kv.split("=").map((s: string) => s.trim());
+      if (k && v) lsAttrs[k] = v;
     }
+
+    // A symbol we have no built-in type for is a library part / `.subckt`, not a
+    // resistor: keep it as a subcircuit with its own symbol and pins, so it (and
+    // every wire on it) survives. Its pin order comes from our own attribute, or
+    // from the `.asy` symbol itself for a file written by LTSpice.
+    const known = symbolToType(sym.name);
+    const cType: ComponentType = known ?? "subcircuit";
+    const symBase = (sym.name.split(/[\\/]/).pop() ?? sym.name) as string;
+    const subPins = cType === "subcircuit"
+      ? (lsAttrs.pins?.split(",").map((s) => s.trim()).filter(Boolean)
+         ?? [...(symbolByName(symBase)?.pins ?? [])].sort((a, b) => a.order - b.order).map((p) => p.name))
+      : undefined;
 
     const deg = rotDeg(sym.rot);
 
     // Pin registration (LTSpice symbol-local offsets, rotated about the origin).
-    const rotated = rotatedOffsets(cType, deg);
+    const rotated = offsetsForNode(cType, deg, subPins, symBase);
     for (const p of rotated) {
       pins.push({ compId: sym.id, handle: p.handle, x: sym.x + p.dx, y: sym.y + p.dy });
     }
@@ -359,7 +383,11 @@ export class LTSpiceParser {
     // sits ~16px off, forcing dog-leg wires.
     const { x: nodeX, y: nodeY } = symbolToNode(sym.x, sym.y, rotated, centeringFor(cType));
 
-    const comp = createSpiceComponent(cType, sym.id, label, nodeX, nodeY);
+    // The subcircuit *body* isn't in the .asc — the file references it by name,
+    // exactly as LTSpice does. circuitStore re-links it from the loaded library.
+    const comp = cType === "subcircuit"
+      ? createSubcircuitComponent(sym.id, label, nodeX, nodeY, "", subPins ?? [])
+      : createSpiceComponent(cType, sym.id, label, nodeX, nodeY);
 
     // Preserve LTSpice waveform specs verbatim (PULSE/SINE/PWL/EXP/SFFM) so
     // `{param}` expressions and unit suffixes survive to the netlist. ngspice
@@ -370,44 +398,47 @@ export class LTSpiceParser {
     }
 
     // Parse values
-    if (cType === "sinesource") {
-      const match = valueStr.match(/SINE\(([^)]+)\)/i);
-      if (match) {
-        const pVals = match[1].split(/[\s,]+/).map(parseSI);
-        if (pVals[0] !== undefined) (comp as any).offset = pVals[0];
-        if (pVals[1] !== undefined) (comp as any).amplitude = pVals[1];
-        if (pVals[2] !== undefined) (comp as any).frequency = pVals[2];
+    const c = comp as any;
+    if (cType === "vsource" || cType === "isource") {
+      // Generalized source: waveform kind + every field of its spec, so a phase,
+      // delay or damping factor set in LTSpice (or by us on the last save) is
+      // still there after the load — and the UI shows the right waveform.
+      const wave = valueStr.match(/^\s*(sine?|pulse)\s*\(([^)]*)\)/i);
+      const f = wave ? wave[2].split(/[\s,]+/).filter(Boolean).map(parseSI) : [];
+      if (wave && /^sin/i.test(wave[1])) {
+        // SINE(Voffset Vamp Freq Td Theta Phi Ncycles)
+        c.sourceType = "Sine";
+        if (f[0] !== undefined) c.sOffset = f[0];
+        if (f[1] !== undefined) c.sAmpl = f[1];
+        if (f[2] !== undefined) c.sFreq = f[2];
+        if (f[3] !== undefined) c.sTd = f[3];
+        if (f[4] !== undefined) c.sTheta = f[4];
+        if (f[5] !== undefined) c.sPhi = f[5];
+        if (f[6] !== undefined && c.sNcycles !== undefined) c.sNcycles = f[6];
+      } else if (wave && cType === "vsource") {
+        // PULSE(V1 V2 Tdelay Trise Tfall Ton Tperiod Ncycles). Read every field —
+        // omitting delay/rise/fall left them at their defaults (a 1 ns edge), so a
+        // triangle like PULSE(0 10 0 10 10 0 20) collapsed to a 1 ns spike.
+        c.sourceType = "Pulse";
+        if (f[0] !== undefined) c.pV1 = f[0];
+        if (f[1] !== undefined) c.pV2 = f[1];
+        if (f[2] !== undefined) c.pTd = f[2];
+        if (f[3] !== undefined) c.pTr = f[3];
+        if (f[4] !== undefined) c.pTf = f[4];
+        if (f[5] !== undefined) c.pPw = f[5];
+        if (f[6] !== undefined) c.pPer = f[6];
+        if (f[7] !== undefined) c.pNp = f[7];
+      } else if (!/\(/.test(valueStr)) {
+        // Plain DC level ("5", "DC 5", "DC 5 AC 1"), possibly with only an AC spec.
+        c.sourceType = "DC";
+        if (valueStr) c.dcValue = parseDC(valueStr);
       }
-    } else if (cType === "isource" && /^\s*sine?\s*\(/i.test(valueStr)) {
-      // A SINE current source: fill the structured sine fields and flag the
-      // waveform so it survives a later UI edit that clears the verbatim spec.
-      const match = valueStr.match(/SINE?\(([^)]+)\)/i);
-      if (match) {
-        (comp as any).sourceType = "Sine";
-        const pVals = match[1].split(/[\s,]+/).map(parseSI);
-        if (pVals[0] !== undefined) (comp as any).sOffset = pVals[0];
-        if (pVals[1] !== undefined) (comp as any).sAmpl = pVals[1];
-        if (pVals[2] !== undefined) (comp as any).sFreq = pVals[2];
-        if (pVals[3] !== undefined) (comp as any).sTd = pVals[3];
-        if (pVals[4] !== undefined) (comp as any).sTheta = pVals[4];
-        if (pVals[5] !== undefined) (comp as any).sPhi = pVals[5];
-      }
-    } else if (cType === "pulsesource") {
-       // PULSE(V1 V2 Tdelay Trise Tfall Ton Tperiod). Read every field — omitting
-       // delay/rise/fall left them at their defaults (a 1 ns edge), so a triangle
-       // like PULSE(0 10 0 10 10 0 20) collapsed to a 1 ns spike once the verbatim
-       // rawSpec was dropped (e.g. after any edit in the properties panel).
-       const match = valueStr.match(/PULSE\(([^)]+)\)/i);
-       if (match) {
-         const pVals = match[1].split(/[\s,]+/).map(parseSI);
-         if (pVals[0] !== undefined) (comp as any).initialValue = pVals[0];
-         if (pVals[1] !== undefined) (comp as any).pulsedValue = pVals[1];
-         if (pVals[2] !== undefined) (comp as any).delay = pVals[2];
-         if (pVals[3] !== undefined) (comp as any).riseTime = pVals[3];
-         if (pVals[4] !== undefined) (comp as any).fallTime = pVals[4];
-         if (pVals[5] !== undefined) (comp as any).pulseWidth = pVals[5];
-         if (pVals[6] !== undefined) (comp as any).period = pVals[6];
-       }
+      // Parasitics: LTSpice keeps them in `SYMATTR SpiceLine Rser=… Cpar=…`.
+      const spiceLine = (sym.attrs["SpiceLine"] || "") + " " + (sym.attrs["SpiceLine2"] || "");
+      const rser = spiceLine.match(/\bRser\s*=\s*(\S+)/i);
+      const cpar = spiceLine.match(/\bCpar\s*=\s*(\S+)/i);
+      if (rser && c.seriesR !== undefined) c.seriesR = parseSI(rser[1]);
+      if (cpar && c.parallelC !== undefined) c.parallelC = parseSI(cpar[1]);
     } else if (valueStr && comp.hasOwnProperty("model")) {
       // Semiconductors carry a model name (e.g. a diode's `1N4148`), not a value.
       (comp as any).model = valueStr;
@@ -435,11 +466,22 @@ export class LTSpiceParser {
       }
     }
 
+    // Apply our own attributes (`pins` is structural and already used above).
+    // setProperty drops a verbatim imported spec (a UI edit overrides it), so
+    // restore it afterwards — these attributes are not waveform edits.
+    const keptSpec = (comp as any).rawSpec;
+    for (const [k, v] of Object.entries(lsAttrs)) {
+      if (k !== "pins") comp.setProperty(k, v);
+    }
+    if (keptSpec) (comp as any).rawSpec = keptSpec;
+
     components.push(comp);
 
-    // On-canvas value caption: fall back to the AC spec for an AC-only source
-    // (empty main Value) so it isn't rendered blank.
-    let displayValue = valueStr;
+    // On-canvas value caption: the same formatting the editor uses for a
+    // component edited in-app, so a saved and reloaded part reads identically.
+    // Fall back to the raw attribute (e.g. a model name), then to the AC spec of
+    // an AC-only source, so the caption is never rendered blank.
+    let displayValue = getValueLabel(comp, cType) || valueStr;
     if (!displayValue && (comp as any).acAmplitude) displayValue = `AC ${(comp as any).acAmplitude}`;
 
     // Note: LTSpice WINDOW positions are intentionally NOT imported as caption
@@ -457,6 +499,10 @@ export class LTSpiceParser {
         label,
         valueLabel: displayValue,
         rotation: deg,
+        // The generalized source picks its symbol (DC / sine / pulse) from this.
+        ...((comp as any).sourceType !== undefined && { sourceType: (comp as any).sourceType }),
+        // Library part: its handles, its `.asy` symbol and the subcircuit name.
+        ...(cType === "subcircuit" && { pins: subPins ?? [], symbolName: symBase, subName: valueStr || symBase }),
       }
     });
   }

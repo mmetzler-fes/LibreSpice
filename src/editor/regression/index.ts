@@ -5,6 +5,7 @@ import { runPointerDragTests } from "./pointerDrag.test.js";
 import { runLongPressTests } from "./longPress.test.js";
 import { runNetlistPrefixTests } from "./netlistPrefix.test.js";
 import { runAscConnectivityTests } from "./ascConnectivity.test.js";
+import { runShareLinkTests } from "./shareLink.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
@@ -21,5 +22,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Netlist prefixes", ...runNetlistPrefixTests() },
     { name: "ASC connectivity", ...runAscConnectivityTests() },
+    // Share links/QR codes decompress asynchronously.
+    { name: "Share links", ...(await runShareLinkTests()) },
   ];
 }

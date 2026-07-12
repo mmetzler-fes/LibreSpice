@@ -52,6 +52,32 @@ export abstract class SpiceComponent {
 
   abstract clone(): SpiceComponent;
 
+  /**
+   * Full persistable state. A superset of {@link getProperties}, which only
+   * returns the fields the UI currently shows — a source in DC mode hides its
+   * sine fields, so saving the property list alone silently dropped e.g. a
+   * configured phase. Subclasses with hidden state override this.
+   */
+  serialize(): Record<string, string | number> {
+    const out: Record<string, string | number> = {};
+    for (const p of this.getProperties()) out[p.key] = p.value;
+    if (this.valueExpr) out.valueExpr = this.valueExpr;
+    return out;
+  }
+
+  /** Restore a {@link serialize} payload. */
+  deserialize(props: Record<string, string | number>): void {
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "valueExpr") this.valueExpr = String(value);
+      else if (key !== "rawSpec") this.setProperty(key, value);
+    }
+    // rawSpec last: setProperty clears it (a UI edit overrides an imported spec),
+    // so it must be re-applied after the structured fields are restored.
+    if (typeof props.rawSpec === "string" && "rawSpec" in this) {
+      (this as unknown as { rawSpec: string }).rawSpec = props.rawSpec;
+    }
+  }
+
   getPort(name: string): Port | undefined {
     return this.ports.find((p) => p.name === name);
   }
