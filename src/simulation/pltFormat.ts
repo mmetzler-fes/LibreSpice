@@ -41,11 +41,31 @@ export interface PltPane {
    * `X:` bounds then refer to that quantity, not to the sweep.
    */
   parametric?: string;
+
+  // ── LibreSpice extensions ────────────────────────────────────────────────
+  // Settings the `.plt` format has no field for. They are written as extra
+  // `Key: value` lines inside the pane block, which LTSpice ignores (it skips
+  // keys it doesn't know), so the file stays loadable there.
+
+  /** Trace colour overrides, trace name → CSS colour. */
+  colors?: Record<string, string>;
+  /** y-axis scale. "log" also sets the standard `Log:` y flag; "db" is ours. */
+  yScale?: "linear" | "log" | "db";
+  /** Functions kept in the list but toggled off (not drawn). */
+  hidden?: string[];
+  /** Manual y-axis caption; empty = auto from the unit. */
+  yLabel?: string;
+  /** Fixed pane height in px (drag handle); unset = share the space. */
+  height?: number;
 }
 
 export interface PltDoc {
   analysis: string;
   panes: PltPane[];
+  /** "Sync. Horiz. Axes": all panes share one x-range. */
+  syncX?: boolean;
+  /** Diagram drawn on a white background (print/beamer look). */
+  light?: boolean;
 }
 
 /** SI display prefix for the axis magnitude (cosmetic; bounds stay raw). */
@@ -79,6 +99,8 @@ export function serializePlt(doc: PltDoc): string {
   lines.push(`[${doc.analysis}]`);
   lines.push("{");
   lines.push(`   Npanes: ${doc.panes.length}`);
+  if (doc.syncX) lines.push(`   SyncX: 1`);
+  if (doc.light) lines.push(`   Light: 1`);
   doc.panes.forEach((pane, pi) => {
     lines.push("   {");
     const toks = pane.traces.map((name, i) => `{${524290 + i},0,"${name}"}`).join(" ");
@@ -86,8 +108,20 @@ export function serializePlt(doc: PltDoc): string {
     if (pane.parametric) lines.push(`      Parametric: "${pane.parametric}"`);
     lines.push(`      X: ${fmtAxis(pane.x)}`);
     pane.y.forEach((y, yi) => lines.push(`      Y[${yi}]: ${fmtAxis(y)}`));
-    lines.push(`      Log: ${pane.log.map((b) => (b ? 1 : 0)).join(" ")}`);
+    // A logarithmic y-axis is expressible in LTSpice's own Log flags; dB is not,
+    // so it rides along in YScale (below) and leaves the flag at 0.
+    const logY = pane.yScale === "log";
+    lines.push(`      Log: ${[pane.log[0], logY, logY].map((b) => (b ? 1 : 0)).join(" ")}`);
     lines.push(`      GridStyle: 1`);
+    if (pane.yScale && pane.yScale !== "linear") lines.push(`      YScale: ${pane.yScale}`);
+    if (pane.yLabel) lines.push(`      YLabel: "${pane.yLabel}"`);
+    if (pane.height !== undefined) lines.push(`      Height: ${Math.round(pane.height)}`);
+    for (const [trace, color] of Object.entries(pane.colors ?? {})) {
+      lines.push(`      Color: "${trace}" "${color}"`);
+    }
+    if (pane.hidden?.length) {
+      lines.push(`      Hidden: ${pane.hidden.map((h) => `"${h}"`).join(" ")}`);
+    }
     lines.push(pi < doc.panes.length - 1 ? "   }," : "   }");
   });
   lines.push("}");
@@ -163,7 +197,34 @@ function parsePane(body: string): PltPane | null {
   // form is not used, so it never lands in `traces`.
   const pm = body.match(/^[ \t]*Parametric:[ \t]*(.+?)[ \t]*$/m);
   const parametric = pm ? pm[1].replace(/^"|"$/g, "") : undefined;
-  return { traces, x, y, log: [!!logs[0], !!logs[1], !!logs[2]], parametric };
+
+  // LibreSpice extensions (see PltPane). A file written by LTSpice has none of
+  // these, hence every one is optional; a log y-axis still comes through via the
+  // standard Log flag.
+  const colors: Record<string, string> = {};
+  const cRe = /^[ \t]*Color:[ \t]*"([^"]*)"[ \t]*"([^"]*)"[ \t]*$/gm;
+  let cm: RegExpExecArray | null;
+  while ((cm = cRe.exec(body)) !== null) colors[cm[1]] = cm[2];
+
+  const ysM = body.match(/^[ \t]*YScale:[ \t]*(linear|log|db)[ \t]*$/mi);
+  const yScale = ysM
+    ? (ysM[1].toLowerCase() as "linear" | "log" | "db")
+    : (logs[1] ? "log" : undefined);
+
+  const hm = body.match(/^[ \t]*Hidden:[ \t]*(.+?)[ \t]*$/m);
+  const hidden = hm ? [...hm[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]) : undefined;
+
+  const ylM = body.match(/^[ \t]*YLabel:[ \t]*"([^"]*)"[ \t]*$/m);
+  const hM = body.match(/^[ \t]*Height:[ \t]*(\d+)[ \t]*$/m);
+
+  return {
+    traces, x, y, log: [!!logs[0], !!logs[1], !!logs[2]], parametric,
+    ...(Object.keys(colors).length ? { colors } : {}),
+    ...(yScale ? { yScale } : {}),
+    ...(hidden?.length ? { hidden } : {}),
+    ...(ylM ? { yLabel: ylM[1] } : {}),
+    ...(hM ? { height: Number(hM[1]) } : {}),
+  };
 }
 
 export function parsePlt(text: string): PltDoc | null {
@@ -178,7 +239,12 @@ export function parsePlt(text: string): PltDoc | null {
   const bodies = blocks.length > 0 ? blocks : [outer];
   const panes = bodies.map(parsePane).filter((p): p is PltPane => p !== null);
   if (panes.length === 0) return null;
-  return { analysis, panes };
+  return {
+    analysis,
+    panes,
+    syncX: /^[ \t]*SyncX:[ \t]*1[ \t]*$/m.test(text),
+    light: /^[ \t]*Light:[ \t]*1[ \t]*$/m.test(text),
+  };
 }
 
 /** Grid spacing (our tick model) from an axis tuple, or undefined if invalid. */

@@ -35,6 +35,8 @@ export function applyPltText(text: string): boolean {
   const tracePanel: Record<string, string> = {};
   const exprs = new Set<string>();
   const raw = new Set<string>();
+  const colors: Record<string, string> = {};
+  const hidden = new Set<string>();
 
   doc.panes.forEach((pane, i) => {
     const id = `panel-${i}`;
@@ -51,6 +53,9 @@ export function applyPltText(text: string): boolean {
       xMin: pane.x.low, xMax: pane.x.high, xTicks: tickStep(pane.x), logX: pane.log[0],
       yMin: pane.y[0]?.low, yMax: pane.y[0]?.high, yTicks: tickStep(pane.y[0]),
       yAxes,
+      ...(pane.yScale ? { yScale: pane.yScale } : {}),
+      ...(pane.yLabel ? { yLabel: pane.yLabel } : {}),
+      ...(pane.height !== undefined ? { height: pane.height } : {}),
     });
     for (const t of pane.traces) {
       const name = resolveName(t);
@@ -62,10 +67,26 @@ export function applyPltText(text: string): boolean {
     if (xTrace) {
       if (looksLikeExpression(xTrace)) exprs.add(xTrace); else raw.add(xTrace);
     }
+    for (const [trace, color] of Object.entries(pane.colors ?? {})) colors[resolveName(trace)] = color;
+    // A hidden function is not drawn, so it has no trace token — it only lives in
+    // `Hidden:` and must be added back to the expression list (toggled off).
+    for (const h of pane.hidden ?? []) {
+      const name = resolveName(h);
+      hidden.add(name);
+      if (looksLikeExpression(name)) exprs.add(name); else raw.add(name);
+      if (!(name in tracePanel)) tracePanel[name] = id;
+    }
   });
 
   usePlotStore.getState().importSettings({
-    version: 1, panels: newPanels, traceToPanel: tracePanel, colors: {}, expressions: [...exprs], syncX: false,
+    version: 1,
+    panels: newPanels,
+    traceToPanel: tracePanel,
+    colors,
+    expressions: [...exprs],
+    hiddenExpressions: [...hidden],
+    syncX: !!doc.syncX,
+    svgLight: !!doc.light,
   });
   // Make the referenced probes active so the traces are re-plotted on next run.
   useSimulationStore.getState().setSelectedVariables([...raw]);

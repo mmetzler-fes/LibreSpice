@@ -8,7 +8,8 @@ import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
 import { evalExpression, resolveSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
-import { serializePlt, siPrefix, type PltDoc, type PltAxis, type PltPane } from "./pltFormat.js";
+import { serializePlt } from "./pltFormat.js";
+import { buildPltDoc } from "./pltBuild.js";
 import { stripStepTag, applyPltText } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
@@ -502,27 +503,25 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     downloadText(xml, `${(circuitName.trim() || "plot")}_Diagramme.svg`, "image/svg+xml");
   }, [panels, svgLight, circuitName]);
 
-  // `step` is the grid spacing (our tick model); fall back to ~5 divisions.
-  const axisFrom = (low: number, high: number, step?: number): PltAxis =>
-    ({ prefix: siPrefix(Math.max(Math.abs(low), Math.abs(high))), low, tick: step && step > 0 ? step : (high - low) / 5, high });
-
   // Save the plot configuration as an LTSpice-compatible `.plt` file, defaulting
   // to the current .asc's folder and base name.
   const handleSavePlt = async () => {
     const time = result!.time!;
-    const doc: PltDoc = {
+    const doc = buildPltDoc({
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
-      panes: panels.map((panel): PltPane => {
-        const traces = allTraces.filter((t) => panelForTrace(t) === panel.id && t !== panel.xTrace);
-        const groups = applyYOverrides(groupByUnit(traces, seriesMap.map), panel);
-        const y = groups.map((g) => axisFrom(g.yMin, g.yMax, g.ticks ?? panel.yTicks));
-        if (y.length === 0) y.push(axisFrom(panel.yMin ?? -1, panel.yMax ?? 1, panel.yTicks));
-        // A parametric panel's x bounds describe its x-trace, not the time base.
+      panels, colors, syncX, svgLight,
+      tracesOf: (panel) => allTraces.filter((t) => panelForTrace(t) === panel.id && t !== panel.xTrace),
+      // A hidden function has no trace, so it is not in allTraces — take it from
+      // the expression list, or its colour and its "off" state would be lost.
+      hiddenOf: (panel) =>
+        expressions.filter((e) => hiddenExpressions.includes(e) && panelForTrace(e) === panel.id),
+      yAxesOf: (panel, traces) => applyYOverrides(groupByUnit(traces, seriesMap.map), panel),
+      // A parametric panel's x bounds describe its x-trace, not the time base.
+      xRangeOf: (panel) => {
         const xs = (panel.xTrace ? seriesMap.map[panel.xTrace] : null) ?? time;
-        const x = axisFrom(panel.xMin ?? xs[0], panel.xMax ?? xs[xs.length - 1], panel.xTicks);
-        return { traces, x, y, log: [!!panel.logX, false, false], parametric: panel.xTrace };
-      }),
-    };
+        return { low: panel.xMin ?? xs[0], high: panel.xMax ?? xs[xs.length - 1], ticks: panel.xTicks };
+      },
+    });
     const content = serializePlt(doc);
     const suggestedName = `${circuitName.trim() || "plot"}.plt`;
     if ("showSaveFilePicker" in window) {

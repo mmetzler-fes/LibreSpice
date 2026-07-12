@@ -61,7 +61,11 @@ export interface PlotSettings {
   traceToPanel: Record<string, string>;
   colors: Record<string, string>;
   expressions: string[];
+  /** Functions kept in the list but toggled off. */
+  hiddenExpressions?: string[];
   syncX: boolean;
+  /** Diagram on a white background (print/beamer look). */
+  svgLight?: boolean;
 }
 
 interface PlotActions {
@@ -233,8 +237,9 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       traceToPanel: settings.traceToPanel ?? {},
       colors: settings.colors ?? {},
       expressions: settings.expressions ?? [],
-      hiddenExpressions: [],
+      hiddenExpressions: settings.hiddenExpressions ?? [],
       syncX: !!settings.syncX,
+      ...(settings.svgLight !== undefined && { svgLight: settings.svgLight }),
     });
   },
 
