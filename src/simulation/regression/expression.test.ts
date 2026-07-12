@@ -1,5 +1,5 @@
 import type { SimulationResult } from "@store/simulationStore.js";
-import { evalExpression } from "../expression.js";
+import { evalExpression, exprCheckResult, stepView } from "../expression.js";
 import { inferUnit } from "../units.js";
 
 export interface TestReport {
@@ -77,10 +77,57 @@ const CASES: Case[] = [
       if (inferUnit("I(@r1[i])") !== "A") fail(`device current inferUnit = ${inferUnit("I(@r1[i])")}`);
     },
   },
+  {
+    // A `.step` sweep tags every vector (`v(u2+) @1`, `@2`, …). The user writes
+    // the expression the way the probe list shows it — `V(u2+)-V(u2-)` — so
+    // validating it against the *raw* result found no such variable and rejected
+    // every function on a stepped run ("Unknown variable"), even though the plot
+    // evaluates them per step without trouble. Names with `+`/`-` (a B2U bridge
+    // labels its output U2+ / U2-) were a red herring: it hit any expression.
+    // A6_B2U-Schaltung1_Glaeetung1.asc.
+    name: "a function resolves on a .step run (validated against one step's view)",
+    run: (fail) => {
+      const stepped: SimulationResult = {
+        variables: ["time", "v(u2+) @1", "v(u2-) @1", "v(u2+) @2", "v(u2-) @2"],
+        time: new Float64Array([0, 1, 2]),
+        data: {
+          "v(u2+) @1": new Float64Array([10, 11, 12]),
+          "v(u2-) @1": new Float64Array([2, 3, 4]),
+          "v(u2+) @2": new Float64Array([20, 21, 22]),
+          "v(u2-) @2": new Float64Array([5, 5, 5]),
+        },
+      };
+      const expr = "V(u2+)-V(u2-)";
+
+      // The raw result cannot resolve it — this is what the add-function check used.
+      if (!evalExpression(stepped, expr).error) fail("the raw stepped result should not resolve a plain name");
+
+      // The view the check must use: one step, plain names.
+      const checked = evalExpression(exprCheckResult(stepped, ["1", "2"]), expr);
+      if (checked.error) { fail(`the function was rejected on a stepped run: ${checked.error}`); return; }
+      if (!checked.values) { fail("no values"); return; }
+      if (checked.values[0] !== 8 || checked.values[2] !== 8) {
+        fail(`step 1 values ${[...checked.values]} ≠ 8,8,8`);
+      }
+
+      // And each step evaluates on its own data (that is what the plot draws).
+      const s2 = evalExpression(stepView(stepped, "2"), expr);
+      if (s2.error) { fail(`step 2 failed: ${s2.error}`); return; }
+      if (s2.values?.[0] !== 15) fail(`step 2 value ${s2.values?.[0]} ≠ 15`);
+
+      // Without a step sweep the raw result is used unchanged.
+      const plain: SimulationResult = {
+        variables: ["time", "v(a)"], time: new Float64Array([0, 1]),
+        data: { "v(a)": new Float64Array([1, 2]) },
+      };
+      if (exprCheckResult(plain, null) !== plain) fail("an unstepped result must be passed through unchanged");
+    },
+  },
 ];
 
 export function runExpressionTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];
+
   let failedCases = 0;
   for (const tc of CASES) {
     let failed = false;

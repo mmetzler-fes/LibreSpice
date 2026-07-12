@@ -179,3 +179,27 @@ export function evalExpression(result: SimulationResult, expr: string, params: R
     return { error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/**
+ * One step's data under the plain variable names. A `.step` sweep tags every
+ * vector (`v(out) @1`, `v(out) @2`, …), while a user writes an expression the way
+ * the probe list shows it — `V(out)`.
+ */
+export function stepView(result: SimulationResult, tag: string): SimulationResult {
+  const suffix = ` @${tag}`;
+  const data: Record<string, Float64Array> = {};
+  for (const k of Object.keys(result.data)) {
+    if (k.endsWith(suffix)) data[k.slice(0, -suffix.length)] = result.data[k];
+  }
+  return { variables: Object.keys(data), data, time: result.time };
+}
+
+/**
+ * The result an expression must be *validated* against. For a stepped run that
+ * is a single step's view: checking against the raw, tagged names rejected every
+ * function on a `.step` sweep ("Unknown variable V(out)") even though the plot
+ * evaluates them per step without trouble.
+ */
+export function exprCheckResult(result: SimulationResult, stepTags: string[] | null | undefined): SimulationResult {
+  return stepTags?.length ? stepView(result, stepTags[0]) : result;
+}

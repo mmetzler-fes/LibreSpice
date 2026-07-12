@@ -1,12 +1,12 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { useSimulationStore, type SimulationResult } from "@store/simulationStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
-import { evalExpression, resolveSeries } from "./expression.js";
+import { evalExpression, resolveSeries, stepView, exprCheckResult } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
@@ -339,25 +339,22 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     return [...new Set([...selectedVariables, ...exprTraces])];
   }, [selectedVariables, expressions, hiddenExpressions, stepTags]);
 
+  // A stepped run tags every vector (`v(out) @1`), so both the plot and the
+  // validation have to look at one step's view under the plain names.
+  const checkResult = result ? exprCheckResult(result, stepTags) : null;
+
   // Resolve each trace to a data series (raw variable or evaluated expression).
   const seriesMap = useMemo(() => {
     const map: Record<string, Float64Array | null> = {};
     const errors: Record<string, string> = {};
     if (result) {
-      // A single-step data view (base variable names) for per-step expressions.
-      const stepView = (tag: string): SimulationResult => {
-        const suffix = ` @${tag}`;
-        const data: Record<string, Float64Array> = {};
-        for (const k of Object.keys(result.data)) if (k.endsWith(suffix)) data[k.slice(0, -suffix.length)] = result.data[k];
-        return { variables: Object.keys(data), data, time: result.time };
-      };
       for (const trace of allTraces) {
         if (result.data[trace]) { map[trace] = result.data[trace]; continue; }
         const at = trace.lastIndexOf(" @");
         const tag = at >= 0 && stepTags?.includes(trace.slice(at + 2)) ? trace.slice(at + 2) : null;
         const base = tag ? trace.slice(0, at) : trace;
         if (expressions.includes(base)) {
-          const r = evalExpression(tag ? stepView(tag) : result, base, paramMap);
+          const r = evalExpression(tag ? stepView(result, tag) : result, base, paramMap);
           map[trace] = r.values ?? null;
           if (r.error) errors[base] = r.error;
         } else {
@@ -440,8 +437,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const handleAddExpression = () => {
     const expr = exprInput.trim();
     if (!expr) return;
-    if (result) {
-      const r = evalExpression(result, expr, paramMap);
+    if (checkResult) {
+      const r = evalExpression(checkResult, expr, paramMap);
       if (r.error) { setExprError(r.error); return; }
     }
     addExpression(expr);
@@ -454,8 +451,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   const handleEditExpression = (oldExpr: string, next: string): boolean => {
     const trimmed = next.trim();
     if (!trimmed) return false;
-    if (result) {
-      const r = evalExpression(result, trimmed, paramMap);
+    if (checkResult) {
+      const r = evalExpression(checkResult, trimmed, paramMap);
       if (r.error) { setExprError(r.error); return false; }
     }
     setExprError(null);
