@@ -2,6 +2,7 @@ import { Resistor } from "@core/components/passives/Resistor.js";
 import { Capacitor } from "@core/components/passives/Capacitor.js";
 import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
+import { normalizeMeasDirective } from "@core/circuit/NetlistGenerator.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -45,10 +46,36 @@ const CASES: Case[] = [
     const t = firstToken(new MOSFET("m", "U5").getNetlistLine());
     if (t !== "MU5") fail(`expected MU5, got ${t}`);
   } },
+
+  // ── .meas: LTSpice's differential probe ─────────────────────────────────────
+  { name: ".meas V(a,b) → par('v(a)-v(b)') (ngspice has no such vector)", run: (fail) => {
+    // A6_B2U-Schaltung1_Glaeetung1.asc measures the bridge output as V(U2+,U2-).
+    // ngspice fails the whole measurement on it ("no such vector as 'v(u2+,u2-)'")
+    // — and it rejects a bare (v(a)-v(b)) just the same; only par('…') runs.
+    // Verified against the engine: the translated line yields ubrpp = 1.954e+01.
+    const out = normalizeMeasDirective(".meas TRAN UBrPP PP V(U2+,U2-) FROM 20ms");
+    if (!out.includes("par('v(U2+)-v(U2-)')")) fail(`not translated: ${out}`);
+    if (/v\s*\([^)]*,/i.test(out)) fail(`a differential probe survived: ${out}`);
+    // The FROM keyword still becomes from= (the existing normalisation).
+    if (!/\bfrom=20ms\b/.test(out)) fail(`from= lost: ${out}`);
+  } },
+
+  { name: ".meas V(a,0) drops the ground term", run: (fail) => {
+    const out = normalizeMeasDirective(".meas TRAN u PP V(out,0)");
+    if (!out.includes("par('v(out)-0')")) fail(`ground term not dropped: ${out}`);
+  } },
+
+  { name: "a plain .meas and a non-.meas line are left alone", run: (fail) => {
+    const plain = ".meas TRAN u PP V(out) from=1ms";
+    if (normalizeMeasDirective(plain) !== plain) fail(`rewritten: ${normalizeMeasDirective(plain)}`);
+    const tran = ".tran 1m 40m";
+    if (normalizeMeasDirective(tran) !== tran) fail(`non-.meas line touched: ${normalizeMeasDirective(tran)}`);
+  } },
 ];
 
 export function runNetlistPrefixTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];
+
   let failed = 0;
   for (const tc of CASES) {
     let f = false;

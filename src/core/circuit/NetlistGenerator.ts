@@ -269,7 +269,28 @@ export function normalizeDcDirective(line: string): string {
  */
 export function normalizeMeasDirective(line: string): string {
   if (!/^\s*\.meas\b/i.test(line)) return line;
-  return line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`);
+  return expandDiffProbes(
+    line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
+  );
+}
+
+/**
+ * `V(a,b)` → `par('v(a)-v(b)')`, LTSpice's differential probe. ngspice has no
+ * such vector and fails the whole measurement ("no such vector as 'v(u2+,u2-)'"),
+ * so a `.meas` over a bridge output written the LTSpice way produced no result.
+ *
+ * The `par('…')` wrapper is required: ngspice rejects a bare `(v(a)-v(b))` in a
+ * `.meas` just as it rejects `v(a,b)` — measured against the engine, only the
+ * par() form runs. A node named `0` is ground and drops out to a plain zero.
+ */
+export function expandDiffProbes(line: string): string {
+  return line.replace(
+    /\bv\s*\(\s*([^\s,()]+)\s*,\s*([^\s,()]+)\s*\)/gi,
+    (_m, a: string, b: string) => {
+      const term = (n: string) => (n === "0" ? "0" : `v(${n})`);
+      return `par('${term(a)}-${term(b)}')`;
+    },
+  );
 }
 
 /** Parse a SPICE value token with an optional SI suffix (1u, 10m, 1meg, 1k). */
