@@ -668,6 +668,35 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           {exprError && <div style={{ fontSize: 9, color: "#f87171" }}>{exprError}</div>}
         </div>
 
+        {/* Functions, right under the field that creates them: appended at the
+            bottom of the probe list, a new one landed at the very end of a long
+            scroll — on the iPad behind the keyboard bar, exactly where it is
+            hardest to reach. They grow downward from here instead. */}
+        {expressions.length > 0 && (
+          <div className="keyboard-safe" style={{ padding: "0 6px 6px", display: "flex", flexDirection: "column", gap: 2, borderBottom: `1px solid ${pt.border}`, flexShrink: 0, maxHeight: "40%", overflow: "auto" }}>
+            <div style={{ fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase", padding: "2px 0" }}>
+              Functions
+            </div>
+            {expressions.map((expr) => (
+              <ProbeRow
+                key={expr}
+                label={expr}
+                color={colorFor(expr)}
+                active={!hiddenExpressions.includes(expr)}
+                draggable
+                error={seriesMap.errors[expr]}
+                onToggle={() => toggleExpressionHidden(expr)}
+                onDragStart={(e) => e.dataTransfer.setData(DND_MIME, expr)}
+                onSwatch={() => setColorPickerFor(colorPickerFor === expr ? null : expr)}
+                showPicker={colorPickerFor === expr}
+                onPick={(c) => { setColor(expr, c); setColorPickerFor(null); }}
+                onRemove={() => removeExpression(expr)}
+                onEdit={(next) => handleEditExpression(expr, next)}
+              />
+            ))}
+          </div>
+        )}
+
         <div className="keyboard-safe" style={{ padding: 6, display: "flex", flexDirection: "column", gap: 2, flex: 1, overflow: "auto" }}>
           {probeGroups
             ? probeGroups.map((g) => {
@@ -725,28 +754,6 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
                 );
               })}
 
-          {expressions.length > 0 && (
-            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 600, color: pt.labelDim, textTransform: "uppercase", padding: "2px 6px" }}>
-              Functions
-            </div>
-          )}
-          {expressions.map((expr) => (
-            <ProbeRow
-              key={expr}
-              label={expr}
-              color={colorFor(expr)}
-              active={!hiddenExpressions.includes(expr)}
-              draggable
-              error={seriesMap.errors[expr]}
-              onToggle={() => toggleExpressionHidden(expr)}
-              onDragStart={(e) => e.dataTransfer.setData(DND_MIME, expr)}
-              onSwatch={() => setColorPickerFor(colorPickerFor === expr ? null : expr)}
-              showPicker={colorPickerFor === expr}
-              onPick={(c) => { setColor(expr, c); setColorPickerFor(null); }}
-              onRemove={() => removeExpression(expr)}
-              onEdit={(next) => handleEditExpression(expr, next)}
-            />
-          ))}
         </div>
 
       </div>
