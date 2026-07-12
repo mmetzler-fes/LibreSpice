@@ -102,22 +102,31 @@ function NetLabelGhost({ rotation }: { rotation: number }) {
   const shape = netLabelShape(rotation);
   const c = NODE_SIZE / 2;
   const color = "#2563eb";
+  // The name tag is laid out exactly as NetLabelNode does it — same anchor, same
+  // box — so the preview and the connector that appears are the same picture; an
+  // SVG text drawn "roughly there" reads as a displaced label.
+  const tagStyle: React.CSSProperties = shape.tag.baseline === "middle"
+    ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
+    : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
   return (
-    <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
-      <line
-        x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2}
-        stroke={color} strokeWidth={1.6} strokeLinecap="round"
-      />
-      <polygon points={shape.head} fill={color} />
-      <circle cx={c} cy={c} r={shape.circle.r} fill="none" stroke={color} strokeWidth={1.6} />
-      <text
-        x={shape.tag.x} y={shape.tag.y}
-        textAnchor={shape.tag.anchor === "start" ? "start" : "middle"}
-        dominantBaseline={shape.tag.baseline === "middle" ? "middle" : "auto"}
-        fontFamily="monospace" fontSize={11} fill={color}
+    <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE }}>
+      <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color, display: "block" }}>
+        <line
+          x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2}
+          stroke={color} strokeWidth={1.6} strokeLinecap="round"
+        />
+        <polygon points={shape.head} fill={color} />
+        <circle cx={c} cy={c} r={shape.circle.r} fill="none" stroke={color} strokeWidth={1.6} />
+      </svg>
+      <div
+        style={{
+          position: "absolute", ...tagStyle,
+          padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
+          lineHeight: 1.3, border: `1px solid ${color}`, color,
+        }}
       >
         NET
-      </text>
-    </svg>
+      </div>
+    </div>
   );
 }
