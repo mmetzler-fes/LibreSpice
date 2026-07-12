@@ -1,5 +1,6 @@
 import { usePlotStore, type PlotPanel } from "../plotStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
+import { useCircuitStore } from "@store/circuitStore.js";
 import { buildPltDoc } from "../pltBuild.js";
 import { serializePlt, parsePlt } from "../pltFormat.js";
 import { applyPltText } from "../pltApply.js";
@@ -19,6 +20,14 @@ import type { TestReport } from "@editor/regression/svgExport.test.js";
  */
 
 type Case = { name: string; run: (fail: (r: string) => void) => void };
+
+/** A circuit with no plot settings of its own — loading it must reset the diagram. */
+const ASC_PLAIN = `Version 4
+SHEET 1 880 680
+SYMBOL res 0 0 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+`;
 
 const plot = () => usePlotStore.getState();
 const sim = () => useSimulationStore.getState();
@@ -185,6 +194,39 @@ const CASES: Case[] = [
     for (const key of ["Npanes:", "traces:", "X:", "Y[0]:", "Log:", "GridStyle:"]) {
       if (!plt.includes(key)) fail(`LTSpice key ${key} missing:\n${plt}`);
     }
+  } },
+
+  // ── Loading a circuit resets the diagram ───────────────────────────────────
+
+  { name: "load: a new circuit without a .plt resets the axes to linear/auto", run: (fail) => {
+    setUpPlot();                       // dB axis, log axis, fixed bounds, colours…
+    useSimulationStore.setState({ result: { time: new Float64Array([0, 1]) } as never });
+    useCircuitStore.getState().loadFromAsc(ASC_PLAIN);
+
+    const p = plot().panels;
+    if (p.length !== 1) fail(`${p.length} panels != 1 (panels not reset)`);
+    const only = p[0];
+    for (const k of ["xMin", "xMax", "xTicks", "yMin", "yMax", "yTicks", "yScale", "yLabel", "height", "xTrace"] as const) {
+      if (only[k] !== undefined) fail(`${k} survived the load as ${only[k]} — axes must be auto`);
+    }
+    if (only.logX) fail("logX survived — the x-axis must be linear");
+    if (Object.keys(plot().colors).length) fail("colours of the previous circuit survived");
+    if (plot().expressions.length || plot().hiddenExpressions.length) fail("functions of the previous circuit survived");
+    if (Object.keys(plot().traceToPanel).length) fail("trace assignments of the previous circuit survived");
+    if (plot().syncX) fail("syncX survived");
+    // The old result and probes belong to the previous circuit's nets.
+    if (sim().result !== null) fail("the previous circuit's simulation result survived");
+    if (sim().selectedVariables.length) fail("the previous circuit's probes survived");
+  } },
+
+  { name: "load: a sibling .plt still wins over the reset", run: (fail) => {
+    setUpPlot();
+    const plt = savePlt();
+    // The toolbar loads the .asc first, then applies <name>.plt on top.
+    useCircuitStore.getState().loadFromAsc(ASC_PLAIN);
+    if (!applyPltText(plt)) { fail("the .plt did not apply after the load"); return; }
+    if (plot().panels[0].yScale !== "db") fail("the .plt settings were not applied after the reset");
+    if (plot().colors["V(out)"] !== "#ff0000") fail("the .plt colours were not applied");
   } },
 
   { name: "plt: an LTSpice-written file still loads (incl. its log y-axis)", run: (fail) => {

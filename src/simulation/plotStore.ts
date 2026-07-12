@@ -87,6 +87,14 @@ interface PlotActions {
   /** Toggle the diagram between the dark (screen) and light (print/beamer) look. */
   toggleSvgLight: () => void;
   importSettings: (settings: PlotSettings) => void;
+  /**
+   * Back to the defaults: one panel, linear x/y, auto bounds, no colour or
+   * function overrides. Called when a new circuit is loaded, so its diagram does
+   * not inherit the previous circuit's axes (a dB/log scale or a fixed range
+   * fitted to other data leaves the new traces off-screen or invisible). A
+   * sibling `.plt` is applied *after* this and overrides it.
+   */
+  resetSettings: () => void;
   /** Follow a net rename in traces/expressions/colours/panel assignments. */
   renameTraceNet: (oldLabel: string, newLabel: string) => void;
 }
@@ -242,6 +250,18 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       ...(settings.svgLight !== undefined && { svgLight: settings.svgLight }),
     });
   },
+
+  resetSettings: () =>
+    set({
+      panels: [{ id: "panel-0" }],
+      traceToPanel: {},
+      colors: {},
+      expressions: [],
+      hiddenExpressions: [],
+      syncX: false,
+      // svgLight is a viewing preference (screen vs. beamer), not a property of
+      // the circuit, so it deliberately survives a load.
+    }),
 
   renameTraceNet: (oldLabel, newLabel) => {
     if (oldLabel === newLabel) return;

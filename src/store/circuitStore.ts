@@ -252,6 +252,14 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const { nodes, edges, directives, components, dataFlags, netNames } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
+    // A new circuit starts with a fresh diagram: linear axes on auto-range, no
+    // colours or functions carried over from the circuit before it. A sibling
+    // `.plt` is applied after this load and overrides it (see Toolbar). The
+    // simulation state goes too — its result and probes belong to nets of the
+    // previous circuit, so the plot would keep drawing the old curves.
+    usePlotStore.getState().resetSettings();
+    useSimulationStore.getState().reset();
+
     const newCircuit = new Circuit();
     for (const comp of components) {
       // A library part is referenced by name in the `.asc` (as in LTSpice); the
@@ -299,6 +307,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   clearCircuit: () => {
     const snap = { nodes: get().nodes, edges: get().edges };
     const newCircuit = new Circuit();
+    usePlotStore.getState().resetSettings();
+    useSimulationStore.getState().reset();
     set((state) => ({
       circuit: newCircuit,
       nodes: [],
