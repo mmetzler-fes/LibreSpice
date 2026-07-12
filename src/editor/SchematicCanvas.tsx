@@ -34,7 +34,7 @@ import { useTheme } from "../theme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import type { ComponentDefinition } from "./componentDefinitions.js";
-import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel } from "./componentFactory.js";
+import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel, nextComponentId } from "./componentFactory.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
 import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
@@ -45,7 +45,6 @@ import { trackPointerDrag } from "./pointerDrag.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
-let componentCounter = 1;
 let wireCounter = 1;
 
 function CanvasInner() {
@@ -184,7 +183,8 @@ function CanvasInner() {
       // Center the node on the (snapped) cursor: node.position is its top-left.
       const x = snapToGrid(cx) - NODE_SIZE / 2;
       const y = snapToGrid(cy) - NODE_SIZE / 2;
-      const id = `${type}_${componentCounter++}`;
+      // Never reuse an id an import already handed out (see nextComponentId).
+      const id = nextComponentId(type, useCircuitStore.getState().nodes.map((n) => n.id));
       // Ground uses label "0" internally; display label is separate
       const label = type === "ground" ? "0" : getNextLabel(type, existingLabels());
       const component = createSpiceComponent(type, id, label, x, y);
@@ -208,7 +208,7 @@ function CanvasInner() {
       const y = snapToGrid(cy) - NODE_SIZE / 2;
 
       if (placement.componentType === "subcircuit") {
-        const id = `subckt_${componentCounter++}`;
+        const id = nextComponentId("subckt", useCircuitStore.getState().nodes.map((n) => n.id));
         const label = getNextLabel("subcircuit", existingLabels());
         const component = createSubcircuitComponent(id, label, x, y, placement.raw ?? "", placement.pins ?? []);
         if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);
@@ -225,7 +225,7 @@ function CanvasInner() {
 
       // Typed device backed by an imported .model – place the base symbol with
       // its model property pre-set so the netlist references the model.
-      const id = `${placement.componentType}_${componentCounter++}`;
+      const id = nextComponentId(placement.componentType, useCircuitStore.getState().nodes.map((n) => n.id));
       const label = getNextLabel(placement.componentType, existingLabels());
       const component = createSpiceComponent(placement.componentType, id, label, x, y);
       if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);

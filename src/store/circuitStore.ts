@@ -4,7 +4,7 @@ import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
+import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
 import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
 import { useUIStore } from "./uiStore.js";
 import type { FlowPoint } from "@editor/WireTool.js";
@@ -316,7 +316,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const pin = getNodePins(anchorNode, useUIStore.getState().symbolNorm).find((p) => p.handleId === handle)
       ?? { x: anchorNode.position.x + NODE_SIZE / 2, y: anchorNode.position.y + NODE_SIZE / 2 };
 
-    const id = `netlabel_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const id = nextComponentId("netlabel", nodes.map((n) => n.id));
     // The terminal sits at the node's centre, so offset the box to put it on the pin.
     const x = pin.x - NODE_SIZE / 2, y = pin.y - NODE_SIZE / 2;
     const comp = createSpiceComponent("netlabel", id, name, x, y);
@@ -371,6 +371,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
     }));
     if (created) get().connectPorts(`${created.node.id}-t`, created.anchorPortId);
+    // Naming a net "GND" / "0" makes it ground; the merge happens on the rebuild.
+    if (/^(0|gnd)$/i.test(newLabel)) setTimeout(() => get().rebuildConnections(), 0);
     get().regenerateNetlist();
     // Carry the rename into the waveform so plotted traces follow the new name
     // (both immediately and after a re-run), instead of keeping the old label.
@@ -599,6 +601,30 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           circuit.connectPorts(`${edge.source}-${edge.sourceHandle}`, `${edge.target}-${edge.targetHandle}`);
         } catch { /* visual-only */ }
       }
+    }
+
+    // A label reading "0" or "GND" *is* ground — merge its net into net "0",
+    // exactly as LTSpice treats a "0" flag. Otherwise it became a SPICE node
+    // literally called GND, sitting next to the real ground node "0": the circuit
+    // looked earthed but was floating, and two nets displayed the same name.
+    const isGroundName = (s: string) => /^(0|gnd)$/i.test(s.trim());
+    for (const comp of circuit.components.values()) {
+      const name = comp.getNetLabel();
+      const netId = comp.ports[0]?.netId;
+      if (!name || !isGroundName(name) || !netId || netId === "0") continue;
+
+      const groundNet = circuit.nets.get("0") ?? new Net("0", "GND");
+      circuit.nets.set("0", groundNet);
+      // Move every port of that net over to ground, then drop the empty net.
+      for (const other of circuit.components.values()) {
+        for (const port of other.ports) {
+          if (port.netId === netId) {
+            port.connect("0");
+            groundNet.addPort(port.id);
+          }
+        }
+      }
+      circuit.nets.delete(netId);
     }
 
     // Restore custom labels – never relabel the ground net "0".

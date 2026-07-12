@@ -92,6 +92,25 @@ export function getNextLabel(type: ComponentType, existingLabels: Iterable<strin
   return `${prefix}${max + 1}`;
 }
 
+let idCounter = 1;
+
+/**
+ * A node id that is guaranteed not to be in use. The placement counter alone was
+ * not enough: an import numbers its own components (`netlabel_2`, `ground_1`, …),
+ * so a freshly placed part could be handed an id that already existed. The new
+ * component then *replaced* the old one in the circuit map while both nodes stayed
+ * on the canvas — renaming the new label edited the old one, and its name appeared
+ * across the schematic.
+ */
+export function nextComponentId(type: string, usedIds: Iterable<string>): string {
+  const taken = new Set(usedIds);
+  let id: string;
+  do {
+    id = `${type}_${idCounter++}`;
+  } while (taken.has(id));
+  return id;
+}
+
 function fmtSI(v: number, unit: string): string {
   const a = Math.abs(v);
   if (a === 0) return `0${unit}`;

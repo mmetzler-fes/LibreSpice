@@ -1,4 +1,5 @@
 import { useCircuitStore } from "@store/circuitStore.js";
+import { createSpiceComponent, nextComponentId } from "@editor/componentFactory.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -44,7 +45,110 @@ const netOf = (label: string) => {
 
 const netLabelNode = () => st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "netlabel");
 
+// V1 in series with R1, the bottom rail grounded (the flag sits on V1's − pin).
+const ASC_GND = `Version 4
+SHEET 1 880 680
+FLAG 16 96 0
+WIRE 16 16 128 16
+WIRE 16 96 128 96
+SYMBOL voltage 16 0 R0
+SYMATTR InstName V1
+SYMATTR Value 5
+SYMBOL res 112 0 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+`;
+
+/**
+ * The device lines of the netlist, with the auto-generated net ids canonicalised
+ * (a rebuild renumbers them, which says nothing about connectivity). "V1 net7 0"
+ * and "V1 net9 0" are the same circuit — this makes them compare equal.
+ */
+const devices = () => {
+  const seen = new Map<string, string>();
+  return st().netlist
+    .split("\n")
+    .filter((l) => /^[RCVLID]\w*\s/i.test(l))
+    .join(" | ")
+    .replace(/\bnet\d+\b/g, (m) => {
+      if (!seen.has(m)) seen.set(m, `n${seen.size + 1}`);
+      return seen.get(m)!;
+    });
+};
+
 const CASES: Case[] = [
+  { name: "a net label on the ground net (named GND) changes nothing, and deletes cleanly", run: async (fail) => {
+    st().loadFromAsc(ASC_GND);
+    await tick();
+    st().rebuildConnections();
+    const before = devices();
+
+    // Hang a label named GND straight onto the ground terminal.
+    const gnd = [...st().circuit.components.values()].find((c) => c.id.startsWith("ground_"));
+    if (!gnd) { fail("no ground imported"); return; }
+    const id = nextComponentId("netlabel", st().nodes.map((n) => n.id));
+    st().addComponent(createSpiceComponent("netlabel", id, "GND", 0, 0), {
+      id, type: "component", position: { x: 0, y: 0 }, data: { componentType: "netlabel", label: "GND" },
+    });
+    st().setEdges([...st().edges, {
+      id: `w_${id}`, source: id, sourceHandle: "t", target: gnd.id, targetHandle: "gnd", type: "wire", data: {},
+    }]);
+    st().rebuildConnections();
+    if (devices() !== before) fail(`the netlist changed:\n    before: ${before}\n    after:  ${devices()}`);
+
+    // …and removing it again leaves the circuit exactly as it was.
+    st().removeComponent(id);
+    await tick();
+    st().rebuildConnections();
+    if (devices() !== before) fail(`deleting the GND label changed the netlist: ${devices()}`);
+  } },
+
+  { name: "naming a net GND grounds it (no second node called GND)", run: async (fail) => {
+    st().loadFromAsc(ASC_GND);
+    await tick();
+    st().rebuildConnections();
+    const r1 = [...st().circuit.components.values()].find((c) => c.label === "R1");
+    const top = r1?.ports[0]?.netId;
+    if (!top || top === "0") { fail("R1's top pin is not on a floating net"); return; }
+
+    st().renameNet(top, "GND");
+    await tick();               // the merge happens on the rebuild renameNet schedules
+    st().rebuildConnections();
+
+    // The net must *be* ground, not a SPICE node that merely reads GND — that
+    // looked earthed but was floating next to node 0.
+    if (r1?.ports[0]?.netId !== "0") fail(`R1's pin is on net ${r1?.ports[0]?.netId}, not on ground`);
+    if (/\bGND\b/.test(devices())) fail(`a node literally called GND is in the netlist: ${devices()}`);
+    const named = [...st().circuit.nets.values()].filter((n) => n.nodeLabel === "GND");
+    if (named.length > 1) fail(`${named.length} nets display the name GND`);
+  } },
+
+  { name: "deleting a GND label un-grounds the net again", run: async (fail) => {
+    st().loadFromAsc(ASC_GND);
+    await tick();
+    st().rebuildConnections();
+    const r1 = () => [...st().circuit.components.values()].find((c) => c.label === "R1");
+    const top = r1()?.ports[0]?.netId;
+    if (!top) { fail("R1 has no net"); return; }
+
+    st().renameNet(top, "GND");
+    await tick();
+    st().rebuildConnections();
+    if (r1()?.ports[0]?.netId !== "0") { fail("the net did not become ground"); return; }
+
+    // The label is what grounded it, so removing it must let go again.
+    const label = st().nodes.find((n) => (n.data as { label?: string }).label === "GND"
+      && (n.data as { componentType?: string }).componentType === "netlabel");
+    if (!label) { fail("no GND label on the canvas"); return; }
+    st().removeComponent(label.id);
+    await tick();
+    st().rebuildConnections();
+
+    const a = r1()?.ports[0]?.netId, b = r1()?.ports[1]?.netId;
+    if (a === "0") fail("R1's top pin is still grounded after the label was deleted");
+    if (!a || a === b) fail(`R1 is shorted (both pins on ${a})`);
+  } },
+
   { name: "deleting a net label keeps the wires it sat on", run: async (fail) => {
     st().loadFromAsc(ASC);
     await tick();
@@ -137,6 +241,42 @@ const CASES: Case[] = [
     if (net?.nodeLabel === "UB") fail("the net kept the name UB although its label is gone");
     st().regenerateNetlist();
     if (st().netlist.includes(" UB ")) fail("the netlist still uses the deleted label's name");
+  } },
+
+  { name: "delete a label, place a new one, name it — it stays its own component", run: async (fail) => {
+    // The reported bug: the placement counter started at 1 while the import had
+    // already handed out `netlabel_2`, so a newly placed label got an id that was
+    // in use. It *replaced* the imported component in the circuit map while both
+    // nodes stayed on the canvas — renaming the new one edited the old one, and
+    // the name appeared elsewhere in the schematic.
+    st().loadFromAsc(ASC);
+    await tick();
+    st().rebuildConnections();
+
+    const first = netLabelNode();
+    if (!first) { fail("no net label imported"); return; }
+    st().removeComponent(first.id);
+    await tick();
+
+    // Place a fresh label exactly as the canvas does.
+    const id = nextComponentId("netlabel", st().nodes.map((n) => n.id));
+    if (st().nodes.some((n) => n.id === id)) { fail(`the new label reuses the id ${id}`); return; }
+    const comp = createSpiceComponent("netlabel", id, "NET", 0, 0);
+    st().addComponent(comp, { id, type: "component", position: { x: 0, y: 0 }, data: { componentType: "netlabel", label: "NET" } });
+
+    // Ids stay unique, and every node has its own component behind it.
+    const ids = st().nodes.map((n) => n.id);
+    if (new Set(ids).size !== ids.length) fail(`duplicate node ids: ${ids.join(", ")}`);
+    if (st().circuit.components.size !== ids.length) {
+      fail(`${ids.length} nodes but ${st().circuit.components.size} components — one overwrote another`);
+    }
+
+    // Naming it must rename *this* label and no other.
+    st().updateComponentProperty(id, "label", "U2");
+    const named = st().nodes.filter((n) => (n.data as { label?: string }).label === "U2");
+    if (named.length !== 1 || named[0].id !== id) {
+      fail(`"U2" ended up on ${named.map((n) => n.id).join(", ") || "nothing"} instead of ${id}`);
+    }
   } },
 
   { name: "a wire's net resolves to exactly one net (what the panel shows)", run: async (fail) => {

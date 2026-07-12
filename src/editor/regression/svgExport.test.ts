@@ -64,8 +64,10 @@ const CASES: Case[] = [
     },
   },
   {
-    // The exported endpoints must be the true pin centres. V1 `n` sits at the
-    // node's bottom-centre (40, 70); V2 `p` at its top-centre (240, 210).
+    // The exported endpoints must be the true pin centres. The source's fallback
+    // pins sit 8 px inside the node box — a multiple of the grid, so the terminal
+    // lands on a grid line (and can therefore meet a wire at all). V1 `n` is thus
+    // at (40, 72), V2 `p` at (240, 208).
     name: "exported wire starts and ends on the pin centres",
     run: (fail) => {
       const a = vsource("V1", 0, 0);
@@ -77,8 +79,8 @@ const CASES: Case[] = [
       const pts = polylinePoints(buildSchematicSvg([a, b], [edge], "default"));
       if (pts.length !== 1) return fail(`expected 1 polyline, got ${pts.length}`);
       const verts = pts[0].split(" ");
-      if (verts[0] !== "40,70") fail(`start ${verts[0]} ≠ 40,70`);
-      if (verts[verts.length - 1] !== "240,210") fail(`end ${verts[verts.length - 1]} ≠ 240,210`);
+      if (verts[0] !== "40,72") fail(`start ${verts[0]} ≠ 40,72`);
+      if (verts[verts.length - 1] !== "240,208") fail(`end ${verts[verts.length - 1]} ≠ 240,208`);
     },
   },
   {
