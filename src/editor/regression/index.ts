@@ -6,6 +6,7 @@ import { runLongPressTests } from "./longPress.test.js";
 import { runNetlistPrefixTests } from "./netlistPrefix.test.js";
 import { runAscConnectivityTests } from "./ascConnectivity.test.js";
 import { runShareLinkTests } from "./shareLink.test.js";
+import { runPlacementTests } from "./placement.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 
@@ -24,6 +25,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Plot settings (.plt)", ...runPlotSettingsTests() },
     { name: "Netlist prefixes", ...runNetlistPrefixTests() },
     { name: "ASC connectivity", ...runAscConnectivityTests() },
+    { name: "Placement ghost", ...runPlacementTests() },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];

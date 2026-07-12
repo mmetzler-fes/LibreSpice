@@ -22,7 +22,7 @@ import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, 
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
-import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, GRID_DOTS, snapToGrid, getNodePins } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
@@ -45,13 +45,8 @@ import { trackPointerDrag } from "./pointerDrag.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
-const GRID_SIZE = GRID;
 let componentCounter = 1;
 let wireCounter = 1;
-
-function snapToGrid(v: number): number {
-  return Math.round(v / GRID_SIZE) * GRID_SIZE;
-}
 
 function CanvasInner() {
   const reactFlowInstance = useReactFlow();
@@ -690,7 +685,7 @@ function CanvasInner() {
             onEdgeContextMenu={onEdgeContextMenu}
             onPaneClick={onPaneClick}
             snapToGrid
-            snapGrid={[GRID_SIZE, GRID_SIZE]}
+            snapGrid={[GRID, GRID]}
             fitView={fitOnInit}
             fitViewOptions={{ padding: 0.3 }}
             defaultViewport={{ x: 0, y: 0, zoom: 1 }}
@@ -705,7 +700,7 @@ function CanvasInner() {
               style: { stroke: wireStroke, strokeWidth: 2 },
             }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color={theme.gridDot} />
+            <Background variant={BackgroundVariant.Dots} gap={GRID_DOTS} size={1} color={theme.gridDot} />
           </ReactFlow>
 
           {/* Custom zoom/fit/lock buttons. React Flow's own <Controls> did not

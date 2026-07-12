@@ -3,7 +3,7 @@ import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { symbolToType, CENTER, rotDeg, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, GROUND_PIN, rotDeg, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 
@@ -100,11 +100,12 @@ export class LTSpiceParser {
         const flagName = parts[3];
         if (flagName === "0") {
           const id = `ground_${compIdCounter++}`;
-          const comp = createSpiceComponent("ground", id, "0", x - 40, y - 20);
+          const gx = x - GROUND_PIN.dx, gy = y - GROUND_PIN.dy;
+          const comp = createSpiceComponent("ground", id, "0", gx, gy);
           components.push(comp);
-          // Ground symbol's pin sits at local (40, 20); offset the node so the
-          // rendered terminal lands exactly on the LTSpice flag coordinate.
-          nodes.push({ id, type: "component", position: { x: x - 40, y: y - 20 }, data: { componentType: "ground", label: "0" } });
+          // Offset the node by the ground symbol's pin offset so the rendered
+          // terminal lands exactly on the LTSpice flag coordinate.
+          nodes.push({ id, type: "component", position: { x: gx, y: gy }, data: { componentType: "ground", label: "0" } });
           pins.push({ compId: id, handle: "gnd", x, y });
         } else if (flagName) {
           // Named net label (e.g. UB-) → a placeable NetLabel terminal at the

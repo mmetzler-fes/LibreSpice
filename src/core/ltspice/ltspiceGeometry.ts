@@ -1,5 +1,6 @@
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { symbolByName } from "@sym/asyParser.js";
+import { GROUND_PIN_Y } from "@editor/pinGeometry.js";
 
 /**
  * Shared LTSpice symbol geometry used by both the parser (`.asc` → schematic)
@@ -104,7 +105,7 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
 };
 
 /** Ground's node is offset so its single terminal lands on the FLAG point. */
-export const GROUND_PIN: PinOffset = { handle: "gnd", dx: CENTER, dy: 20 };
+export const GROUND_PIN: PinOffset = { handle: "gnd", dx: CENTER, dy: GROUND_PIN_Y };
 
 export function rotDeg(rot: string): number {
   if (rot === "R90") return 90;

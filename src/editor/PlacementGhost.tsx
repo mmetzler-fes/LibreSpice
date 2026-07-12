@@ -1,11 +1,10 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { SymbolPreview } from "./SymbolPreview.js";
-import { NODE_SIZE } from "./pinGeometry.js";
+import { NODE_SIZE, snapToGrid } from "./pinGeometry.js";
+import { netLabelShape } from "./netLabelShape.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
-
-const GRID = 20;
 
 interface PlacementGhostProps {
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -31,8 +30,9 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
     // which produces no move beforehand.
     const onMove = (e: PointerEvent) => {
       const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      // Snap to the grid point where the node's center will land.
-      setFlowPos({ x: Math.round(flow.x / GRID) * GRID, y: Math.round(flow.y / GRID) * GRID });
+      // The very snap the placement uses, so the ghost marks the exact spot the
+      // component's docking point will land on.
+      setFlowPos({ x: snapToGrid(flow.x), y: snapToGrid(flow.y) });
     };
     const onLeave = () => setFlowPos(null);
     el.addEventListener("pointermove", onMove);
@@ -51,23 +51,73 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
   const left = screen.x - (rect?.left ?? 0);
   const top = screen.y - (rect?.top ?? 0);
 
+  // A net label's terminal stays at the node centre at any rotation (only its
+  // arrow turns, see netLabelShape), so the ghost must not be spun as a whole —
+  // that would swing the docking point away from the cursor.
+  const isNetLabel = type === "netlabel";
+  const spin = isNetLabel ? "" : ` rotate(${placementRotation}deg)`;
+
   return (
     <div
       style={{
         position: "absolute",
         left,
         top,
+        // Exactly the node's box, laid out as a grid cell: the preview is an
+        // inline element, and its baseline strut made the box taller than the
+        // symbol — so translate(-50%) centred the *box*, leaving the drawn symbol
+        // ~2.5 px (× zoom) below the component that then appeared.
+        width: NODE_SIZE,
+        height: NODE_SIZE,
+        display: "grid",
+        placeItems: "center",
+        lineHeight: 0,
         // Center pinned at (left, top); scaled about center so size = NODE_SIZE * zoom.
-        transform: `translate(-50%, -50%) scale(${zoom}) rotate(${placementRotation}deg)`,
+        transform: `translate(-50%, -50%) scale(${zoom})${spin}`,
         transformOrigin: "center center",
         pointerEvents: "none",
         opacity: 0.55,
         zIndex: 6,
       }}
     >
-      {/* nativeScale: render at the node's 1:1 size (not fit-to-box) so the
-          ghost matches the placed component exactly, at any zoom. */}
-      <SymbolPreview type={type} size={NODE_SIZE} nativeScale strokeWidth={1.6} color="#2563eb" />
+      {isNetLabel ? (
+        <NetLabelGhost rotation={placementRotation} />
+      ) : (
+        /* nativeScale: render at the node's 1:1 size (not fit-to-box) so the
+           ghost matches the placed component exactly, at any zoom. */
+        <SymbolPreview type={type} size={NODE_SIZE} nativeScale strokeWidth={1.6} color="#2563eb" />
+      )}
     </div>
+  );
+}
+
+/**
+ * The net-label/connector preview, drawn from the very geometry the placed node
+ * uses ({@link netLabelShape}) — terminal circle at the node centre, the arrow in
+ * the placement rotation, and the upright name tag. The generic glyph used before
+ * put its terminal elsewhere, so the ghost pointed at a different docking spot
+ * than the connector that appeared.
+ */
+function NetLabelGhost({ rotation }: { rotation: number }) {
+  const shape = netLabelShape(rotation);
+  const c = NODE_SIZE / 2;
+  const color = "#2563eb";
+  return (
+    <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
+      <line
+        x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2}
+        stroke={color} strokeWidth={1.6} strokeLinecap="round"
+      />
+      <polygon points={shape.head} fill={color} />
+      <circle cx={c} cy={c} r={shape.circle.r} fill="none" stroke={color} strokeWidth={1.6} />
+      <text
+        x={shape.tag.x} y={shape.tag.y}
+        textAnchor={shape.tag.anchor === "start" ? "start" : "middle"}
+        dominantBaseline={shape.tag.baseline === "middle" ? "middle" : "auto"}
+        fontFamily="monospace" fontSize={11} fill={color}
+      >
+        NET
+      </text>
+    </svg>
   );
 }

@@ -8,12 +8,40 @@ export const NODE_SIZE = 80;
 /** Margin used when fitting an .asy symbol into the node box. */
 export const NODE_MARGIN = 14;
 /**
- * Editor grid pitch in px; component pins snap to it so they sit on grid lines.
- * 8 = half of LTSpice's 16-unit grid, so it is commensurate: imported wires
- * (on the 16-grid) and anything drawn afterwards share grid lines, and a
- * near-1:1 symbol's terminals snap exactly onto imported wire endpoints.
+ * Editor snap pitch in px; component pins snap to it, so they sit on grid lines
+ * and can meet a wire (a tap needs ~2 px accuracy).
+ *
+ * 4 divides every pitch LTSpice draws on — its 16-unit schematic grid and the
+ * 12-unit spacing alike — so every point of an imported schematic is reachable.
+ * Measured over the bundled examples, the GCD of all wire/flag/symbol
+ * coordinates is exactly 4 (98% are multiples of 16, but two schematics go down
+ * to 4), so a coarser pitch would leave points we could never land on.
  */
-export const GRID = 8;
+export const GRID = 4;
+
+/**
+ * Spacing of the drawn grid dots. Deliberately coarser than the snap pitch: it
+ * mirrors LTSpice's 16-unit schematic grid as a visual reference, while
+ * placement still snaps to every {@link GRID} step in between.
+ */
+export const GRID_DOTS = 16;
+
+/**
+ * Node-local y of the ground terminal (the top of its stem). A multiple of GRID,
+ * so a placed ground lands on a grid line — at the old 20 px it was off the grid
+ * and could never be dropped onto a wire.
+ */
+export const GROUND_PIN_Y = 24;
+
+/**
+ * Snap a flow coordinate to the grid. The single definition on purpose: the
+ * placement ghost and the actual placement must agree to the pixel, or the ghost
+ * points at a docking spot the component never lands on — the ghost used to carry
+ * its own 20 px grid, so a net-label connector missed the wire it was aimed at.
+ */
+export function snapToGrid(v: number): number {
+  return Math.round(v / GRID) * GRID;
+}
 
 export function rotatePoint(px: number, py: number, cx: number, cy: number, deg: number): [number, number] {
   const rad = (deg * Math.PI) / 180;
@@ -65,14 +93,19 @@ export interface LocalPin {
   py: number;
 }
 
-/** Fixed handle layout for components drawn with hand-coded fallback symbols. */
+/**
+ * Fixed handle layout for components drawn with hand-coded fallback symbols.
+ * Every offset is a multiple of {@link GRID}: the node box is placed on the grid,
+ * so a grid-aligned local offset puts the terminal on a grid line — which is what
+ * lets it meet a wire.
+ */
 const SOURCE_PINS: LocalPin[] = [
-  { handleId: "p", order: 1, px: NODE_SIZE / 2, py: 10 },
-  { handleId: "n", order: 2, px: NODE_SIZE / 2, py: NODE_SIZE - 10 },
+  { handleId: "p", order: 1, px: NODE_SIZE / 2, py: 8 },
+  { handleId: "n", order: 2, px: NODE_SIZE / 2, py: NODE_SIZE - 8 },
 ];
 
 const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
-  ground: [{ handleId: "gnd", order: 1, px: NODE_SIZE / 2, py: 20 }],
+  ground: [{ handleId: "gnd", order: 1, px: NODE_SIZE / 2, py: GROUND_PIN_Y }],
   netlabel: [{ handleId: "t", order: 1, px: NODE_SIZE / 2, py: NODE_SIZE / 2 }],
   vsource: SOURCE_PINS,
   sinesource: SOURCE_PINS,
