@@ -48,15 +48,24 @@ function NetLabelInput({ id, initialLabel, onRename }: {
 
 // 2. Die Hauptkomponente
 export function NetLabelsPanel() {
-  const { circuit, selectedComponentId, renameNet, netVersion } = useCircuitStore();
+  const { circuit, selectedComponentId, renameNet, netVersion, edges } = useCircuitStore();
   const theme = useTheme();
   const borderTop = theme.borderMuted;
   const heading = theme.heading;
   void netVersion;
 
-  // Collect only the nets connected to the selected component's pins.
-  // Fall back to all nets (except GND "0") when nothing is selected.
+  const selectedEdge = edges.find((e) => e.selected);
+
   const nets = React.useMemo(() => {
+    // A selected wire belongs to exactly one net — show that one and nothing
+    // else, so the field on screen is the label of the wire in hand.
+    if (selectedEdge) {
+      const comp = circuit.components.get(selectedEdge.source);
+      const netId = comp?.ports.find((p) => p.id === `${selectedEdge.source}-${selectedEdge.sourceHandle}`)?.netId;
+      const net = netId ? circuit.nets.get(netId) : undefined;
+      return net && netId !== "0" ? [[netId, net] as [string, typeof net]] : [];
+    }
+    // A selected component: only the nets on its own pins.
     if (selectedComponentId) {
       const comp = circuit.components.get(selectedComponentId);
       if (comp) {
@@ -66,8 +75,9 @@ export function NetLabelsPanel() {
         return Array.from(circuit.nets.entries()).filter(([id]) => netIds.has(id));
       }
     }
+    // Nothing selected: every net (except GND).
     return Array.from(circuit.nets.entries()).filter(([id]) => id !== "0");
-  }, [circuit, selectedComponentId, netVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [circuit, selectedComponentId, selectedEdge, netVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (nets.length === 0) {
     return (
