@@ -106,6 +106,14 @@ function CanvasInner() {
   // and the connector tap-to-rotate inside the nodes (see ComponentNode).
   const canvasLocked = useUIStore((s) => s.canvasLocked);
   const toggleCanvasLocked = useUIStore((s) => s.toggleCanvasLocked);
+  // One tap = one flip, whichever event the browser sends (see the lock button).
+  const lockTapRef = useRef(0);
+  const toggleLock = useCallback(() => {
+    const now = Date.now();
+    if (now - lockTapRef.current < 400) return;
+    lockTapRef.current = now;
+    toggleCanvasLocked();
+  }, [toggleCanvasLocked]);
 
   // Reference designators already in use, for per-prefix auto-numbering.
   const existingLabels = () =>
@@ -716,14 +724,21 @@ function CanvasInner() {
             <button style={canvasButton} title="Verkleinern" onClick={() => reactFlowInstance.zoomOut()}>−</button>
             <button style={canvasButton} title="Einpassen" onClick={() => reactFlowInstance.fitView({ padding: 0.3 })}>▣</button>
             <button
-              style={{ ...canvasButton, color: canvasLocked ? theme.accent : theme.symPreview }}
+              style={{
+                ...canvasButton,
+                color: canvasLocked ? "#fff" : theme.symPreview,
+                background: canvasLocked ? theme.accent : canvasButton.background,
+                borderColor: canvasLocked ? theme.accent : canvasButton.border as string,
+              }}
               title={canvasLocked ? "Entsperren (Bauteile wieder verschiebbar)" : "Sperren (Bauteile fixieren)"}
               aria-pressed={canvasLocked}
-              // Toggle on pointerup, not click: the Apple Pencil does not reliably
-              // produce a click on this button, so the lock could not be released
-              // on the iPad at all. preventDefault suppresses the synthetic click
-              // that would otherwise toggle it straight back.
-              onPointerUp={(e) => { e.preventDefault(); e.stopPropagation(); toggleCanvasLocked(); }}
+              // Toggle on whichever event the device delivers. Relying on `click`
+              // alone left the lock unreachable with the Apple Pencil; relying on
+              // `pointerup` alone is just as brittle (Safari does not always let
+              // preventDefault suppress the following click). Take both and
+              // swallow the second one — the lock must flip exactly once per tap.
+              onPointerUp={() => toggleLock()}
+              onClick={() => toggleLock()}
             >
               <LockIcon locked={canvasLocked} />
             </button>
@@ -819,12 +834,15 @@ const nodeMenuItem: React.CSSProperties = {
  */
 function LockIcon({ locked }: { locked: boolean }) {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <rect x="3" y="11" width="13" height="10" rx="2" />
       {locked
-        ? <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-        : <path d="M8 11V7a4 4 0 0 1 7.5-2" />}
+        // Shackle down on both sides, sitting on the body.
+        ? <path d="M6 11V7a3.5 3.5 0 0 1 7 0v4" />
+        // Open: the shackle is lifted clear of the body and swung to the right,
+        // so the two states cannot be confused at 18 px (the emoji 🔓 could).
+        : <path d="M6 11V7a3.5 3.5 0 0 1 7 0" />}
     </svg>
   );
 }
