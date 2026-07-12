@@ -459,6 +459,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       netlist: "",
       circuitName: "Untitled",
       dataFlags: [],
+      // A new schematic starts blank: the previous circuit's SPICE directives
+      // (and the analysis they configured) would otherwise still drive the next
+      // simulation — a `.step`/`.meas` over parts that no longer exist.
+      spiceDirectives: "",
+      simulationConfig: DEFAULT_CONFIG,
+      showDirectivesOnCanvas: false,
+      directivesPos: { x: 40, y: 40 },
       fileHandle: null,
       fileName: null,
       _history: [...state._history, snap],

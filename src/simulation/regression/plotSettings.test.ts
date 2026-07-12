@@ -219,6 +219,34 @@ const CASES: Case[] = [
     if (sim().selectedVariables.length) fail("the previous circuit's probes survived");
   } },
 
+  { name: "new circuit: directives, analysis and diagram all start blank", run: (fail) => {
+    setUpPlot();                       // dB axis, log axis, fixed bounds, colours…
+    const circuit = useCircuitStore.getState();
+    circuit.loadFromAsc(ASC_PLAIN);
+    circuit.setSpiceDirectives(".tran 5m\n.step param R 1 10 1");
+    circuit.setSimulationConfig({ type: "ac", sweep: "dec", points: 100, start: 1, stop: 1e6 } as never);
+    useSimulationStore.setState({ result: { time: new Float64Array([0, 1]) } as never, selectedVariables: ["V(out)"] });
+
+    useCircuitStore.getState().clearCircuit();
+
+    const st = useCircuitStore.getState();
+    // The old circuit's directives would otherwise still drive the next run — a
+    // `.step`/`.meas` over parts that no longer exist.
+    if (st.spiceDirectives !== "") fail(`directives survived: ${JSON.stringify(st.spiceDirectives)}`);
+    if (st.simulationConfig.type !== "tran") fail(`analysis survived as ${st.simulationConfig.type}`);
+    if (st.nodes.length || st.edges.length) fail("the schematic was not cleared");
+    if (st.showDirectivesOnCanvas) fail("the on-canvas directive box survived");
+
+    // …and the diagram is back on auto.
+    const p = plot().panels;
+    if (p.length !== 1) fail(`${p.length} panels != 1`);
+    for (const k of ["xMin", "xMax", "yMin", "yMax", "yScale", "yLabel"] as const) {
+      if (p[0][k] !== undefined) fail(`${k} survived as ${p[0][k]}`);
+    }
+    if (Object.keys(plot().colors).length || plot().expressions.length) fail("colours/functions survived");
+    if (sim().result !== null || sim().selectedVariables.length) fail("the old result/probes survived");
+  } },
+
   { name: "load: a sibling .plt still wins over the reset", run: (fail) => {
     setUpPlot();
     const plt = savePlt();
