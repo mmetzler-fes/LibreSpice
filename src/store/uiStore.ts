@@ -2,7 +2,12 @@ import { create } from "zustand";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 
 export type ActiveTab = "schematic" | "netlist" | "oscilloscope";
-export type EditorMode = "select" | "wire" | "pan" | "place";
+/**
+ * Editor modes. There is no "pan": dragging empty canvas already pans in select
+ * mode, and the lock covers "navigate without touching anything" — the button was
+ * a third way to do what those two already do, and it never got used.
+ */
+export type EditorMode = "select" | "wire" | "place";
 export type DockTab = "netlist" | "simulation" | "waveform" | "log";
 /** Which LTSpice symbol variant to draw: European default, ANSI, or EN. */
 export type SymbolNorm = "default" | "ansi" | "en";

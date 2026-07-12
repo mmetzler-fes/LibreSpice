@@ -649,8 +649,7 @@ function CanvasInner() {
 
   const cursorStyle =
     editorMode === "place" ? "crosshair" :
-    editorMode === "wire"  ? "cell" :
-    editorMode === "pan"   ? "grab" : "default";
+    editorMode === "wire"  ? "cell" : "default";
 
   /** Delete the part the menu was opened on (its wires go with it). */
   const deleteMenuNode = useCallback(() => {
