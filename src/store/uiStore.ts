@@ -41,6 +41,12 @@ interface UIState {
   symbolNorm: SymbolNorm;
   /** When on, clicking a component adds its branch current to the waveform probes. */
   autoProbeCurrent: boolean;
+  /**
+   * Canvas lock: components are pinned and the view does not pan. Lives here (not
+   * in the canvas) because it has to reach every interaction — React Flow's node
+   * drag, the caption drags and the connector tap-to-rotate all read it.
+   */
+  canvasLocked: boolean;
 }
 
 interface UIActions {
@@ -61,6 +67,7 @@ interface UIActions {
   setDockTab: (tab: DockTab) => void;
   setSymbolNorm: (norm: SymbolNorm) => void;
   toggleAutoProbeCurrent: () => void;
+  toggleCanvasLocked: () => void;
 }
 
 export const useUIStore = create<UIState & UIActions>((set) => ({
@@ -80,6 +87,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   dockTab: "netlist",
   symbolNorm: "en",
   autoProbeCurrent: true,
+  canvasLocked: false,
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null, pendingLibraryPlacement: null }),
@@ -99,4 +107,5 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setDockTab: (dockTab) => set({ dockTab, dockOpen: true }),
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
+  toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
 }));

@@ -100,10 +100,12 @@ function CanvasInner() {
   // canvas fitView would stay pending and first fire when the first node is
   // placed, jerking the zoom (shrinking the ghost and offsetting placement).
   const [fitOnInit] = useState(() => nodes.length > 0);
-  // Freezes the canvas: no panning, no node dragging. On a touch device this
-  // stops the schematic sliding around under a stray finger while you read or
-  // draw. (Replaces React Flow's padlock, which did not respond to touch.)
-  const [canvasLocked, setCanvasLocked] = useState(false);
+  // Freezes the canvas: components are pinned, the view does not pan. On a touch
+  // device this stops the schematic sliding around under a stray finger while you
+  // read or draw. It lives in the UI store so it also reaches the caption drags
+  // and the connector tap-to-rotate inside the nodes (see ComponentNode).
+  const canvasLocked = useUIStore((s) => s.canvasLocked);
+  const toggleCanvasLocked = useUIStore((s) => s.toggleCanvasLocked);
 
   // Reference designators already in use, for per-prefix auto-numbering.
   const existingLabels = () =>
@@ -715,9 +717,16 @@ function CanvasInner() {
             <button style={canvasButton} title="Einpassen" onClick={() => reactFlowInstance.fitView({ padding: 0.3 })}>▣</button>
             <button
               style={{ ...canvasButton, color: canvasLocked ? theme.accent : theme.symPreview }}
-              title={canvasLocked ? "Ansicht entsperren" : "Ansicht sperren (kein Verschieben)"}
-              onClick={() => setCanvasLocked((v) => !v)}
-            >{canvasLocked ? "🔒" : "🔓"}</button>
+              title={canvasLocked ? "Entsperren (Bauteile wieder verschiebbar)" : "Sperren (Bauteile fixieren)"}
+              aria-pressed={canvasLocked}
+              // Toggle on pointerup, not click: the Apple Pencil does not reliably
+              // produce a click on this button, so the lock could not be released
+              // on the iPad at all. preventDefault suppresses the synthetic click
+              // that would otherwise toggle it straight back.
+              onPointerUp={(e) => { e.preventDefault(); e.stopPropagation(); toggleCanvasLocked(); }}
+            >
+              <LockIcon locked={canvasLocked} />
+            </button>
           </div>
 
           <DataFlagLayer />
@@ -802,6 +811,23 @@ const nodeMenuItem: React.CSSProperties = {
   border: "none", background: "transparent", color: "#e2e8f0", cursor: "pointer",
   fontSize: 12, borderRadius: 4, whiteSpace: "nowrap",
 };
+
+/**
+ * Padlock, drawn rather than taken from the emoji font: iOS renders 🔓 (open) so
+ * close to 🔒 that the button looked permanently locked. Here the open state is
+ * unmistakable — the shackle stands off to the side.
+ */
+function LockIcon({ locked }: { locked: boolean }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      {locked
+        ? <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        : <path d="M8 11V7a4 4 0 0 1 7.5-2" />}
+    </svg>
+  );
+}
 
 /** Touch-friendly square button for the on-canvas zoom / fit / lock controls. */
 const canvasBtn: React.CSSProperties = {

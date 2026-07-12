@@ -94,11 +94,13 @@ function MovableLabel({
 }) {
   const rf = useReactFlow();
   const setLabelOffset = useCircuitStore((s) => s.setLabelOffset);
+  const canvasLocked = useUIStore((s) => s.canvasLocked);
   const [live, setLive] = useState<{ x: number; y: number } | null>(null);
   const off = live ?? offset ?? { x: 0, y: 0 };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!isDragPointer(e)) return;
+    // The lock pins everything that belongs to a part, its captions included.
+    if (canvasLocked || !isDragPointer(e)) return;
     e.stopPropagation();
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY;
@@ -180,8 +182,11 @@ type TapProps = { onClick?: (e: React.MouseEvent) => void };
  */
 function useRotateTapProps(nodeId: string): TapProps {
   const editorMode = useUIStore((s) => s.editorMode);
+  const canvasLocked = useUIStore((s) => s.canvasLocked);
   const rotateComponent = useCircuitStore((s) => s.rotateComponent);
-  if (editorMode !== "select") return {};
+  // A locked canvas pins the parts: rotating one by tapping its connector would
+  // be a move the lock is supposed to prevent.
+  if (editorMode !== "select" || canvasLocked) return {};
   return { onClick: (e) => { e.stopPropagation(); rotateComponent(nodeId); } };
 }
 
