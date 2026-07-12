@@ -8,6 +8,7 @@ import { runAscConnectivityTests } from "./ascConnectivity.test.js";
 import { runShareLinkTests } from "./shareLink.test.js";
 import { runPlacementTests } from "./placement.test.js";
 import { runNetLabelTests } from "./netLabel.test.js";
+import { runKeyboardViewportTests } from "./keyboardViewport.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 
@@ -29,6 +30,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Placement ghost", ...runPlacementTests() },
     // Net-label consistency drives the store, whose rebuilds are deferred a tick.
     { name: "Net labels", ...(await runNetLabelTests()) },
+    { name: "Keyboard viewport", ...runKeyboardViewportTests() },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];
