@@ -12,7 +12,12 @@ export const CENTER = 40;
 
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   res: "resistor", cap: "capacitor", polcap: "capacitor_polarized", ind: "inductor",
+  // The IEC/European symbol set (`Misc\EuropeanResistor`, …) draws the same
+  // devices with the same pins. Without these, an IEC schematic fell back to the
+  // 2-pin default and lost the symbol it was drawn with.
   europeanpolcap: "capacitor_polarized",
+  europeanresistor: "resistor", europeancap: "capacitor", europeancapacitor: "capacitor",
+  europeaninductor: "inductor", europeanind: "inductor",
   diode: "diode", LED: "led", zener: "zener", schottky: "schottky",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
@@ -179,6 +184,11 @@ export function centeringFor(type: string): Centering {
 }
 
 function centre(offsets: PinOffset[], mode: Centering): { mx: number; my: number } {
+  // A pinless symbol would otherwise centre on (Infinity + -Infinity)/2 = NaN
+  // (bbox) or 0/0 = NaN (mean), and a single node at a NaN position breaks React
+  // Flow's rect maths for the *whole* canvas: nothing can be dragged any more and
+  // wires vanish when clicked. Keep it finite; the symbol origin is a fine centre.
+  if (offsets.length === 0) return { mx: 0, my: 0 };
   if (mode === "bbox") {
     const xs = offsets.map((p) => p.dx), ys = offsets.map((p) => p.dy);
     return { mx: (Math.min(...xs) + Math.max(...xs)) / 2, my: (Math.min(...ys) + Math.max(...ys)) / 2 };

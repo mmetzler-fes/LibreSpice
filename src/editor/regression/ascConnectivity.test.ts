@@ -198,7 +198,72 @@ ROUNDTRIP_CASES.push({ name: "round-trip: library subcircuit keeps symbol, pins 
   if (back.edges.length === 0) fail("wires on the subcircuit were dropped");
 } });
 
+// The IEC/European symbol set (06-2-1_RC_TP2.asc). `Misc\EuropeanResistor` is a
+// plain resistor: it must keep its value (1k591 = 1591 Ω, the SI letter as the
+// decimal point) and its two pins. It has no built-in type, and treating every
+// unmapped symbol as a library part turned it into a pinless, valueless
+// subcircuit — the whole low-pass fell apart.
+const ASC_EUROPEAN = `Version 4
+SHEET 1 880 680
+SYMBOL Misc\\\\EuropeanResistor 256 48 R90
+SYMATTR InstName R1
+SYMATTR Value 1k591
+SYMBOL cap 288 112 R0
+SYMATTR InstName C1
+SYMATTR Value 100nF
+`;
+
 const CASES: Case[] = [
+  { name: "every imported node has a finite position (a NaN one kills the canvas)", run: (fail) => {
+    // A symbol we know nothing about — no type, no pins. Its node must still land
+    // at a real coordinate: centring on an empty pin set yields NaN, and a single
+    // NaN-positioned node breaks React Flow's rect maths for the whole canvas —
+    // no component can be dragged any more and wires vanish when clicked
+    // (06-2-1_RC_TP2.asc, where Misc\EuropeanResistor was taken for a library part).
+    const asc = `Version 4
+SHEET 1 880 680
+SYMBOL SomeUnknownSymbol 256 48 R90
+SYMATTR InstName X9
+SYMBOL res 100 100 R0
+SYMATTR InstName R9
+SYMATTR Value 1k
+`;
+    for (const n of LTSpiceParser.parse(asc).nodes) {
+      if (!Number.isFinite(n.position.x) || !Number.isFinite(n.position.y)) {
+        fail(`${(n.data as { label?: string }).label} at (${n.position.x}, ${n.position.y})`);
+      }
+    }
+  } },
+
+  { name: "European (IEC) resistor imports as a resistor, value 1k591 = 1591", run: (fail) => {
+    const { nodes, components } = LTSpiceParser.parse(ASC_EUROPEAN);
+    const r1 = nodeBy(nodes, (d) => d.label === "R1");
+    if ((r1?.data as { componentType?: string })?.componentType !== "resistor") {
+      fail(`EuropeanResistor imported as ${(r1?.data as { componentType?: string })?.componentType}`);
+    }
+    const comp = components.find((c) => c.label === "R1");
+    const p = Object.fromEntries((comp?.getProperties() ?? []).map((x) => [x.key, x.value]));
+    if (p.resistance !== 1591) fail(`resistance ${p.resistance} != 1591`);
+    if (comp?.ports.length !== 2) fail(`${comp?.ports.length} ports != 2`);
+    // 100nF must not regress either (the unit suffix follows the value).
+    const c1 = Object.fromEntries(
+      (components.find((c) => c.label === "C1")?.getProperties() ?? []).map((x) => [x.key, x.value]),
+    );
+    if (Math.abs(Number(c1.capacitance) - 1e-7) > 1e-12) fail(`capacitance ${c1.capacitance} != 100n`);
+  } },
+
+  { name: "European (IEC) symbol survives a save: the file keeps EuropeanResistor", run: (fail) => {
+    const { nodes, components } = LTSpiceParser.parse(ASC_EUROPEAN);
+    const circuit = { components: new Map(components.map((c) => [c.id, c])), nets: new Map() };
+    const asc = LTSpiceExporter.export(nodes, [], "", circuit, []);
+    if (!/^SYMBOL Misc\\+EuropeanResistor /m.test(asc)) {
+      fail(`saved as the US symbol instead of the IEC one:\n${asc.split("\n").filter((l) => l.startsWith("SYMBOL")).join("\n")}`);
+    }
+    // …and it still reads back as a resistor of 1591 Ω.
+    const back = LTSpiceParser.parse(asc).components.find((c) => c.label === "R1");
+    const p = Object.fromEntries((back?.getProperties() ?? []).map((x) => [x.key, x.value]));
+    if (p.resistance !== 1591) fail(`after the round-trip resistance ${p.resistance} != 1591`);
+  } },
   { name: "flag-on-pin connects source terminals (no bridging wire)", run: (fail) => {
     const { nodes, edges } = LTSpiceParser.parse(ASC);
     const v1 = nodeBy(nodes, (d) => d.label === "V1");

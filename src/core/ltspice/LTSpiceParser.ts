@@ -357,17 +357,20 @@ export class LTSpiceParser {
       if (k && v) lsAttrs[k] = v;
     }
 
-    // A symbol we have no built-in type for is a library part / `.subckt`, not a
-    // resistor: keep it as a subcircuit with its own symbol and pins, so it (and
-    // every wire on it) survives. Its pin order comes from our own attribute, or
-    // from the `.asy` symbol itself for a file written by LTSpice.
+    // A library part / `.subckt` has no built-in type: keep it as a subcircuit
+    // with its own symbol and pins, so it (and every wire on it) survives. Its
+    // pin order comes from our own attribute, or from the `.asy` symbol itself
+    // for a file written by LTSpice. Only a symbol that actually declares pins
+    // qualifies — an unknown *device* symbol (a stock variant we don't map yet,
+    // e.g. `Misc\EuropeanResistor`) has none, and must keep falling back to the
+    // 2-pin default rather than becoming a pinless, valueless subcircuit.
     const known = symbolToType(sym.name);
-    const cType: ComponentType = known ?? "subcircuit";
     const symBase = (sym.name.split(/[\\/]/).pop() ?? sym.name) as string;
-    const subPins = cType === "subcircuit"
-      ? (lsAttrs.pins?.split(",").map((s) => s.trim()).filter(Boolean)
-         ?? [...(symbolByName(symBase)?.pins ?? [])].sort((a, b) => a.order - b.order).map((p) => p.name))
-      : undefined;
+    const declaredPins =
+      lsAttrs.pins?.split(",").map((s) => s.trim()).filter(Boolean) ??
+      [...(symbolByName(symBase)?.pins ?? [])].sort((a, b) => a.order - b.order).map((p) => p.name);
+    const cType: ComponentType = known ?? (declaredPins.length > 0 ? "subcircuit" : "resistor");
+    const subPins = cType === "subcircuit" ? declaredPins : undefined;
 
     const deg = rotDeg(sym.rot);
 
@@ -503,6 +506,10 @@ export class LTSpiceParser {
         ...((comp as any).sourceType !== undefined && { sourceType: (comp as any).sourceType }),
         // Library part: its handles, its `.asy` symbol and the subcircuit name.
         ...(cType === "subcircuit" && { pins: subPins ?? [], symbolName: symBase, subName: valueStr || symBase }),
+        // Remember the symbol the file actually used (e.g. `Misc\EuropeanResistor`
+        // for the IEC set), so saving writes it back instead of collapsing every
+        // resistor to the US `res` symbol.
+        ...(known && { ascSymbol: sym.name }),
       }
     });
   }

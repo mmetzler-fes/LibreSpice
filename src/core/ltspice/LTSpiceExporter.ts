@@ -140,6 +140,8 @@ export class LTSpiceExporter {
         labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
         /** Library part / `.subckt`: its own `.asy` symbol, subcircuit name and pin order. */
         symbolName?: string; subName?: string; pins?: string[];
+        /** The SYMBOL name this component was imported under (see LTSpiceParser). */
+        ascSymbol?: string;
       };
 
       if (data.componentType === "ground") {
@@ -169,7 +171,10 @@ export class LTSpiceExporter {
       const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));
       for (const p of rotated) pinCoord.set(`${node.id}-${p.handle}`, { x: symX + p.dx, y: symY + p.dy });
 
-      const symName = isSub ? subSymbol : (TYPE_TO_SYMBOL[data.componentType] || "res");
+      // Keep the symbol the file was imported with (the IEC/European set, a
+      // localized variant, …); only a freshly placed part falls back to the
+      // default symbol for its type.
+      const symName = isSub ? subSymbol : (data.ascSymbol || TYPE_TO_SYMBOL[data.componentType] || "res");
       symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg)}`);
 
       // Persist caption positions so LTSpice (and our own re-import) keep them.
