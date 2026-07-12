@@ -1369,7 +1369,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
         <div style={{ display: "flex", gap: 16, padding: "4px 8px", background: pt.toolbarBg, borderTop: `1px solid ${pt.border}`, flexWrap: "wrap" }}>
           <AxisFields
             title="x-axis"
-            min={panel.xMin ?? round6(vr.xMin)} max={panel.xMax ?? round6(vr.xMax)} ticks={panel.xTicks}
+            min={panel.xMin} max={panel.xMax} ticks={panel.xTicks}
+            autoMin={round6(vr.xMin)} autoMax={round6(vr.xMax)}
             minLabel="left" maxLabel="right"
             onMin={(v) => onUpdate({ xMin: v })}
             onMax={(v) => onUpdate({ xMax: v })}
@@ -1385,7 +1386,10 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <AxisFields
               key={g.unit || "y"}
               title={g.unit ? `y (${g.unit})` : "y-axis"}
-              min={round6(g.yMin)} max={round6(g.yMax)} ticks={g.ticks}
+              min={panel.yAxes?.[g.unit]?.min ?? (gi === 0 && !panel.yAxes?.[g.unit] ? panel.yMin : undefined)}
+              max={panel.yAxes?.[g.unit]?.max ?? (gi === 0 && !panel.yAxes?.[g.unit] ? panel.yMax : undefined)}
+              ticks={g.ticks}
+              autoMin={round6(g.yMin)} autoMax={round6(g.yMax)}
               minLabel="bottom" maxLabel="top"
               onMin={(v) => setYAxis(g.unit, { min: v })}
               onMax={(v) => setYAxis(g.unit, { max: v })}
@@ -1688,9 +1692,13 @@ function round6(n: number): number {
 
 interface AxisFieldsProps {
   title: string;
+  /** The bound the user set explicitly; undefined = auto. */
   min?: number;
   max?: number;
   ticks?: number;
+  /** What "auto" currently works out to — shown as the placeholder, not as a value. */
+  autoMin?: number;
+  autoMax?: number;
   minLabel: string;
   maxLabel: string;
   onMin: (v: number | undefined) => void;
@@ -1699,13 +1707,13 @@ interface AxisFieldsProps {
   extra?: React.ReactNode;
 }
 
-function AxisFields({ title, min, max, ticks, minLabel, maxLabel, onMin, onMax, onTicks, extra }: AxisFieldsProps) {
+function AxisFields({ title, min, max, ticks, autoMin, autoMax, minLabel, maxLabel, onMin, onMax, onTicks, extra }: AxisFieldsProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <span style={{ fontSize: 9, fontWeight: 600, color: "#64748b", width: 40 }}>{title}</span>
-      <AxisInput label={minLabel} value={min} onChange={onMin} />
+      <AxisInput label={minLabel} value={min} auto={autoMin} onChange={onMin} />
       <AxisInput label="tick" value={ticks} onChange={onTicks} />
-      <AxisInput label={maxLabel} value={max} onChange={onMax} />
+      <AxisInput label={maxLabel} value={max} auto={autoMax} onChange={onMax} />
       {extra}
     </div>
   );
@@ -1717,10 +1725,15 @@ function AxisFields({ title, min, max, ticks, minLabel, maxLabel, onMin, onMax, 
  * arrows; empty commits `undefined` (auto). A local buffer lets the user type
  * freely; the value is committed on blur / Enter.
  */
-function AxisInput({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
+function AxisInput({ label, value, auto, onChange }: { label: string; value?: number; auto?: number; onChange: (v: number | undefined) => void }) {
   const pt = usePlotTheme();
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? (value === undefined || !isFinite(value) ? "" : siFormat(value));
+  // An empty field *is* auto. The field used to be fed the auto-computed bound as
+  // its value, so clearing it and pressing Enter looked as if the old number had
+  // come back — it was the auto value, identical because the data had not changed.
+  // The auto bound belongs in the placeholder, where it reads as "not set".
+  const hint = auto === undefined || !isFinite(auto) ? "auto" : `auto: ${siFormat(auto)}`;
 
   const commit = () => {
     if (text === null) return;
@@ -1737,7 +1750,7 @@ function AxisInput({ label, value, onChange }: { label: string; value?: number; 
       <input
         type="text"
         value={shown}
-        placeholder="auto"
+        placeholder={hint}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") { commit(); (e.target as HTMLInputElement).blur(); } }}
