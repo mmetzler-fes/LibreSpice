@@ -92,7 +92,7 @@ function CanvasInner() {
   };
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean; netId?: string | null; vExpr?: string | null } | null>(null);
   /** Right-click menu on a wire: annotate the net's potential / current. */
   const [wireMenu, setWireMenu] = useState<{ edgeId: string; netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
@@ -355,9 +355,16 @@ function CanvasInner() {
       const data = node.data as ComponentNodeData;
       setWireMenu(null);
       setSelectedComponentId(node.id);
-      // Net labels get their own menu (net label ↔ connector).
+      // Net labels get their own menu (net label ↔ connector), plus the option
+      // to plot the potential of the node they name — the same probe a wire on
+      // that net offers, so a named net is reachable however you right-click it.
       if (data?.componentType === "netlabel") {
-        setNodeMenu({ id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y, isNetlabel: true, connector: !!data.connector });
+        const netId = circuit.components.get(node.id)?.ports[0]?.netId ?? null;
+        setNodeMenu({
+          id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y,
+          isNetlabel: true, connector: !!data.connector,
+          netId, vExpr: netVoltageExpr(circuit, netId),
+        });
         return;
       }
       const comp = circuit.components.get(node.id);
@@ -514,6 +521,22 @@ function CanvasInner() {
   // Switch a net label between a plain wire-name tag and a directional connector.
   const setNetlabelConnector = (connector: boolean) => {
     if (nodeMenu) updateNodeData(nodeMenu.id, { connector });
+    setNodeMenu(null);
+  };
+
+  // Plot the potential of the net a label names, as a scope trace.
+  const probeNetlabelVoltageInScope = () => {
+    if (nodeMenu?.vExpr) { addExpression(nodeMenu.vExpr); setDockTab("waveform"); }
+    setNodeMenu(null);
+  };
+
+  // Pin the net's potential as a data-point badge, next to the label terminal.
+  const addNetlabelDataFlag = () => {
+    const m = nodeMenu;
+    const node = m && nodes.find((n) => n.id === m.id);
+    if (m?.vExpr && node) {
+      addDataFlag(node.position.x + NODE_SIZE + 6, node.position.y + NODE_SIZE / 2, m.vExpr);
+    }
     setNodeMenu(null);
   };
 
@@ -778,6 +801,15 @@ function CanvasInner() {
                 <button style={nodeMenuItem} onClick={() => setNetlabelConnector(true)}>
                   {nodeMenu.connector ? "✓ " : " "}Connector (Pfeil, verbindet entfernte Netze)
                 </button>
+                <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+                {nodeMenu.vExpr ? (
+                  <>
+                    <button style={nodeMenuItem} onClick={probeNetlabelVoltageInScope}>{nodeMenu.vExpr} im Oszi anzeigen</button>
+                    <button style={nodeMenuItem} onClick={addNetlabelDataFlag}>Datenpunkt: Potential {nodeMenu.vExpr}</button>
+                  </>
+                ) : (
+                  <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Kein Potential verfügbar</div>
+                )}
               </>
             ) : nodeMenu.isGround ? null : (
               <>
