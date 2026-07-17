@@ -11,7 +11,8 @@
     "check": "tsc --noEmit",
     "server": "node server/index.mjs",
     "test:library": "node scripts/run-library-tests.mjs",
-    "test:editor": "node scripts/run-editor-tests.mjs"
+    "test:editor": "node scripts/run-editor-tests.mjs",
+    "bake:examples": "node scripts/bake-example-links.mjs"
   },
   "author": "",
   "license": "MIT",
