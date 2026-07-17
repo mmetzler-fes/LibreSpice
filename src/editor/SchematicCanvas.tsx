@@ -19,6 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
 import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, type FlowPoint } from "./WireTool.js";
+import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
@@ -135,43 +136,42 @@ function CanvasInner() {
         return p ? { x: p.x, y: p.y } : null;
       };
 
-      for (const pin of newPins) {
-        let bestWire: Edge | null = null;
-        let bestTap: FlowPoint | null = null;
-        
-        for (const e of currentEdges) {
-          const s = (e.data?.sourceTap as FlowPoint | undefined) ?? getPinPos(e.source, e.sourceHandle);
-          const t = (e.data?.targetTap as FlowPoint | undefined) ?? getPinPos(e.target, e.targetHandle);
-          if (!s || !t) continue;
-          const wp = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
-          const verts = orthoVertices([s, ...wp, t]);
-          for (let i = 0; i < verts.length - 1; i++) {
-            const { point, d2 } = projectToSegment({ x: pin.x, y: pin.y }, verts[i], verts[i + 1]);
-            if (d2 <= 4) {
-              bestWire = e;
-              bestTap = point;
-              break;
-            }
-          }
-          if (bestWire) break;
-        }
-        
-        if (bestWire && bestTap) {
-          const edgeId = `wire_${node.id}-${pin.handleId}__${bestWire.source}-${bestWire.sourceHandle}_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-          newEdges.push({
-            id: edgeId,
-            source: node.id,
-            sourceHandle: pin.handleId,
-            target: bestWire.source,
-            targetHandle: bestWire.sourceHandle,
-            type: "wire",
-            data: {
-              waypoints: [],
-              targetTap: bestTap,
-              hostEdgeId: bestWire.id,
-            },
-          });
-        }
+      // Pins of every *other* component, so a freshly placed pin that lands on
+      // one can dock straight onto the part — not only onto a wire. (The placed
+      // node is already in the store by the time this runs, so exclude it.)
+      const otherPins: DockPin[] = currentNodes
+        .filter((n) => n.id !== node.id)
+        .flatMap((n) => getNodePins(n, symbolNorm))
+        .map((p) => ({ nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y }));
+
+      // Existing wires resolved to their vertex chains, so a pin can tap them.
+      const wires: WireGeom[] = [];
+      for (const e of currentEdges) {
+        const s = (e.data?.sourceTap as FlowPoint | undefined) ?? getPinPos(e.source, e.sourceHandle);
+        const t = (e.data?.targetTap as FlowPoint | undefined) ?? getPinPos(e.target, e.targetHandle);
+        if (!s || !t) continue;
+        const wp = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
+        wires.push({ id: e.id, source: e.source, sourceHandle: e.sourceHandle ?? null, verts: orthoVertices([s, ...wp, t]) });
+      }
+
+      // True when a wire already joins these two pin endpoints (either
+      // orientation), so a re-dock never lays a second identical edge.
+      const alreadyWired = (a: DockPin, bNode: string, bHandle: string) =>
+        currentEdges.some((e) =>
+          (e.source === a.nodeId && e.sourceHandle === a.handleId && e.target === bNode && e.targetHandle === bHandle) ||
+          (e.source === bNode && e.sourceHandle === bHandle && e.target === a.nodeId && e.targetHandle === a.handleId));
+
+      const dockPins: DockPin[] = newPins.map((p) => ({ nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y }));
+      for (const c of autoConnectEdgesFor(dockPins, otherPins, wires, alreadyWired)) {
+        newEdges.push({
+          id: `wire_${c.source}-${c.sourceHandle}__${c.target}-${c.targetHandle}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          source: c.source,
+          sourceHandle: c.sourceHandle,
+          target: c.target,
+          targetHandle: c.targetHandle,
+          type: "wire",
+          data: c.tap ? { waypoints: [], targetTap: c.tap, hostEdgeId: c.hostEdgeId } : { waypoints: [] },
+        });
       }
       
       if (newEdges.length > 0) {

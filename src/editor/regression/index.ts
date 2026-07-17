@@ -10,6 +10,7 @@ import { runPlacementTests } from "./placement.test.js";
 import { runNetLabelTests } from "./netLabel.test.js";
 import { runNetlabelProbeTests } from "./netlabelProbe.test.js";
 import { runNetRenameTests } from "./netRename.test.js";
+import { runAutoConnectTests } from "./autoConnect.test.js";
 import { runKeyboardViewportTests } from "./keyboardViewport.test.js";
 import { runToolbarTests } from "./toolbar.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
@@ -33,6 +34,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Netlist prefixes", ...runNetlistPrefixTests() },
     { name: "ASC connectivity", ...runAscConnectivityTests() },
     { name: "Placement ghost", ...runPlacementTests() },
+    { name: "Auto-connect docking", ...runAutoConnectTests() },
     // Net-label consistency drives the store, whose rebuilds are deferred a tick.
     { name: "Net labels", ...(await runNetLabelTests()) },
     { name: "Net-label probe menu", ...(await runNetlabelProbeTests()) },
