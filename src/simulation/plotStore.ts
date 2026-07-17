@@ -276,6 +276,25 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
   },
 }));
 
+/**
+ * Snapshot the current diagram configuration as serialisable {@link PlotSettings}
+ * — the same shape written to a `.plt` file, reused to embed the plot config in
+ * a share link / autosave. The inverse of {@link PlotActions.importSettings}.
+ */
+export function currentPlotSettings(): PlotSettings {
+  const s = usePlotStore.getState();
+  return {
+    version: 1,
+    panels: s.panels,
+    traceToPanel: s.traceToPanel,
+    colors: s.colors,
+    expressions: s.expressions,
+    hiddenExpressions: s.hiddenExpressions,
+    syncX: s.syncX,
+    svgLight: s.svgLight,
+  };
+}
+
 /** Shallow pick of the given keys from an object. */
 function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Partial<T> {
   const out: Partial<T> = {};

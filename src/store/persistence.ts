@@ -2,6 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
+import type { PlotSettings } from "@simulation/plotStore.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
 
@@ -48,6 +49,13 @@ export interface CircuitSnapshot {
   showDirectivesOnCanvas?: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */
   directivesPos?: { x: number; y: number };
+  /**
+   * Diagram configuration (panels, axes, colours, functions — the `.plt`
+   * shape). Tiny and highly compressible next to the nodes/edges, so it does
+   * not meaningfully affect whether a share link still fits a QR code. Optional
+   * so links written before this field still load.
+   */
+  plotSettings?: PlotSettings;
   /**
    * The {@link BUILD_ID} that wrote this snapshot. Stamped only on the
    * localStorage autosave (not on share links, which must always open); used to

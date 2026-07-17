@@ -14,7 +14,7 @@ import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { useSimulationStore } from "./simulationStore.js";
-import { usePlotStore } from "@simulation/plotStore.js";
+import { usePlotStore, currentPlotSettings } from "@simulation/plotStore.js";
 import type { CircuitSnapshot } from "./persistence.js";
 
 interface HistoryEntry {
@@ -668,7 +668,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         if (anchor) netLabelPorts[anchor] = net.nodeLabel;
       }
     }
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, showDirectivesOnCanvas, directivesPos };
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings() };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -714,6 +714,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       _history: [],
       _future: [],
     });
+
+    // Restore the saved diagram config (panels, axes, colours, functions). The
+    // trace names were captured against this snapshot's own net labels, so they
+    // are imported verbatim — no re-resolving needed. Legacy snapshots without
+    // it leave the current plot config untouched. importSettings ignores an
+    // invalid/empty payload.
+    if (snapshot.plotSettings) usePlotStore.getState().importSettings(snapshot.plotSettings);
 
     setTimeout(() => {
       get().rebuildConnections();

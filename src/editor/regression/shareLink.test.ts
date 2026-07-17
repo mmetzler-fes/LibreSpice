@@ -2,6 +2,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import {
   encodeSnapshot, decodeSnapshot, encodeSnapshotCompressed, decodeSnapshotCompressed,
 } from "@store/persistence.js";
+import { usePlotStore } from "@simulation/plotStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -147,6 +148,37 @@ const CASES: Case[] = [
     const port = st().circuit.components.get("r1")?.ports[0];
     const label = port?.netId ? st().circuit.nets.get(port.netId)?.nodeLabel : undefined;
     if (label !== "OUT") fail(`net name ${label} != OUT`);
+  } },
+
+  { name: "share link: the diagram (.plt) config survives the reload", run: async (fail) => {
+    buildCircuit();
+    // A non-default diagram: two panels, a custom axis, a colour and a function.
+    usePlotStore.getState().importSettings({
+      version: 1,
+      panels: [{ id: "panel-0", yMin: -5, yMax: 5, yTicks: 4 }, { id: "panel-1", logX: true }],
+      traceToPanel: { "V(out)": "panel-1" },
+      colors: { "V(out)": "#ff8800" },
+      expressions: ["V(a)-V(b)"],
+      hiddenExpressions: ["V(a)-V(b)"],
+      syncX: true,
+      svgLight: true,
+    });
+    const reopened = await decodeSnapshotCompressed(await encodeSnapshotCompressed(st().exportSnapshot()));
+    if (!reopened) { fail("compressed share payload did not decode"); return; }
+    // Wipe the live plot store, then load — proving the config comes from the link.
+    usePlotStore.getState().resetSettings();
+    st().loadFromSnapshot(reopened);
+
+    const s = usePlotStore.getState();
+    if (s.panels.length !== 2) fail(`panels lost: ${JSON.stringify(s.panels)}`);
+    if (s.panels[0]?.yMin !== -5 || s.panels[0]?.yMax !== 5) fail(`panel-0 y-bounds lost: ${JSON.stringify(s.panels[0])}`);
+    if (s.panels[1]?.logX !== true) fail("panel-1 logX lost");
+    if (s.traceToPanel["V(out)"] !== "panel-1") fail(`trace→panel lost: ${JSON.stringify(s.traceToPanel)}`);
+    if (s.colors["V(out)"] !== "#ff8800") fail(`colour lost: ${JSON.stringify(s.colors)}`);
+    if (!s.expressions.includes("V(a)-V(b)")) fail(`expression lost: ${JSON.stringify(s.expressions)}`);
+    if (!s.hiddenExpressions.includes("V(a)-V(b)")) fail("hidden expression lost");
+    if (s.syncX !== true) fail("syncX lost");
+    if (s.svgLight !== true) fail("svgLight lost");
   } },
 
   { name: "legacy (uncompressed) share links still open", run: (fail) => {
