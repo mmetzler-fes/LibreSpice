@@ -74,7 +74,7 @@ const SECTIONS = [
       { name: "Unbelasteter Spannungsteiler", file: "Spannungsteiler_unbelastet" },
       { name: "Belasteter Spannungsteiler", file: "05-2-2_Spannungsteiler1" },
       { name: "Spannungsteiler-Belastungskennlinie", file: "Spannungsteiler_Belastungskennlinie" },
-      { name: "Brückenschaltung (Temperaturmessbrücke)", file: "Tempmessbruecke_NTC502AT_2" },
+      { name: "Brückenschaltung", file: "Brueckenschaltung1" },
       { name: "Innenwiderstand / Spannungsanpassung", file: "05-2-1_Leistungsanpassung1" },
       { name: "Kondensator Auf-/Entladung", file: "04-2-2_RC_an_Pulsquelle" },
       { name: "Spule an Rechteckspannung", file: "06-1_Spule_AC1" },
