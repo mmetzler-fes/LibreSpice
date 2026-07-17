@@ -53,6 +53,12 @@ interface SimulationActions {
   setProgress: (progress: { done: number; total: number } | null) => void;
   /** Follow a net rename: update selected probes and the current result's keys. */
   renameNetVariable: (oldLabel: string, newLabel: string) => void;
+  /**
+   * Restore probes from a loaded snapshot / share link. The circuit's own result
+   * is cleared (it belongs to whatever was open before), and the probes go in as
+   * *pending* so the next run resolves them against the real result variables.
+   */
+  loadProbes: (probes: string[]) => void;
   reset: () => void;
 }
 
@@ -146,5 +152,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       return { selectedVariables, pendingProbes, result };
     });
   },
+  loadProbes: (probes) =>
+    set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [...probes], log: "", progress: null }),
   reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "", progress: null }),
 }));

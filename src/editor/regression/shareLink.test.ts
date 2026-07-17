@@ -3,6 +3,7 @@ import {
   encodeSnapshot, decodeSnapshot, encodeSnapshotCompressed, decodeSnapshotCompressed,
 } from "@store/persistence.js";
 import { usePlotStore } from "@simulation/plotStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -179,6 +180,25 @@ const CASES: Case[] = [
     if (!s.hiddenExpressions.includes("V(a)-V(b)")) fail("hidden expression lost");
     if (s.syncX !== true) fail("syncX lost");
     if (s.svgLight !== true) fail("svgLight lost");
+  } },
+
+  { name: "share link: the active scope probes are restored (as pending)", run: async (fail) => {
+    buildCircuit();
+    // The scope the author left active — a mix of a resolved run and pending.
+    useSimulationStore.getState().loadProbes(["v(out)", "@r1[i]"]);
+    const reopened = await decodeSnapshotCompressed(await encodeSnapshotCompressed(st().exportSnapshot()));
+    if (!reopened) { fail("compressed share payload did not decode"); return; }
+    // A different circuit's scope is live before the load — it must be replaced.
+    useSimulationStore.getState().loadProbes(["v(somethingelse)"]);
+    st().loadFromSnapshot(reopened);
+
+    const sim = useSimulationStore.getState();
+    // No result yet, so they land in pendingProbes (resolved on the next run).
+    const got = [...sim.pendingProbes].sort();
+    if (JSON.stringify(got) !== JSON.stringify(["@r1[i]", "v(out)"])) {
+      fail(`pending probes ${JSON.stringify(sim.pendingProbes)} != [@r1[i], v(out)]`);
+    }
+    if (sim.selectedVariables.length !== 0) fail(`selectedVariables should be empty before a run: ${JSON.stringify(sim.selectedVariables)}`);
   } },
 
   { name: "legacy (uncompressed) share links still open", run: (fail) => {

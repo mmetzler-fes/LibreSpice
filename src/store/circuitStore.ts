@@ -668,7 +668,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         if (anchor) netLabelPorts[anchor] = net.nodeLabel;
       }
     }
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings() };
+    // Persist the active scope: after a run these are ngspice-resolved names; if
+    // the circuit was never run they still sit in pendingProbes. Union covers both.
+    const sim = useSimulationStore.getState();
+    const selectedVariables = [...new Set([...sim.selectedVariables, ...sim.pendingProbes])];
+    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -721,6 +725,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // it leave the current plot config untouched. importSettings ignores an
     // invalid/empty payload.
     if (snapshot.plotSettings) usePlotStore.getState().importSettings(snapshot.plotSettings);
+    // Restore the active scope as pending probes: the next run resolves them and
+    // plots the author's chosen signals straight away. Done before the rename
+    // pass below so renameNetVariable rewrites these probes too.
+    useSimulationStore.getState().loadProbes(snapshot.selectedVariables ?? []);
 
     setTimeout(() => {
       get().rebuildConnections();

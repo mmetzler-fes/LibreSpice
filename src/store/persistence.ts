@@ -57,6 +57,13 @@ export interface CircuitSnapshot {
    */
   plotSettings?: PlotSettings;
   /**
+   * The active scope probes (ngspice-resolved trace names like `v(out)`,
+   * `@r1[i]`). Restored as *pending* probes on load, so the next simulation run
+   * immediately plots the signals the author cared about instead of an empty
+   * scope. Optional — links written before this field simply restore no probes.
+   */
+  selectedVariables?: string[];
+  /**
    * The {@link BUILD_ID} that wrote this snapshot. Stamped only on the
    * localStorage autosave (not on share links, which must always open); used to
    * skip auto-restoring a snapshot from a different build. Optional so older
