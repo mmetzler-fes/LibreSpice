@@ -235,7 +235,7 @@ const page = `<!doctype html>
         <p class="tag">Ein SPICE-Schaltplaneditor und Simulator im Browser.</p>
 
         <p>
-          LibreSpice ist ein freier, browserbasierter Editor zum Zeichnen
+          LibreSpice ist ein browserbasierter Editor zum Zeichnen
           elektronischer Schaltpläne und zum Simulieren ihres Verhaltens — ganz
           ohne Installation. Bauteile werden per Klick platziert, verdrahtet und
           über eine eingebettete SPICE-Engine analysiert.
@@ -264,7 +264,7 @@ ${sectionsHtml}
       </div>
 
       <footer>
-        Freie Software · Zum Starten auf „Zur App" klicken oder ein Beispiel öffnen.
+        Browserbasiert, ohne Installation frei benutzbar · Zum Starten auf „Zur App" klicken oder ein Beispiel öffnen.
       </footer>
     </main>
   </body>

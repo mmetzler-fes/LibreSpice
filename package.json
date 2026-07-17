@@ -15,7 +15,6 @@
     "bake:examples": "node scripts/bake-example-links.mjs"
   },
   "author": "",
-  "license": "MIT",
   "dependencies": {
     "@chakra-ui/react": "^3.0.0",
     "@emotion/react": "^11.14.0",
