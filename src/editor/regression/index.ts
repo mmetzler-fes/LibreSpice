@@ -9,6 +9,7 @@ import { runShareLinkTests } from "./shareLink.test.js";
 import { runPlacementTests } from "./placement.test.js";
 import { runNetLabelTests } from "./netLabel.test.js";
 import { runNetlabelProbeTests } from "./netlabelProbe.test.js";
+import { runNetRenameTests } from "./netRename.test.js";
 import { runKeyboardViewportTests } from "./keyboardViewport.test.js";
 import { runToolbarTests } from "./toolbar.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
@@ -35,6 +36,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Net-label consistency drives the store, whose rebuilds are deferred a tick.
     { name: "Net labels", ...(await runNetLabelTests()) },
     { name: "Net-label probe menu", ...(await runNetlabelProbeTests()) },
+    { name: "Net rename propagation", ...(await runNetRenameTests()) },
     { name: "Keyboard viewport", ...runKeyboardViewportTests() },
     { name: "Toolbar", ...runToolbarTests() },
     // Share links/QR codes decompress asynchronously.

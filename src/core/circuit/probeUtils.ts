@@ -118,10 +118,20 @@ export function getVoltageDiffExpression(component: SpiceComponent, circuit: Cir
  * Rewrite voltage references to a renamed net inside a probe/expression string,
  * e.g. `V(net1)-V(gnd)` with net1→vin becomes `V(vin)-V(gnd)`. Only voltage
  * refs carry a net name (currents reference devices), so `I(...)` is untouched.
+ *
+ * Both LTSpice voltage forms are covered: the single-node `V(a)` and the
+ * differential `V(a,b)` that a component data-point emits — either operand of
+ * the pair renames independently, so `V(out,net1)` with net1→gnd becomes
+ * `V(out,gnd)`. Matching a bare net name (not one already inside `V(...)`) would
+ * be ambiguous with device names, so only names within `V(...)` are touched.
  */
 export function renameNetInProbe(trace: string, oldLabel: string, newLabel: string): string {
-  const esc = oldLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return trace.replace(new RegExp(`([vV])\\(\\s*${esc}\\s*\\)`, "g"), (_m, fn) => `${fn}(${newLabel})`);
+  // Match V(...) with one or two comma-separated node names and rename any
+  // operand that equals oldLabel, leaving the other(s) as they are.
+  return trace.replace(/([vV])\(\s*([^(),]+?)\s*(?:,\s*([^(),]+?)\s*)?\)/g, (_m, fn, a, b) => {
+    const rn = (name: string | undefined) => (name === oldLabel ? newLabel : name);
+    return b !== undefined ? `${fn}(${rn(a)},${rn(b)})` : `${fn}(${rn(a)})`;
+  });
 }
 
 /** Build voltage probe candidates for a specific port net. */
