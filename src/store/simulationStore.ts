@@ -73,22 +73,18 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       // The sweep/time base is never a meaningful trace (it is the x-axis).
       const isAxis = (v: string) => v === "time" || v === "frequency";
       // Keep the probes the user already had (so their panel assignment and
-      // colours survive a re-run), plus any pending ones; only fall back to
-      // the first real signal when nothing carries over.
+      // colours survive a re-run), plus any pending ones.
       const kept = selectedVariables.filter((v) => result.variables.includes(v) && !isAxis(v));
-      const pending = pendingProbes.filter((p) => result.variables.includes(p) && !isAxis(p));
-      const merged = [...new Set([...kept, ...pending])];
-      // Auto-pick a MEANINGFUL default probe: prefer a varying signal over a
-      // constant one (e.g. a supply rail), so the plot isn't a lone flat line.
-      const isConstant = (v: string) => {
-        const d = result.data[v];
-        if (!d || d.length === 0) return true;
-        for (let i = 1; i < d.length; i++) if (d[i] !== d[0]) return false;
-        return true;
-      };
-      const firstReal = result.variables.find((v) => !isAxis(v) && !isConstant(v))
-        ?? result.variables.find((v) => !isAxis(v));
-      const next = merged.length > 0 ? merged : (firstReal ? [firstReal] : []);
+      // A pending probe was requested before the run, so it is spelled the way
+      // the schematic writes it (`I(R1)`) — ngspice answers with `i(r1)` or
+      // `@r1[i]`. Resolve it, or the very probe the user asked for is dropped.
+      const pending = pendingProbes
+        .map((p) => matchResultVariable(result, p))
+        .filter((v): v is string => v !== null && !isAxis(v));
+      // No auto-pick: the scope shows what the user asked for via "add to scope"
+      // and nothing else. A default trace guessed from the netlist was never the
+      // signal anyone wanted, and it had to be hunted down and unticked first.
+      const next = [...new Set([...kept, ...pending])];
       set({ result, status: "done", errorMessage: null, selectedVariables: next, pendingProbes: [], progress: null });
     } else {
       set({ result, status: "done", errorMessage: null, progress: null });
