@@ -4,5 +4,8 @@ library-archive
 # Host-specific container UID/GID — copy .env.example to .env and set your own
 .env
 
-# Ignorierte Beispielschaltungen
-examples/
+# Ignorierte Beispielschaltungen (Verzeichnisinhalt, nicht das Verzeichnis
+# selbst — sonst ließe sich unten keine einzelne Datei wieder einschließen).
+examples/*
+# …außer der Brückenschaltung, die eine Galerie-Karte auf der Startseite füllt.
+!examples/Brueckenschaltung1.asc
