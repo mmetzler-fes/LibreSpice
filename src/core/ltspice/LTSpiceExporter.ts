@@ -268,7 +268,9 @@ export class LTSpiceExporter {
         if (!d?.showLabel && !d?.connector) continue;
         const netId = circuit.components.get(edge.source)?.ports?.find((p: { id: string; netId?: string }) => p.id === `${edge.source}-${edge.sourceHandle}`)?.netId;
         if (!netId || netId === "0" || labelledNets.has(netId)) continue;
-        const name = (circuit.nets.get(netId)?.nodeLabel ?? netId).trim();
+        const rawName = circuit.nets.get(netId)?.nodeLabel;
+        const isNamed = !!rawName && rawName !== netId;
+        const name = (rawName ?? netId).trim();
         if (!name) continue;
         const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
         const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
@@ -276,11 +278,19 @@ export class LTSpiceExporter {
         const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
         const dock = dockPoint(orthoVertices([a, ...wps, b]), typeof d.labelT === "number" ? d.labelT : 0.5);
         const fx = Math.round(dock.x), fy = Math.round(dock.y);
-        // A connector may carry its own name (LTSpice port label ≠ net name); its
-        // FLAG uses that, otherwise the net name.
-        const flagName = (d.connector && d.connectorLabel?.trim()) || name;
-        flagLines.push(`FLAG ${fx} ${fy} ${flagName}`);
+        // A connector carries its own name (LTSpice port label may differ from the
+        // net name); its FLAG uses that, otherwise the net name.
+        const connName = (d.connector && d.connectorLabel?.trim()) || name;
+        flagLines.push(`FLAG ${fx} ${fy} ${connName}`);
         if (d.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
+        // When the connector's name differs from the wire's own (named) net, emit
+        // a *second* FLAG for the net name at a distinct point — exactly how
+        // LTSpice aliases two labels (e.g. a port Q1_C and a wire label Q1_B) onto
+        // one net.
+        if (d.connector && isNamed && connName !== name) {
+          const cx = Math.round(a.x), cy = Math.round(a.y);
+          if (cx !== fx || cy !== fy) flagLines.push(`FLAG ${cx} ${cy} ${name}`);
+        }
         labelledNets.add(netId);
       }
     }

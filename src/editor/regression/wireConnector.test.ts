@@ -126,7 +126,9 @@ function twoResistorNet() {
 }
 
 CASES.push(
-  { name: "a connector's own name is exported as its FLAG (may differ from net name)", run: (fail) => {
+  { name: "a differing connector name and wire name export as two aliased FLAGs", run: (fail) => {
+    // LTSpice: FLAG <connector name> + IOPIN at the port, and a second FLAG with
+    // the wire's own net name elsewhere on the net.
     const { netId } = twoResistorNet();
     useCircuitStore.getState().renameNet(netId, "A");
     useCircuitStore.getState().updateEdgeData("w_conn", { connector: true, connectorLabel: "B" });
@@ -134,7 +136,11 @@ CASES.push(
     const asc = LTSpiceExporter.export(st.nodes, st.edges, "", st.circuit, st.dataFlags);
     if (!/^FLAG\s+-?\d+\s+-?\d+\s+B$/m.test(asc)) fail(`connector FLAG "B" missing:\n${asc}`);
     if (!/^IOPIN\s+-?\d+\s+-?\d+\s+BiDir$/m.test(asc)) fail(`IOPIN missing:\n${asc}`);
-    if (/^FLAG\s+-?\d+\s+-?\d+\s+A$/m.test(asc)) fail("the net name A was written as a FLAG too (connector name B should stand in)");
+    if (!/^FLAG\s+-?\d+\s+-?\d+\s+A$/m.test(asc)) fail(`the wire's net name "A" must also be a FLAG (aliased):\n${asc}`);
+    // The connector's FLAG and the net-name FLAG sit at different points.
+    const bAt = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+B$/m)?.[1];
+    const aAt = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+A$/m)?.[1];
+    if (bAt && aAt && bAt === aAt) fail(`both FLAGs sit on the same point ${bAt}`);
   } },
 
   { name: "renaming a connector leaves the wire's net name untouched", run: (fail) => {
