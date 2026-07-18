@@ -33,11 +33,7 @@ const st = () => useCircuitStore.getState();
  * Documented so the gap is visible and a future fix can drop the entry.
  */
 const KNOWN_ROUNDTRIP_ISSUES: Record<string, string> = {
-  // A stale LibreSpice re-save with stacked duplicate flags (e.g. U+ and UE both
-  // at (-72,208)); one label is dropped on the next save (FLAG 12→11). The clean
-  // original is OP-nicht_inv_Verstärker.asc, which round-trips fine — this ae
-  // duplicate can be deleted.
-  "OP-nicht_inv_Verstaerker.asc": "stale re-save with stacked duplicate net labels",
+  // (currently none — every bundled example round-trips under the strict checks)
 };
 
 /** Node's `fs`/`path`/`os`, loaded via a runtime specifier so `tsc` stays out of it. */
