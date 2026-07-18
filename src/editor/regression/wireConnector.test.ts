@@ -3,6 +3,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { pointAtT, projectToPolyline, ARROW_ORDER, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
+import { createSpiceComponent, nextComponentId } from "../componentFactory.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -103,6 +104,47 @@ CASES.push(
     const back = LTSpiceParser.parse(asc);
     const nl = back.nodes.find((n) => (n.data as { label?: string }).label === "SIG");
     if (nl && (nl.data as { connector?: boolean }).connector) fail("plain label came back as a connector");
+  } },
+);
+
+// Build R1—R2 joined by one wire, return the store, the wire id and the net id.
+function twoResistorNet() {
+  const store = useCircuitStore.getState();
+  store.clearCircuit();
+  const mk = (label: string, x: number) => {
+    const id = nextComponentId("resistor", useCircuitStore.getState().nodes.map((n) => n.id));
+    store.addComponent(createSpiceComponent("resistor", id, label, x, 0),
+      { id, type: "component", position: { x, y: 0 }, data: { componentType: "resistor", label } });
+    return id;
+  };
+  const r1 = mk("R1", 0);
+  const r2 = mk("R2", 160);
+  store.setEdges([{ id: "w_conn", source: r1, sourceHandle: "n", target: r2, targetHandle: "p", type: "wire", data: { waypoints: [] } }]);
+  store.rebuildConnections();
+  const netId = useCircuitStore.getState().circuit.components.get(r1)!.ports.find((p) => p.id === `${r1}-n`)!.netId!;
+  return { netId };
+}
+
+CASES.push(
+  { name: "a connector's own name is exported as its FLAG (may differ from net name)", run: (fail) => {
+    const { netId } = twoResistorNet();
+    useCircuitStore.getState().renameNet(netId, "A");
+    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true, connectorLabel: "B" });
+    const st = useCircuitStore.getState();
+    const asc = LTSpiceExporter.export(st.nodes, st.edges, "", st.circuit, st.dataFlags);
+    if (!/^FLAG\s+-?\d+\s+-?\d+\s+B$/m.test(asc)) fail(`connector FLAG "B" missing:\n${asc}`);
+    if (!/^IOPIN\s+-?\d+\s+-?\d+\s+BiDir$/m.test(asc)) fail(`IOPIN missing:\n${asc}`);
+    if (/^FLAG\s+-?\d+\s+-?\d+\s+A$/m.test(asc)) fail("the net name A was written as a FLAG too (connector name B should stand in)");
+  } },
+
+  { name: "a connector with no own name falls back to the net name", run: (fail) => {
+    const { netId } = twoResistorNet();
+    useCircuitStore.getState().renameNet(netId, "SIG");
+    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true }); // no connectorLabel
+    const st = useCircuitStore.getState();
+    const asc = LTSpiceExporter.export(st.nodes, st.edges, "", st.circuit, st.dataFlags);
+    if (!/^FLAG\s+-?\d+\s+-?\d+\s+SIG$/m.test(asc)) fail(`connector FLAG should use the net name SIG:\n${asc}`);
+    if (!/^IOPIN\b/m.test(asc)) fail("IOPIN missing");
   } },
 );
 

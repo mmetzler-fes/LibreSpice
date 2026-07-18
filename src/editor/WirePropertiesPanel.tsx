@@ -13,24 +13,30 @@ const ARROW_GLYPH: Record<ArrowDir, string> = { up: "↑", down: "↓", left: "�
  * label/connector lives on the wire itself rather than on a separate node.
  */
 export function WirePropertiesPanel() {
-  const { edges, updateEdgeData } = useCircuitStore();
+  const { edges, updateEdgeData, circuit } = useCircuitStore();
   const theme = useTheme();
 
   const edge = edges.find((e) => e.selected);
   if (!edge) return null;
 
-  const data = (edge.data ?? {}) as { showLabel?: boolean; connector?: boolean; arrowDir?: ArrowDir };
+  const data = (edge.data ?? {}) as { showLabel?: boolean; connector?: boolean; arrowDir?: ArrowDir; connectorLabel?: string };
   const showLabel = !!data.showLabel;
   const connector = !!data.connector;
   const arrowDir = data.arrowDir ?? "right";
+  const connectorLabel = data.connectorLabel ?? "";
+
+  // The wire's net name, used as the default/placeholder for the connector name.
+  const port = edge.source ? circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`) : undefined;
+  const netName = port?.netId ? (circuit.nets.get(port.netId)?.nodeLabel ?? port.netId) : "";
 
   const setVisible = (v: boolean) => {
-    // Turning the label off also drops the connector (which needs a label).
-    updateEdgeData(edge.id, v ? { showLabel: true } : { showLabel: false, connector: false });
+    updateEdgeData(edge.id, { showLabel: v });
   };
   const setConnector = (v: boolean) => {
-    // A connector always shows its label, so enabling it implies "visible".
-    updateEdgeData(edge.id, v ? { connector: true, showLabel: true } : { connector: false });
+    // Adding a connector hides the plain label (the connector already names the
+    // net); removing it shows the plain label again. Either can be overridden by
+    // the visible checkbox afterwards.
+    updateEdgeData(edge.id, v ? { connector: true, showLabel: false } : { connector: false, showLabel: true });
   };
 
   const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" };
@@ -49,6 +55,26 @@ export function WirePropertiesPanel() {
           <input type="checkbox" checked={connector} onChange={(e) => setConnector(e.target.checked)} />
           <span>Net connector (Symbol)</span>
         </label>
+        {connector && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ color: theme.textMuted, fontWeight: 500 }}>Connector-Name</span>
+            <input
+              type="text"
+              value={connectorLabel}
+              placeholder={netName || "Netzname"}
+              onChange={(e) => updateEdgeData(edge.id, { connectorLabel: e.target.value })}
+              style={{
+                padding: "4px 6px",
+                border: `1px solid ${theme.border}`,
+                borderRadius: 4,
+                fontFamily: "monospace",
+                background: theme.inputBg,
+                color: theme.text,
+              }}
+            />
+            <span style={{ fontSize: 10, color: "#94a3b8" }}>Leer = Leitungsname ({netName || "—"})</span>
+          </label>
+        )}
         {connector && (
           <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ color: theme.textMuted, fontWeight: 500 }}>Pfeilrichtung</span>

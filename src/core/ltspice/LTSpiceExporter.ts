@@ -264,7 +264,7 @@ export class LTSpiceExporter {
     }
     if (circuit?.nets) {
       for (const edge of edges) {
-        const d = edge.data as { showLabel?: boolean; connector?: boolean; labelT?: number; waypoints?: Pt[] } | undefined;
+        const d = edge.data as { showLabel?: boolean; connector?: boolean; connectorLabel?: string; labelT?: number; waypoints?: Pt[] } | undefined;
         if (!d?.showLabel && !d?.connector) continue;
         const netId = circuit.components.get(edge.source)?.ports?.find((p: { id: string; netId?: string }) => p.id === `${edge.source}-${edge.sourceHandle}`)?.netId;
         if (!netId || netId === "0" || labelledNets.has(netId)) continue;
@@ -276,7 +276,10 @@ export class LTSpiceExporter {
         const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
         const dock = dockPoint(orthoVertices([a, ...wps, b]), typeof d.labelT === "number" ? d.labelT : 0.5);
         const fx = Math.round(dock.x), fy = Math.round(dock.y);
-        flagLines.push(`FLAG ${fx} ${fy} ${name}`);
+        // A connector may carry its own name (LTSpice port label ≠ net name); its
+        // FLAG uses that, otherwise the net name.
+        const flagName = (d.connector && d.connectorLabel?.trim()) || name;
+        flagLines.push(`FLAG ${fx} ${fy} ${flagName}`);
         if (d.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
         labelledNets.add(netId);
       }
