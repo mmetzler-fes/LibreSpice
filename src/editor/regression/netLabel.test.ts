@@ -123,7 +123,7 @@ const CASES: Case[] = [
     if (named.length > 1) fail(`${named.length} nets display the name GND`);
   } },
 
-  { name: "deleting a GND label un-grounds the net again", run: async (fail) => {
+  { name: "clearing a GND wire's name un-grounds it again", run: async (fail) => {
     st().loadFromAsc(ASC_GND);
     await tick();
     st().rebuildConnections();
@@ -136,16 +136,15 @@ const CASES: Case[] = [
     st().rebuildConnections();
     if (r1()?.ports[0]?.netId !== "0") { fail("the net did not become ground"); return; }
 
-    // The label is what grounded it, so removing it must let go again.
-    const label = st().nodes.find((n) => (n.data as { label?: string }).label === "GND"
-      && (n.data as { componentType?: string }).componentType === "netlabel");
-    if (!label) { fail("no GND label on the canvas"); return; }
-    st().removeComponent(label.id);
-    await tick();
+    // The wire's name is what grounds it (no node any more), so clearing the
+    // wire's netName must let the net float again.
+    const gndWire = st().edges.find((e) => (e.data as { netName?: string }).netName === "GND");
+    if (!gndWire) { fail("no wire carries the GND name"); return; }
+    st().updateEdgeData(gndWire.id, { netName: undefined, showLabel: false });
     st().rebuildConnections();
 
     const a = r1()?.ports[0]?.netId, b = r1()?.ports[1]?.netId;
-    if (a === "0") fail("R1's top pin is still grounded after the label was deleted");
+    if (a === "0") fail("R1's top pin is still grounded after the name was cleared");
     if (!a || a === b) fail(`R1 is shorted (both pins on ${a})`);
   } },
 
@@ -200,13 +199,13 @@ const CASES: Case[] = [
     if (netOf("R1")?.nodeLabel !== "OUT") fail(`the net is called "${netOf("R1")?.nodeLabel}", not OUT`);
   } },
 
-  { name: "naming a net creates a visible label (no invisible net names)", run: async (fail) => {
-    // A name that lives only inside the net object is the shadow structure we do
-    // not want: nothing on the schematic shows it, yet it drives the netlist.
+  { name: "naming a net makes its wire visible, without a net-label node", run: async (fail) => {
+    // Naming a net puts the name on the *wire* (visible by default) — it must not
+    // spawn a net-label node / connector; that is what the user did not want.
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    // R1's *lower* pin is a plain, unnamed net.
+    // R1's *lower* pin is a plain, unnamed net (a wire to R2's lower pin).
     const r1 = [...st().circuit.components.values()].find((c) => c.label === "R1");
     const netId = r1?.ports[1]?.netId;
     if (!netId) { fail("R1 has no second net"); return; }
@@ -214,33 +213,38 @@ const CASES: Case[] = [
 
     st().renameNet(netId, "MID");
 
-    const after = st().nodes.filter((n) => (n.data as { componentType?: string }).componentType === "netlabel");
-    if (after.length !== before + 1) fail(`naming the net did not add a label terminal (${before} → ${after.length})`);
-    const created = after.find((n) => (n.data as { label?: string }).label === "MID");
-    if (!created) fail("no terminal carries the new name");
+    const after = st().nodes.filter((n) => (n.data as { componentType?: string }).componentType === "netlabel").length;
+    if (after !== before) fail(`naming the net spawned a net-label node (${before} → ${after})`);
+    const wire = st().edges.find((e) => (e.data as { netName?: string }).netName === "MID");
+    if (!wire) { fail("no wire carries the name MID"); return; }
+    if (!(wire.data as { showLabel?: boolean }).showLabel) fail("the named wire is not visible by default");
     st().regenerateNetlist();
     if (st().circuit.nets.get(netId)?.nodeLabel !== "MID") fail("the name did not survive a netlist rebuild");
+    // …and it survives a *full* rebuild (net ids get renumbered).
+    st().rebuildConnections();
+    if (![...st().circuit.nets.values()].some((n) => n.nodeLabel === "MID")) fail("the name was lost on a full rebuild");
   } },
 
-  { name: "deleting the label takes the net's name with it", run: async (fail) => {
+  { name: "deleting a net-connector keeps the wire's name", run: async (fail) => {
+    // The name belongs to the wire, not to the connector symbol: deleting the
+    // connector must leave the net named (and shown on the bridging wire).
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
     const label = netLabelNode();
     if (!label) { fail("no net label imported"); return; }
-    const netId = netOf("R1")?.id;
-    if (netId === undefined) { fail("R1 has no net"); return; }
     if (netOf("R1")?.nodeLabel !== "UB") fail(`the net is not called UB but ${netOf("R1")?.nodeLabel}`);
 
     st().removeComponent(label.id);
     await tick();
     st().rebuildConnections();
 
-    // The name must be gone with the symbol — a nameless net falls back to its id.
-    const net = netOf("R1");
-    if (net?.nodeLabel === "UB") fail("the net kept the name UB although its label is gone");
+    // The name stays, and no net-label node remains.
+    if (netOf("R1")?.nodeLabel !== "UB") fail(`the net lost its name UB (now ${netOf("R1")?.nodeLabel})`);
+    if (netLabelNode()) fail("a net-label node is still on the canvas");
+    if (!st().edges.some((e) => (e.data as { netName?: string }).netName === "UB")) fail("no wire carries the name UB after the delete");
     st().regenerateNetlist();
-    if (st().netlist.includes(" UB ")) fail("the netlist still uses the deleted label's name");
+    if (!st().netlist.includes("UB")) fail("the netlist no longer uses the name UB");
   } },
 
   { name: "delete a label, place a new one, name it — it stays its own component", run: async (fail) => {

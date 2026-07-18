@@ -4,8 +4,8 @@ import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
-import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
+import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
+import { getNodePins } from "@editor/pinGeometry.js";
 import { useUIStore } from "./uiStore.js";
 import type { FlowPoint, ArrowDir } from "@editor/WireTool.js";
 import { ARROW_ORDER } from "@editor/WireTool.js";
@@ -69,8 +69,6 @@ interface CircuitActions {
   moveDirectivesBox: (x: number, y: number) => void;
   setCircuitName: (name: string) => void;
   renameNet: (netId: string, label: string) => void;
-  /** Internal: build the net-label terminal a freshly named net needs (see renameNet). */
-  _createNetLabel: (netId: string, name: string) => { anchorPortId: string; node: Node; edge: Edge } | null;
   addDataFlag: (x: number, y: number, expr: string) => void;
   removeDataFlag: (id: string) => void;
   moveDataFlag: (id: string, x: number, y: number) => void;
@@ -132,21 +130,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const node = get().nodes.find((n) => n.id === id);
     const doomed = get().edges.filter((e) => e.source === id || e.target === id);
 
-    // The label terminal *is* the net's name (see renameNet), so removing it takes
-    // the name with it — otherwise the net kept a name with nothing on the
-    // schematic to show for it, which is the very ghost-naming we want gone.
+    // Deleting a net-connector (a net-label terminal) must *keep* the net's name:
+    // the name belongs to the wire, not to the connector symbol. So we remember it
+    // and re-show it on the wire that bridges the gap the connector left (below),
+    // instead of dropping it as the old behaviour did.
     const removed = get().circuit.components.get(id);
     const namedNetId = removed?.getNetLabel() !== null ? removed?.ports[0]?.netId : undefined;
+    // The name a deleted connector carried moves onto the bridging wire below.
+    const keptName = namedNetId && namedNetId !== "0" ? removed!.getNetLabel() : null;
 
     get().circuit.removeComponent(id);
-
-    if (namedNetId && namedNetId !== "0") {
-      const stillLabelled = [...get().circuit.components.values()].some(
-        (c) => c.getNetLabel() !== null && c.ports[0]?.netId === namedNetId,
-      );
-      const net = get().circuit.nets.get(namedNetId);
-      if (net && !stillLabelled) net.nodeLabel = namedNetId;
-    }
 
     // Wires that met at one *pin* of the removed part were one net through that
     // pin, so the remaining ends must stay connected to each other — otherwise
@@ -190,8 +183,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           targetHandle: other.handle,
           type: "wire",
           // Route the replacement through the two original paths and the point the
-          // removed pin sat on, so the wire keeps the shape it was drawn with.
-          data: { waypoints: [...[...first.path].reverse(), ...(via ? [via] : []), ...other.path] },
+          // removed pin sat on, so the wire keeps the shape it was drawn with. A
+          // deleted net-connector leaves its name on this bridging wire (visible).
+          data: { waypoints: [...[...first.path].reverse(), ...(via ? [via] : []), ...other.path], ...(keptName ? { netName: keptName, showLabel: true } : {}) },
         });
       }
     }
@@ -305,50 +299,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   setCircuitName: (name) => set({ circuitName: name }),
 
-  /**
-   * Build a net-label terminal for a net that has none, sitting on one of the
-   * net's pins. Registers the component, and returns the node and the wire to it
-   * for the caller to commit. `null` when the net has no component pin to hang it
-   * on (nothing to attach to, so the name stays in the net object alone).
-   */
-  _createNetLabel: (netId, name) => {
-    const { circuit, nodes } = get();
-    // Anchor on a real part, not on another terminal (ground / a net label).
-    const anchor = [...circuit.components.values()].find(
-      (c) => c.getNetLabel() === null && c.label !== "0" && c.ports.some((p) => p.netId === netId),
-    );
-    const port = anchor?.ports.find((p) => p.netId === netId);
-    const anchorNode = anchor ? nodes.find((n) => n.id === anchor.id) : undefined;
-    if (!anchor || !port || !anchorNode) return null;
-
-    const handle = port.id.slice(anchor.id.length + 1);
-    // Sit on the pin; if the part has no pin geometry (a library subcircuit), the
-    // anchor's centre still puts the label on the right net — the wire below
-    // carries the connection either way.
-    const pin = getNodePins(anchorNode, useUIStore.getState().symbolNorm).find((p) => p.handleId === handle)
-      ?? { x: anchorNode.position.x + NODE_SIZE / 2, y: anchorNode.position.y + NODE_SIZE / 2 };
-
-    const id = nextComponentId("netlabel", nodes.map((n) => n.id));
-    // The terminal sits at the node's centre, so offset the box to put it on the pin.
-    const x = pin.x - NODE_SIZE / 2, y = pin.y - NODE_SIZE / 2;
-    const comp = createSpiceComponent("netlabel", id, name, x, y);
-    circuit.addComponent(comp);
-
-    return {
-      anchorPortId: port.id,
-      node: { id, type: "component", position: { x, y }, data: { componentType: "netlabel", label: name } } as Node,
-      edge: {
-        id: `wire_netlabel_${id}`,
-        source: id, sourceHandle: "t",
-        target: anchor.id, targetHandle: handle,
-        type: "wire",
-        data: { waypoints: [] },
-      } as Edge,
-    };
-  },
-
   renameNet: (netId, label) => {
-    const { circuit } = get();
+    const { circuit, edges } = get();
     const net = circuit.nets.get(netId);
     if (!net) return;
     const oldLabel = net.nodeLabel;
@@ -356,10 +308,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (oldLabel === newLabel) return;
     net.nodeLabel = newLabel;
 
-    // A net-label terminal *is* the net's name: regenerateNetlist re-imposes its
-    // label on the net every time. So renaming the net has to rename the terminal
-    // too — otherwise the two disagree and the new name is silently overwritten on
-    // the next rebuild. One name, one source of truth.
+    // Legacy net-label terminals (imported LTSpice FLAGs) *are* the net's name:
+    // regenerateNetlist re-imposes their label, so renaming the net has to rename
+    // the terminal too or the new name is overwritten on the next rebuild.
     const labelIds = new Set<string>();
     for (const comp of circuit.components.values()) {
       if (comp.getNetLabel() !== null && comp.ports[0]?.netId === netId) {
@@ -368,21 +319,45 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
     }
 
-    // No terminal yet: give the net one, on a pin of the net. A name that lives
-    // only inside the net object is invisible on the schematic and is the second,
-    // shadow structure we do not want — every named net now shows its label.
-    const created = labelIds.size === 0 ? get()._createNetLabel(netId, newLabel) : null;
+    // No terminal node: the name lives on the *wire*. The chosen wire (the selected
+    // one, else any on the net) carries `netName` — the persistent source of truth
+    // that survives every rebuild — and is shown by default. Naming a net never
+    // spawns a net-label node / connector; a connector is added only via its button.
+    // An empty name clears the label back to the auto net id.
+    let shownEdgeId: string | null = null;
+    const clearing = newLabel === netId;
+    if (labelIds.size === 0) {
+      const netOfEdge = (e: Edge) =>
+        circuit.components.get(e.source!)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId === netId ||
+        circuit.components.get(e.target!)?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId === netId;
+      // Update every already-named wire of the net so a rename follows them all,
+      // but only *turn on* the label for the one representative wire.
+      const primary = edges.find((e) => e.selected && netOfEdge(e)) ?? edges.find(netOfEdge);
+      shownEdgeId = primary?.id ?? null;
+    }
+    const onNetEdge = (e: Edge) =>
+      circuit.components.get(e.source!)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId === netId ||
+      circuit.components.get(e.target!)?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId === netId;
 
     set((state) => ({
       netVersion: state.netVersion + 1,
       nodes: labelIds.size
         ? state.nodes.map((n) => (labelIds.has(n.id) ? { ...n, data: { ...n.data, label: newLabel } } : n))
-        : [...state.nodes, ...(created ? [created.node] : [])],
-      edges: created ? [...state.edges, created.edge] : state.edges,
+        : state.nodes,
+      edges: labelIds.size ? state.edges : state.edges.map((e) => {
+        if (!onNetEdge(e)) return e;
+        // Every wire of the net follows the new name; the representative one also
+        // becomes visible. Clearing removes the name and hides the label.
+        if (clearing) {
+          const { netName, showLabel, ...rest } = (e.data ?? {}) as Record<string, unknown>;
+          void netName; void showLabel;
+          return { ...e, data: rest };
+        }
+        return { ...e, data: { ...e.data, netName: newLabel, ...(e.id === shownEdgeId ? { showLabel: true } : {}) } };
+      }),
       // Keep data-point expressions pointing at the renamed net.
       dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
     }));
-    if (created) get().connectPorts(`${created.node.id}-t`, created.anchorPortId);
     // Naming a net "GND" / "0" makes it ground; the merge happens on the rebuild.
     if (/^(0|gnd)$/i.test(newLabel)) setTimeout(() => get().rebuildConnections(), 0);
     get().regenerateNetlist();
@@ -663,6 +638,33 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           if (net) net.nodeLabel = label;
         }
       }
+    }
+
+    // Wire-carried names (`edge.data.netName`) are the persistent source of truth
+    // for a labelled wire — they live on the edge and so survive every rebuild,
+    // even after the net is renumbered or merged. Apply them onto the freshly
+    // built nets (overriding the port-keyed restore above).
+    for (const edge of edges) {
+      const nm = (edge.data as { netName?: string } | undefined)?.netName;
+      if (!nm) continue;
+      const port = circuit.components.get(edge.source ?? "")?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
+      const nid = port?.netId;
+      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; }
+    }
+
+    // A net whose *name* is ground — typed into the net-name field on a wire, with
+    // no terminal node — is ground too (mirrors the terminal-based merge above).
+    // Runs after the labels are restored, so the ground names are visible here.
+    for (const [nid, net] of [...circuit.nets]) {
+      if (nid === "0" || !isGroundName(net.nodeLabel)) continue;
+      const groundNet = circuit.nets.get("0") ?? new Net("0", "GND");
+      circuit.nets.set("0", groundNet);
+      for (const comp of circuit.components.values()) {
+        for (const port of comp.ports) {
+          if (port.netId === nid) { port.connect("0"); groundNet.addPort(port.id); }
+        }
+      }
+      circuit.nets.delete(nid);
     }
 
     set((state) => ({ netVersion: state.netVersion + 1 }));
