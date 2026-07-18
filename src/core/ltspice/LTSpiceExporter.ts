@@ -157,6 +157,8 @@ export class LTSpiceExporter {
     for (const node of nodes) {
       const data = node.data as {
         componentType: ComponentType; label: string; valueLabel?: string; rotation?: number;
+        /** Horizontally flipped about the symbol origin → LTSpice's `M` prefix. */
+        mirrored?: boolean;
         labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
         /** Net-label acting as a port/connector → LTSpice FLAG + IOPIN. */
         connector?: boolean;
@@ -187,12 +189,13 @@ export class LTSpiceExporter {
       }
 
       const deg = data.rotation ?? 0;
+      const mirrored = !!data.mirrored;
       // A library part / `.subckt` has no fixed symbol: it carries its own `.asy`
       // name and pin list. Writing it as "res" (the old fallback) turned it into
       // a resistor on reload and dropped every wire attached to it.
       const isSub = data.componentType === "subcircuit";
       const subSymbol = data.symbolName || data.subName || data.label;
-      const rotated = offsetsForNode(data.componentType, deg, data.pins, isSub ? subSymbol : undefined);
+      const rotated = offsetsForNode(data.componentType, deg, data.pins, isSub ? subSymbol : undefined, mirrored);
       const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));
       for (const p of rotated) pinCoord.set(`${node.id}-${p.handle}`, { x: symX + p.dx, y: symY + p.dy });
 
@@ -200,7 +203,7 @@ export class LTSpiceExporter {
       // localized variant, …); only a freshly placed part falls back to the
       // default symbol for its type.
       const symName = isSub ? subSymbol : (data.ascSymbol || TYPE_TO_SYMBOL[data.componentType] || "res");
-      symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg)}`);
+      symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg, mirrored)}`);
 
       // Persist caption positions so LTSpice (and our own re-import) keep them.
       const lw = winCoord(LABEL_DEFAULT, data.labelOffset);

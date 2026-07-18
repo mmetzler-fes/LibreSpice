@@ -268,7 +268,8 @@ function CanvasInner() {
         if (editorMode === "place") rotatePlacement(); else rotateSelected();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === "m") {
+      // Ctrl+E is LTSpice's "Mirror"; Ctrl+M is kept as our original binding.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "m" || e.key === "e")) {
         e.preventDefault();
         mirrorSelected();
         return;

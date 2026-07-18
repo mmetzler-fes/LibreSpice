@@ -53,7 +53,12 @@ export interface ComponentNodeData {
   label: string;
   valueLabel?: string;
   rotation?: number;
-  /** Horizontal mirror flag (visual only; pin identity is unchanged). */
+  /**
+   * Horizontal mirror about the symbol's vertical centre line — LTSpice's `M`
+   * orientation prefix. Applied *before* `rotation`, as LTSpice does. Pin
+   * identity is unchanged (a mirrored NPN keeps its base), only pin *positions*
+   * move, so the netlist is unaffected.
+   */
   mirrored?: boolean;
   /** For the generalized voltage source: "DC" | "Sine" | "Pulse". */
   sourceType?: string;
@@ -364,8 +369,7 @@ function LibrarySymbolNode({
       {mapping.pins.map((pin) => {
         // Map the symbol's SpiceOrder onto the subcircuit's declared pin name.
         const handleId = pins[pin.order - 1] ?? `pin${pin.order}`;
-        const [rx, hy] = rotatePoint(pin.px, pin.py, center, center, rotation);
-        const hx = mirrored ? NODE_SIZE - rx : rx;
+        const [hx, hy] = rotatePoint(mirrored ? NODE_SIZE - pin.px : pin.px, pin.py, center, center, rotation);
         return (
           <Handle
             key={handleId}
@@ -383,7 +387,7 @@ function LibrarySymbolNode({
         style={{
           color: selected ? "#2563eb" : pal.symStroke,
           overflow: "visible",
-          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
+          transform: `${rotation ? `rotate(${rotation}deg) ` : ""}${mirrored ? "scaleX(-1)" : ""}`.trim() || undefined,
           transition: "transform 0.15s ease",
         }}
       >
@@ -484,8 +488,7 @@ function AsyComponentNode({
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
       {selected && <PinNetLabels nodeId={nodeId} data={data} />}
       {mapping.pins.map((pin) => {
-        const [rx, hy] = rotatePoint(pin.px, pin.py, center, center, rotation);
-        const hx = mirrored ? NODE_SIZE - rx : rx;
+        const [hx, hy] = rotatePoint(mirrored ? NODE_SIZE - pin.px : pin.px, pin.py, center, center, rotation);
         return (
           <Handle
             key={pin.order}
@@ -503,7 +506,7 @@ function AsyComponentNode({
         style={{
           color: selected ? "#2563eb" : pal.symStroke,
           overflow: "visible",
-          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
+          transform: `${rotation ? `rotate(${rotation}deg) ` : ""}${mirrored ? "scaleX(-1)" : ""}`.trim() || undefined,
           transition: "transform 0.15s ease",
         }}
       >
@@ -634,7 +637,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
         style={{
           color: selected ? "#2563eb" : "currentColor",
           overflow: "visible",
-          transform: `${mirrored ? "scaleX(-1) " : ""}${rotation ? `rotate(${rotation}deg)` : ""}` || undefined,
+          transform: `${rotation ? `rotate(${rotation}deg) ` : ""}${mirrored ? "scaleX(-1)" : ""}`.trim() || undefined,
           transition: "transform 0.15s ease",
         }}
       >

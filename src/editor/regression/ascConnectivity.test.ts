@@ -4,6 +4,8 @@ import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { Edge, Node } from "@xyflow/react";
+import { getLocalPins, NODE_SIZE } from "@editor/pinGeometry.js";
+import { offsetsForNode, parseRot } from "@core/ltspice/ltspiceGeometry.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -213,6 +215,116 @@ SYMATTR InstName C1
 SYMATTR Value 100nF
 `;
 
+// ── Mirrored symbols (`M<deg>`) ──────────────────────────────────────────────
+//
+// LTSpice's SYMBOL orientation field is `R<deg>` (regular) or `M<deg>`
+// (mirrored): a mirrored symbol is flipped horizontally about its own origin
+// *first*, then rotated. The `M` used to be parsed as a plain `R`, so every pin
+// of a mirrored part sat on the wrong side of the symbol — its wires matched
+// nothing and the net fell apart. 04-4_AstabileKippstufe1.asc (a mirrored Q1)
+// is the real-world case that exposed it.
+//
+// Mirror and rotation do not commute (M∘R(θ) == R(-θ)∘M), so the *order* is the
+// substance of these tests, not just the presence of the flag: an `M90` whose
+// mirror is applied after the rotation lands its pins where `M270` belongs.
+
+/**
+ * `.asc`-space pin coordinates of a symbol at the given origin and orientation,
+ * via the geometry the parser and exporter share. These are LTSpice units — the
+ * frame the file's WIRE endpoints live in, and thus the one connectivity is
+ * decided in. (The *rendered* node is a separate, rescaled 80px frame; the
+ * `renders mirrored` case below covers that side.)
+ */
+function ascPins(ori: string, ox = 240, oy = 240): Record<string, string> {
+  const { deg, mirrored } = parseRot(ori);
+  const offs = offsetsForNode("bjt_npn", deg, undefined, undefined, mirrored);
+  return Object.fromEntries(offs.map((p) => [p.handle, `${ox + p.dx},${oy + p.dy}`]));
+}
+
+/** Node-local (rendered) pin coordinates of an npn at the given orientation. */
+function renderPins(ori: string): Record<string, string> {
+  const { deg, mirrored } = parseRot(ori);
+  const data = { componentType: "bjt_npn" as const, label: "Q1", rotation: deg, mirrored };
+  return Object.fromEntries(getLocalPins(data).map((p) => [p.handleId, `${p.px},${p.py}`]));
+}
+
+const npnAsc = (ori: string) => `Version 4
+SHEET 1 880 680
+SYMBOL npn 240 240 ${ori}
+SYMATTR InstName Q1
+`;
+
+const ALL_ORIENTATIONS = ["R0", "R90", "R180", "R270", "M0", "M90", "M180", "M270"];
+
+const MIRROR_CASES: Case[] = [
+  // Ground truth read off 04-4_AstabileKippstufe1.asc itself: Q1 is `SYMBOL npn
+  // 240 240 M0`, and the file wires its collector at (176,240), base (240,288),
+  // emitter (176,336) — the exact negation of npn.asy's R0 offsets c(64,0)
+  // b(0,48) e(64,96) about the symbol origin.
+  { name: "mirror: M0 npn puts its pins on the flipped side", run: (fail) => {
+    const p = ascPins("M0");
+    const want = { c: "176,240", b: "240,288", e: "176,336" };
+    for (const [h, w] of Object.entries(want)) if (p[h] !== w) fail(`pin ${h} at ${p[h]}, expected ${w}`);
+    // …and R0 (Q2 in that same file) must be untouched.
+    const r = ascPins("R0", 560, 240);
+    const wantR = { c: "624,240", b: "560,288", e: "624,336" };
+    for (const [h, w] of Object.entries(wantR)) if (r[h] !== w) fail(`R0 pin ${h} at ${r[h]}, expected ${w}`);
+  } },
+
+  // The renderer has its own (rescaled) 80px frame, but the mirror must be the
+  // same operation there: a flip about the node's vertical centre line, so the
+  // handles track the flipped symbol. (This harness bundles no `.asy` symbols —
+  // see scripts/glob-shim.js — so it covers getLocalPins' fallback pin table;
+  // the mirror-before-rotate *order* is pinned by the `.asc` cases above, which
+  // is the frame connectivity is actually decided in.)
+  { name: "mirror: the node renders flipped about its centre", run: (fail) => {
+    const r0 = renderPins("R0"), m0 = renderPins("M0");
+    for (const h of Object.keys(r0)) {
+      const [x, y] = r0[h].split(",").map(Number);
+      const want = `${NODE_SIZE - x},${y}`;
+      if (m0[h] !== want) fail(`rendered pin ${h}: M0 at ${m0[h]}, expected ${want} (mirror of R0 ${r0[h]})`);
+    }
+  } },
+
+  { name: "mirror: the M flag reaches the node (so it renders flipped)", run: (fail) => {
+    const { nodes } = LTSpiceParser.parse(npnAsc("M0"));
+    const d = nodes[0]?.data as { mirrored?: boolean; rotation?: number };
+    if (!d?.mirrored) fail("node data lost the mirror flag");
+    if (d?.rotation !== 0) fail(`rotation ${d?.rotation} != 0`);
+    const plain = LTSpiceParser.parse(npnAsc("R0")).nodes[0]?.data as { mirrored?: boolean };
+    if (plain?.mirrored) fail("an unmirrored R0 symbol came back mirrored");
+  } },
+
+  // The non-commuting case. Mirror-then-rotate (LTSpice) sends the base to the
+  // *top*; rotate-then-mirror would send it to the bottom — i.e. to where M270
+  // belongs. Comparing the two orientations pins the order down.
+  { name: "mirror: M90 mirrors before rotating (order matters)", run: (fail) => {
+    // M90 = rotate the *mirrored* offsets c(-64,0) b(0,48) e(-64,96) by 90°,
+    // i.e. (dx,dy) → (-dy,dx), about the origin (240,240).
+    const m90 = ascPins("M90");
+    const want = { c: "240,176", b: "192,240", e: "144,176" };
+    for (const [h, w] of Object.entries(want)) if (m90[h] !== w) fail(`M90 pin ${h} at ${m90[h]}, expected ${w}`);
+    // Rotating first and mirroring after would land M90's pins on M270's.
+    if (m90.c === ascPins("M270").c) {
+      fail("M90 and M270 put the collector at the same spot — mirror applied after the rotation");
+    }
+  } },
+
+  { name: "mirror: every orientation round-trips through a save", run: (fail) => {
+    for (const ori of ALL_ORIENTATIONS) {
+      const asc = npnAsc(ori);
+      const { nodes, edges, components } = LTSpiceParser.parse(asc);
+      const circuit = { components: new Map(components.map((c) => [c.id, c])), nets: new Map() };
+      const out = LTSpiceExporter.export(nodes, edges, "", circuit, []);
+      const line = out.split("\n").find((l) => l.startsWith("SYMBOL "));
+      if (!line?.trim().endsWith(` ${ori}`)) fail(`${ori} exported as "${line?.trim()}"`);
+      // The symbol origin too: shifting it moves every pin off its wires, which
+      // is silent in a self-consistent round-trip but breaks the file in LTSpice.
+      if (line?.trim() !== `SYMBOL npn 240 240 ${ori}`) fail(`${ori}: origin moved — "${line?.trim()}"`);
+    }
+  } },
+];
+
 const CASES: Case[] = [
   { name: "every imported node has a finite position (a NaN one kills the canvas)", run: (fail) => {
     // A symbol we know nothing about — no type, no pins. Its node must still land
@@ -315,6 +427,7 @@ SYMATTR Value 1k
     if (p.pPer !== 20) fail(`pPer (Tperiod) ${p.pPer} != 20`);
   } },
   ...ROUNDTRIP_CASES,
+  ...MIRROR_CASES,
 ];
 
 export function runAscConnectivityTests(): TestReport {

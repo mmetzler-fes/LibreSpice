@@ -107,18 +107,32 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
 /** Ground's node is offset so its single terminal lands on the FLAG point. */
 export const GROUND_PIN: PinOffset = { handle: "gnd", dx: CENTER, dy: GROUND_PIN_Y };
 
-export function rotDeg(rot: string): number {
-  if (rot === "R90") return 90;
-  if (rot === "R180") return 180;
-  if (rot === "R270") return 270;
-  return 0;
+/**
+ * An LTSpice symbol orientation: `R<deg>` (regular) or `M<deg>` (mirrored).
+ * `M` means the symbol is flipped horizontally about its own origin *first*,
+ * then rotated by the angle — that order matters, since mirror and rotation do
+ * not commute (M∘R(θ) == R(-θ)∘M). The whole app follows LTSpice's order.
+ */
+export interface Orientation { deg: number; mirrored: boolean }
+
+/** Parse a SYMBOL orientation field (`R0`, `R90`, `M0`, `M270`, …). */
+export function parseRot(rot: string): Orientation {
+  const m = /^([RM])(\d+)$/.exec((rot ?? "").trim().toUpperCase());
+  if (!m) return { deg: 0, mirrored: false };
+  const deg = ((parseInt(m[2], 10) % 360) + 360) % 360;
+  return { deg: deg === 90 || deg === 180 || deg === 270 ? deg : 0, mirrored: m[1] === "M" };
 }
 
-export function rotStr(deg: number): string {
-  if (deg === 90) return "R90";
-  if (deg === 180) return "R180";
-  if (deg === 270) return "R270";
-  return "R0";
+/** Rotation angle of a SYMBOL orientation field, ignoring any mirror. */
+export function rotDeg(rot: string): number {
+  return parseRot(rot).deg;
+}
+
+/** Inverse of {@link parseRot}: an orientation → its `.asc` field. */
+export function rotStr(deg: number, mirrored = false): string {
+  const d = ((Math.round(deg) % 360) + 360) % 360;
+  const norm = d === 90 || d === 180 || d === 270 ? d : 0;
+  return `${mirrored ? "M" : "R"}${norm}`;
 }
 
 /**
@@ -144,16 +158,28 @@ export function subcircuitPinOffsets(pinNames: string[], symbolName?: string): P
 }
 
 /** Pin offsets for any node, including library parts (which have no fixed table). */
-export function offsetsForNode(type: string, deg: number, pinNames?: string[], symbolName?: string): PinOffset[] {
+export function offsetsForNode(
+  type: string, deg: number, pinNames?: string[], symbolName?: string, mirrored = false,
+): PinOffset[] {
   const base = type === "subcircuit"
     ? subcircuitPinOffsets(pinNames ?? [], symbolName)
     : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
-  return rotateOffsets(base, deg);
+  return rotateOffsets(mirrorOffsets(base, mirrored), deg);
 }
 
-/** Pin offsets after applying an LTSpice rotation about the symbol origin. */
-export function rotatedOffsets(type: string, deg: number): PinOffset[] {
-  return rotateOffsets(PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"], deg);
+/** Pin offsets after applying an LTSpice orientation about the symbol origin. */
+export function rotatedOffsets(type: string, deg: number, mirrored = false): PinOffset[] {
+  return rotateOffsets(mirrorOffsets(PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"], mirrored), deg);
+}
+
+/**
+ * Horizontal flip about the symbol's own origin (x = 0), which is what LTSpice's
+ * `M` prefix does — verified against stock files: an `npn` at `M0` puts its base
+ * at +0 and collector/emitter at -64, the exact negation of the `R0` offsets.
+ * Applied *before* the rotation, per LTSpice's order.
+ */
+function mirrorOffsets(base: PinOffset[], mirrored: boolean): PinOffset[] {
+  return mirrored ? base.map((p) => ({ ...p, dx: -p.dx })) : base;
 }
 
 function rotateOffsets(base: PinOffset[], deg: number): PinOffset[] {

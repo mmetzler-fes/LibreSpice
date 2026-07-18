@@ -520,15 +520,17 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   mirrorSelected: () => {
     const { selectedComponentId } = get();
     if (!selectedComponentId) return;
-    // Mirror is purely visual (pin identity is unchanged, so the netlist stays
-    // the same); it toggles a flag on the node that the renderer/pin geometry
-    // read to flip the symbol and its handles horizontally.
+    // Mirror keeps pin *identity* (so the netlist is unchanged) but moves the
+    // pins, exactly like a rotation — hence it is undoable the same way.
+    const snap = { nodes: get().nodes, edges: get().edges };
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === selectedComponentId
           ? { ...n, data: { ...n.data, mirrored: !(n.data as { mirrored?: boolean }).mirrored } }
           : n,
       ),
+      _history: [...state._history, snap],
+      _future: [],
     }));
     set((state) => ({ netVersion: state.netVersion + 1 }));
   },

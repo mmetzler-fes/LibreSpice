@@ -132,7 +132,12 @@ const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
   ],
 };
 
-/** Node-local pin positions, accounting for rotation/mirror of the symbol. */
+/**
+ * Node-local pin positions, accounting for the symbol's orientation. Mirror is
+ * applied *before* rotation, exactly as LTSpice's `M<deg>` is defined — the two
+ * do not commute, so flipping afterwards placed the pins of every mirrored,
+ * rotated part on the wrong side.
+ */
 export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "default"): LocalPin[] {
   const mirrored = !!data.mirrored;
   const flip = (px: number) => (mirrored ? NODE_SIZE - px : px);
@@ -142,8 +147,8 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
     const c = NODE_SIZE / 2;
     const rotation = data.rotation ?? 0;
     return mapping.pins.map((pin) => {
-      const [px, py] = rotatePoint(pin.px, pin.py, c, c, rotation);
-      return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px: flip(px), py };
+      const [px, py] = rotatePoint(flip(pin.px), pin.py, c, c, rotation);
+      return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px, py };
     });
   }
   const pins = FALLBACK_PINS[data.componentType] ?? [];

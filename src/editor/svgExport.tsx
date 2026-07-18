@@ -30,11 +30,16 @@ const SOURCE_FALLBACK: Record<string, React.FC> = {
   DC: VoltageSourceSymbol, Sine: SineSourceSymbol, Pulse: PulseSourceSymbol,
 };
 
-/** Center-anchored rotate + horizontal-mirror transform for an inner symbol. */
+/**
+ * Center-anchored orientation transform for an inner symbol. SVG applies the
+ * list left-to-right as outermost-first, so the rotate is written *before* the
+ * mirror to make the mirror happen first — LTSpice's `M<deg>` order, matching
+ * the editor node and getLocalPins.
+ */
 function transformFor(rotation: number, mirrored: boolean, cx: number, cy: number): string | undefined {
   const parts: string[] = [];
-  if (mirrored) parts.push(`translate(${2 * cx} 0) scale(-1 1)`);
   if (rotation) parts.push(`rotate(${rotation} ${cx} ${cy})`);
+  if (mirrored) parts.push(`translate(${2 * cx} 0) scale(-1 1)`);
   return parts.length ? parts.join(" ") : undefined;
 }
 

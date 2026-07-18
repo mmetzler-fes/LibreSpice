@@ -503,7 +503,7 @@ export function Toolbar() {
       <TBtn title="Rotate 90° left (Ctrl+R)" onClick={rotateSelected} disabled={!selectedComponentId}>
         <Ico d="M23 4v6h-6 M1 20v-6h6 M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
       </TBtn>
-      <TBtn title="Mirror Horizontal (Ctrl+M)" onClick={mirrorSelected} disabled={!selectedComponentId}>
+      <TBtn title="Mirror horizontal (Ctrl+E)" onClick={mirrorSelected} disabled={!selectedComponentId}>
         <Ico d="M12 3v18 M4 7l4 5-4 5 M20 7l-4 5 4 5" />
       </TBtn>
 

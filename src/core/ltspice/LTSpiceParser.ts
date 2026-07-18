@@ -3,7 +3,7 @@ import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { symbolToType, CENTER, GROUND_PIN, rotDeg, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 
@@ -413,10 +413,14 @@ export class LTSpiceParser {
     const cType: ComponentType = known ?? (declaredPins.length > 0 ? "subcircuit" : "resistor");
     const subPins = cType === "subcircuit" ? declaredPins : undefined;
 
-    const deg = rotDeg(sym.rot);
+    // `R<deg>` / `M<deg>`: a mirrored symbol is flipped horizontally first, then
+    // rotated. Dropping the `M` (as we used to) put every pin of a mirrored part
+    // on the wrong side, so its wires matched nothing and the net fell apart.
+    const { deg, mirrored } = parseRot(sym.rot);
 
-    // Pin registration (LTSpice symbol-local offsets, rotated about the origin).
-    const rotated = offsetsForNode(cType, deg, subPins, symBase);
+    // Pin registration (LTSpice symbol-local offsets, mirrored then rotated
+    // about the origin).
+    const rotated = offsetsForNode(cType, deg, subPins, symBase, mirrored);
     for (const p of rotated) {
       pins.push({ compId: sym.id, handle: p.handle, x: sym.x + p.dx, y: sym.y + p.dy });
     }
@@ -543,6 +547,7 @@ export class LTSpiceParser {
         label,
         valueLabel: displayValue,
         rotation: deg,
+        ...(mirrored && { mirrored: true }),
         // The generalized source picks its symbol (DC / sine / pulse) from this.
         ...((comp as any).sourceType !== undefined && { sourceType: (comp as any).sourceType }),
         // Library part: its handles, its `.asy` symbol and the subcircuit name.

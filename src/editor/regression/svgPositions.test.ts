@@ -244,6 +244,16 @@ const CASES: Case[] = [
       if (!/translate\(0 0\) scale\(-1 1\)|translate\(80 0\) scale\(-1 1\)/.test(m)) {
         fail("no horizontal-mirror transform found");
       }
+      // LTSpice's `M<deg>` mirrors *then* rotates. SVG applies a transform list
+      // outermost-first, so the rotate must be written before the mirror — the
+      // two don't commute, and the reverse order exports a mirrored, rotated
+      // part as its opposite rotation.
+      const mr = buildSchematicSvg([part("R3", 0, 0, { rotation: 90, mirrored: true })], [], "default");
+      const g = /<g transform="([^"]*rotate\(90[^"]*)"/.exec(mr)?.[1] ?? "";
+      if (!g.includes("scale(-1 1)")) fail(`no mirror in the rotated group: "${g}"`);
+      else if (g.indexOf("rotate(90") > g.indexOf("scale(-1 1)")) {
+        fail(`mirror applied after the rotation: "${g}"`);
+      }
     },
   },
   {
