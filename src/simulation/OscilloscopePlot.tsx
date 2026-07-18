@@ -6,7 +6,7 @@ import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
-import { evalExpression, resolveSeries, stepView, exprCheckResult } from "./expression.js";
+import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
@@ -353,7 +353,12 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         const at = trace.lastIndexOf(" @");
         const tag = at >= 0 && stepTags?.includes(trace.slice(at + 2)) ? trace.slice(at + 2) : null;
         const base = tag ? trace.slice(0, at) : trace;
-        if (expressions.includes(base)) {
+        // A formula is evaluated; a probe name is looked up. Falling back on
+        // `isExpression` rather than trusting the registration list alone: a
+        // formula that reaches the plot without being registered (restored
+        // settings, a renamed net, an import) used to resolve to null and drew
+        // as nothing — indistinguishable from a signal that is genuinely zero.
+        if (expressions.includes(base) || isExpression(result, base)) {
           const r = evalExpression(tag ? stepView(result, tag) : result, base, paramMap);
           map[trace] = r.values ?? null;
           if (r.error) errors[base] = r.error;

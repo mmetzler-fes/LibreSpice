@@ -80,7 +80,12 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       const isAxis = (v: string) => v === "time" || v === "frequency";
       // Keep the probes the user already had (so their panel assignment and
       // colours survive a re-run), plus any pending ones.
-      const kept = selectedVariables.filter((v) => result.variables.includes(v) && !isAxis(v));
+      // Resolve, don't string-compare: a probe restored from a `.plt` is spelled
+      // the way LTSpice writes it (`V(U1)`), while ngspice answers `v(u1)`. An
+      // exact `includes` dropped exactly those traces on every single run.
+      const kept = selectedVariables
+        .map((v) => matchResultVariable(result, [v]))
+        .filter((v): v is string => v !== null && !isAxis(v));
       // A pending probe was requested before the run, so it is spelled the way
       // the schematic writes it (`I(R1)`) — ngspice answers with `i(r1)` or
       // `@r1[i]`. Resolve it, or the very probe the user asked for is dropped.
@@ -118,10 +123,14 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   addProbeCandidates: (candidates) => {
     const { result, selectedVariables, pendingProbes } = get();
     if (result) {
+      // The list holds alternative *spellings* of one quantity (`I(R1)`, `i(R1)`,
+      // `@R1[i]`, `@r1[i]`), not four probes: resolving each on its own added the
+      // same trace once per spelling. Dedupe against itself, not just against the
+      // existing selection.
       const matched = candidates
         .map((c) => matchResultVariable(result, c))
         .filter((v): v is string => v !== null);
-      const toAdd = matched.filter((v) => !selectedVariables.includes(v));
+      const toAdd = [...new Set(matched)].filter((v) => !selectedVariables.includes(v));
       if (toAdd.length > 0) {
         set({ selectedVariables: [...selectedVariables, ...toAdd] });
       }

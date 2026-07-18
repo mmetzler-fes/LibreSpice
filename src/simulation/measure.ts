@@ -69,10 +69,43 @@ function isNameTarget(target: string | undefined): boolean {
 }
 
 /**
+ * ngspice devices that carry a real branch current, so `I(name)` resolves inside
+ * `.meas`. Everything else (R, C, D, Q, M, …) only has a current because
+ * `.options savecurrents` saves it, and that vector is named `@r1[i]` — `i(r1)`
+ * simply does not exist and the measurement fails.
+ */
+const BRANCH_CURRENT_DEVICES = /^[vehl]/i;
+
+/**
+ * True when ngspice cannot evaluate this `.meas` expression itself, so the app
+ * has to. Two cases, both observed against the bundled engine:
+ *
+ *  - a device current ngspice has no vector for: `.meas TRAN Ieff RMS I(R1)`
+ *    fails with "no such vector as 'i(r1)'". Rewriting it to `@r1[i]` does work
+ *    for a bare vector, but not inside a product (below), and `par('…')` hangs
+ *    the engine — so the app evaluates the whole family instead, uniformly.
+ *  - any composite expression: `.meas TRAN PAC AVG V(U1)*I(R1)` fails with
+ *    "no such vector as 'v(u1)*i(r1)'" — `.meas` takes a vector, not a formula.
+ *
+ * The app-side evaluator handles both: `evalExpression` resolves `I(R1)` to the
+ * engine's `i(@r1[i])` through the same canonical matching the scope uses.
+ */
+export function needsAppSideEval(expr: string): boolean {
+  if (!expr) return false;
+  // Composite (an operator outside the parentheses of a probe reference).
+  if (/[-+*/]/.test(expr.replace(/[A-Za-z_@][\w.]*\s*\([^()]*\)/g, ""))) return true;
+  // A device current ngspice has no vector for.
+  for (const m of expr.matchAll(/\bi\s*\(\s*([^\s,()]+)\s*\)/gi)) {
+    if (!BRANCH_CURRENT_DEVICES.test(m[1])) return true;
+  }
+  return false;
+}
+
+/**
  * Split the netlist into the part ngspice can run and the `.meas` directives the
  * app has to evaluate itself. Measurements ngspice handles natively (a `.meas
- * tran/ac/dc` with a literal target) stay in the netlist and are read back from
- * its log as before.
+ * tran/ac/dc` with a literal target over a vector it knows) stay in the netlist
+ * and are read back from its log as before.
  */
 export function splitMeasDirectives(netlist: string): { netlist: string; appSide: MeasSpec[] } {
   const appSide: MeasSpec[] = [];
@@ -83,9 +116,11 @@ export function splitMeasDirectives(netlist: string): { netlist: string; appSide
     if (!m) { kept.push(line); continue; }
     const [, analysis, name, body] = m;
     const parsed = parseMeasBody(body.trim());
-    // `.meas op` has no ngspice equivalent; a name target aborts its parser.
+    // `.meas op` has no ngspice equivalent; a name target aborts its parser; and
+    // an expression it has no vector for fails outright (see needsAppSideEval).
     const isOp = analysis.toLowerCase() === "op";
-    if (!isOp && !isNameTarget(parsed?.target)) { kept.push(line); continue; }
+    const appExpr = !!parsed && needsAppSideEval(parsed.expr);
+    if (!isOp && !isNameTarget(parsed?.target) && !appExpr) { kept.push(line); continue; }
 
     appSide.push(
       parsed
@@ -94,6 +129,33 @@ export function splitMeasDirectives(netlist: string): { netlist: string; appSide
     );
   }
   return { netlist: kept.join("\n"), appSide };
+}
+
+/**
+ * Time-weighted mean of `f(y)` over the x axis, by the trapezoidal rule.
+ *
+ * AVG and RMS are *integrals* (`(1/T)∫f dt`), not sample averages — and a
+ * transient run has an adaptive timestep, so ngspice packs samples where the
+ * signal moves fast. Averaging the samples unweighted therefore over-weights
+ * those regions: the RMS of a 10 V / 10 Ω sine came out 0.7043 A instead of
+ * 0.7071 A, which is exactly the kind of small, plausible-looking error that
+ * makes a measurement worse than useless in a teaching circuit.
+ *
+ * Falls back to the plain mean when the x axis has no extent (an `.op` sweep,
+ * or a single sample), where a trapezoid has nothing to integrate over.
+ */
+function timeMean(xs: Float64Array, ys: Float64Array, f: (y: number) => number): number {
+  const n = Math.min(xs.length, ys.length);
+  if (n === 0) return NaN;
+  const span = xs[n - 1] - xs[0];
+  if (n === 1 || span <= 0) {
+    let s = 0;
+    for (let i = 0; i < n; i++) s += f(ys[i]);
+    return s / n;
+  }
+  let area = 0;
+  for (let i = 1; i < n; i++) area += ((f(ys[i - 1]) + f(ys[i])) / 2) * (xs[i] - xs[i - 1]);
+  return area / span;
 }
 
 /** Linear interpolation of `ys` at `x`, over an ascending `xs`. */
@@ -182,8 +244,8 @@ export function evaluateMeasurements(
         case "pp":
           v = values.reduce((a, b) => Math.max(a, b), -Infinity) - values.reduce((a, b) => Math.min(a, b), Infinity);
           break;
-        case "avg": v = values.reduce((a, b) => a + b, 0) / values.length; break;
-        case "rms": v = Math.sqrt(values.reduce((a, b) => a + b * b, 0) / values.length); break;
+        case "avg": v = timeMean(xs, values, (y) => y); break;
+        case "rms": v = Math.sqrt(timeMean(xs, values, (y) => y * y)); break;
         case "when": v = crossing(xs, values, resolveTarget(spec.target!)); break;
         case "find": v = interpolate(xs, values, resolveScalar(spec.target!)); break;
       }

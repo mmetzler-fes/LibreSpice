@@ -19,6 +19,7 @@ import { runAscExamplesTests } from "./ascExamples.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
+import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasure.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -34,6 +35,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Plot settings (.plt)", ...runPlotSettingsTests() },
     { name: "Probe selection", ...runProbeSelectionTests() },
+    { name: "Current measurements", ...runCurrentMeasureTests() },
     { name: "Netlist prefixes", ...runNetlistPrefixTests() },
     { name: "ASC connectivity", ...runAscConnectivityTests() },
     { name: "Placement ghost", ...runPlacementTests() },
