@@ -1,6 +1,7 @@
 import type { Circuit } from "./Circuit.js";
 import type { SpiceComponent } from "../components/base/SpiceComponent.js";
 import type { SimulationResult } from "@store/simulationStore.js";
+import { senseDeviceOf, isSenseNode } from "./currentSense.js";
 
 /** Resolve a net id to the label used in the generated netlist. */
 export function netLabel(circuit: Circuit, netId: string | null): string | null {
@@ -10,11 +11,36 @@ export function netLabel(circuit: Circuit, netId: string | null): string | null 
 }
 
 /**
+ * Terminals of a multi-terminal device, keyed by SPICE reference letter. A
+ * two-terminal part has one branch current, but a transistor has one *per pin*
+ * — LTSpice writes them `Ic(Q1)`, `Ib(Q1)`, … and ngspice (via `savecurrents`)
+ * `@q1[ic]`, `@q1[ib]`, … There is no `I(Q1)`: asking for "the" current of a
+ * transistor is meaningless, so the probes must stay separate.
+ */
+const DEVICE_TERMINALS: Record<string, string[]> = {
+  q: ["c", "b", "e", "s"],   // BJT: collector, base, emitter, substrate
+  m: ["d", "g", "s", "b"],   // MOSFET
+  j: ["d", "g", "s"],        // JFET
+};
+
+/** The terminal letters of the device a reference designator names. */
+export function deviceTerminals(label: string): string[] {
+  return DEVICE_TERMINALS[label.trim()[0]?.toLowerCase() ?? ""] ?? [];
+}
+
+/**
  * Branch-current probe names for a component. Covers the classic `I(label)` form
  * plus ngspice's `@dev[i]` vectors produced by `.options savecurrents` (used for
- * R/C/L whose currents are not emitted by default).
+ * R/C/L whose currents are not emitted by default). For a transistor the list is
+ * its terminal currents instead — that is what the engine actually saves.
  */
 export function getCurrentProbeCandidates(label: string): string[] {
+  const terminals = deviceTerminals(label);
+  if (terminals.length) {
+    return terminals.flatMap((t) => [
+      `I${t}(${label})`, `@${label.toLowerCase()}[i${t}]`, `i(@${label.toLowerCase()}[i${t}])`,
+    ]);
+  }
   return [`I(${label})`, `i(${label})`, `@${label}[i]`, `@${label.toLowerCase()}[i]`];
 }
 
@@ -64,12 +90,32 @@ export function canonicalProbe(raw: string): CanonicalProbe | null {
   // forms like i(@l1[i]) collapse onto @l1[i] / i(l1) / l1#branch.
   const outer = s.match(/^i\((.+)\)$/i);
   const body = outer ? outer[1].trim() : s;
-  const cur = (d: string): CanonicalProbe => ({ key: `I:${d.toUpperCase()}`, display: `I(${d.toUpperCase()})`, kind: "I" });
-  let m = body.match(/^@(.+?)\[i\w*\]$/i);        // @dev[i]  (savecurrents)
-  if (m) return cur(m[1]);
+  // A current-sense source stands in for the device it is in series with (an AC
+  // run cannot report an R/C current any other way — see currentSense). Report
+  // it as that device's current, so `i(v__i_r1)` is the `I(R1)` the user asked
+  // for and never appears under its synthetic name.
+  //
+  // `term` is a transistor terminal letter (c/b/e, d/g/s, …) and is part of the
+  // identity: `@q1[ic]` and `@q1[ib]` are different quantities and must not
+  // collapse onto one another. Written the LTSpice way, `Ic(Q1)`.
+  const cur = (d: string, term = ""): CanonicalProbe => {
+    const dev = senseDeviceOf(d) ?? d;
+    const t = term.toLowerCase();
+    return {
+      key: `I:${dev.toUpperCase()}${t ? `:${t.toUpperCase()}` : ""}`,
+      display: `I${t}(${dev.toUpperCase()})`,
+      kind: "I",
+    };
+  };
+  let m = body.match(/^@(.+?)\[i(\w*)\]$/i);      // @dev[i] / @dev[ic]  (savecurrents)
+  if (m) return cur(m[1], m[2]);
   m = body.match(/^(.+)#branch$/i);              // dev#branch
   if (m) return cur(m[1]);
   if (outer && /^[a-z_][\w.]*$/i.test(body)) return cur(body); // i(dev)
+  // LTSpice's terminal-current spelling, e.g. `Ic(Q1)` — the form a user types
+  // and the one `.plt` files carry, so it must resolve to `@q1[ic]`.
+  m = s.match(/^i([a-z])\(([a-z_][\w.]*)\)$/i);
+  if (m) return cur(m[2], m[1]);
   return null;
 }
 
@@ -86,6 +132,10 @@ export function dedupeProbes(variables: string[]): ProbeEntry[] {
   const others: ProbeEntry[] = [];
   for (const v of variables) {
     if (v === "time" || v === "frequency") continue;
+    // The node an AC sense source introduces is plumbing, not a signal: it
+    // duplicates the node the device already sits on (0 V across the source).
+    const vm = /^v\((.+)\)$/i.exec(v);
+    if (vm && isSenseNode(vm[1])) continue;
     const c = canonicalProbe(v);
     if (!c) { others.push({ raw: v, display: v, kind: "other" }); continue; }
     const existing = byKey.get(c.key);

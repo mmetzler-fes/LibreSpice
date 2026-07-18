@@ -34,6 +34,8 @@ export interface OPConfig {
 
 export type SimulationConfig = TransientConfig | DCConfig | ACConfig | OPConfig;
 
+import { insertCurrentSenses } from "./currentSense.js";
+
 /** Regex to detect analysis commands at the start of a directive line */
 const ANALYSIS_RE = /^\.(tran|ac|dc|op)\b/i;
 
@@ -47,11 +49,24 @@ export class NetlistGenerator {
   ): string {
     const lines: string[] = [`* ${title}`];
 
+    // Parsed up front because the device lines depend on it: an `.ac` run cannot
+    // report a resistor's or capacitor's current at all, so those devices get a
+    // series sense source instead (see currentSense).
+    const directiveLines = directives
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("*"));
+    const hasAnalysisInDirectives = directiveLines.some((l) => ANALYSIS_RE.test(l));
+    const isAc = directiveLines.some((l) => /^\.ac\b/i.test(l))
+      || (!hasAnalysisInDirectives && config.type === "ac");
+
+    const componentLines: string[] = [];
     for (const component of circuit.components.values()) {
       const line = component.getNetlistLine();
-      if (line) lines.push(line);
+      if (line) componentLines.push(line);
     }
-    const instanceLines = lines.slice(1).join("\n"); // component lines only
+    lines.push(...(isAc ? insertCurrentSenses(componentLines) : componentLines));
+    const instanceLines = componentLines.join("\n"); // component lines only
 
     // Library definitions as named blocks. A plain string (legacy callers) is
     // treated as a single anonymous block that is always emitted.
@@ -119,22 +134,13 @@ export class NetlistGenerator {
       }
     }
 
-    // Parse directive lines – skip blank lines and full-line comments
-    const directiveLines = directives
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && !l.startsWith("*"));
-
-    // Only emit auto-generated analysis line when directives don't contain one
-    const hasAnalysisInDirectives = directiveLines.some((l) => ANALYSIS_RE.test(l));
-    const isAc = directiveLines.some((l) => /^\.ac\b/i.test(l))
-      || (!hasAnalysisInDirectives && config.type === "ac");
-
     // Compute branch currents for every device (R, C, L, sources, …) so they can
     // be plotted as @dev[i]. Skip if the user already set the option themselves.
-    // Also skip for `.ac`: the bundled ngspice can't write a device-current
-    // vector (e.g. @c1[i]) in an AC run, and the failed write aborts the whole
-    // analysis (no result vector) — node voltages and source currents still work.
+    // Also skip for `.ac`: asking the bundled ngspice for *any* device-current
+    // vector during an AC run breaks its result write ("no writable vector
+    // found") and then hangs `runSim()` forever — a targeted `.save @r1[i]`
+    // hangs exactly the same, so this is not about the option being blunt. Those
+    // currents come from series sense sources instead (see currentSense).
     if (!isAc && !/savecurrents/i.test(directives)) {
       lines.push(".options savecurrents");
     }

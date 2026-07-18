@@ -6,6 +6,18 @@ export type SimulationStatus = "idle" | "running" | "done" | "error";
 export interface SimulationResult {
   variables: string[];
   data: Record<string, Float64Array>;
+  /**
+   * Real and imaginary parts of an `.ac`/`.noise` result, alongside the
+   * magnitudes in `data`.
+   *
+   * `data` stays the magnitude, which is what a Bode plot shows and what every
+   * existing consumer expects. But a *difference* of two AC signals cannot be
+   * computed from magnitudes: |Va| − |Vb| is not |Va − Vb| unless the two are in
+   * phase. A differential probe across the resistor of an RC divider read 0.153
+   * instead of 0.532 at 1 kHz — a 71% error, and one that looks like a plausible
+   * number rather than an obvious failure. Present only for a complex run.
+   */
+  complex?: Record<string, { re: Float64Array; im: Float64Array }>;
   time?: Float64Array;
   /**
    * Present for a `.step` sweep. Each swept signal appears in `data` as

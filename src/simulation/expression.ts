@@ -24,6 +24,17 @@ function nodeVoltage(result: SimulationResult, node: string, length: number): Fl
   return match ? result.data[match] ?? null : null;
 }
 
+/**
+ * Complex node voltage of a single node, for an `.ac` result. The ground node is
+ * identically zero; a node the run doesn't have yields null.
+ */
+function nodePhasor(result: SimulationResult, node: string, length: number) {
+  if (!result.complex) return null;
+  if (node === "0") return { re: new Float64Array(length), im: new Float64Array(length) };
+  const match = matchResultVariable(result, [`V(${node})`]);
+  return match ? result.complex[match] ?? null : null;
+}
+
 /** Resolve a single reference token (e.g. `V(out)`) to a data series. */
 export function resolveSeries(result: SimulationResult, ref: string): Float64Array | null {
   if (result.data[ref]) return result.data[ref];
@@ -32,6 +43,18 @@ export function resolveSeries(result: SimulationResult, ref: string): Float64Arr
   const diff = ref.match(DIFF_RE);
   if (diff) {
     const len = result.time?.length ?? 0;
+    // An AC result must be subtracted as *phasors*: |Va| − |Vb| is not
+    // |Va − Vb| unless the two happen to be in phase, and the error is large
+    // (71% across the resistor of an RC divider at 1 kHz). Transient data is
+    // real, so there the two are the same thing and the magnitude path stands.
+    const pa = nodePhasor(result, diff[1], len);
+    const pb = nodePhasor(result, diff[2], len);
+    if (pa && pb) {
+      const n = Math.min(pa.re.length, pb.re.length);
+      const out = new Float64Array(n);
+      for (let i = 0; i < n; i++) out[i] = Math.hypot(pa.re[i] - pb.re[i], pa.im[i] - pb.im[i]);
+      return out;
+    }
     const a = nodeVoltage(result, diff[1], len);
     const b = nodeVoltage(result, diff[2], len);
     if (!a || !b) return null;

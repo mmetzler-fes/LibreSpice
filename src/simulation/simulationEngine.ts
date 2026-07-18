@@ -313,15 +313,23 @@ async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => v
 function convertResult(result: ResultType): SimulationResult {
   const variables = result.variableNames;
   const data: Record<string, Float64Array> = {};
+  // Keep the phase for a complex run: magnitudes alone cannot express a
+  // *difference* of two AC signals (see SimulationResult.complex).
+  let complex: Record<string, { re: Float64Array; im: Float64Array }> | undefined;
 
   if (result.dataType === "real") {
     for (const d of result.data) {
       data[d.name] = new Float64Array(d.values as number[]);
     }
   } else {
+    complex = {};
     for (const d of result.data) {
       const complexVals = d.values as Array<{ real: number; img: number }>;
       data[d.name] = new Float64Array(complexVals.map((v) => Math.sqrt(v.real ** 2 + v.img ** 2)));
+      complex[d.name] = {
+        re: new Float64Array(complexVals.map((v) => v.real)),
+        im: new Float64Array(complexVals.map((v) => v.img)),
+      };
     }
   }
 
@@ -340,8 +348,12 @@ function convertResult(result: ResultType): SimulationResult {
   // vector "frequency" and returns it as the x-vector. Label it so the plot
   // shows Hz instead of defaulting the unnamed axis to seconds.
   const freqAxis = variables.includes("frequency");
+  const keptComplex = complex
+    ? Object.fromEntries(kept.filter((v) => complex![v]).map((v) => [v, complex![v]]))
+    : undefined;
   return {
     variables: kept, data: keptData, time,
+    ...(keptComplex ? { complex: keptComplex } : {}),
     ...(freqAxis ? { xLabel: "frequency", xUnit: "Hz" } : {}),
   };
 }

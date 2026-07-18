@@ -1,6 +1,8 @@
 import { useSimulationStore, type SimulationResult } from "@store/simulationStore.js";
 import { splitMeasDirectives, evaluateMeasurements, needsAppSideEval } from "../measure.js";
 import { evalExpression, isExpression, resolveSeries } from "../expression.js";
+import { insertCurrentSenses } from "@core/circuit/currentSense.js";
+import { canonicalProbe, dedupeProbes, matchResultVariable, getCurrentProbeCandidates } from "@core/circuit/probeUtils.js";
 import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
@@ -172,6 +174,107 @@ const CASES: Case[] = [
     const p = r.values?.[0] ?? NaN;
     // Casing differs from ngspice's (v(u2) / i(@r2[i])) on purpose.
     if (Math.abs(p - 5) > 0.01) fail(`V(U2)*I(R2) = ${p}, expected ≈ 5 W`);
+  } },
+
+  // ── 5. AC: currents via series sense sources ──────────────────────────────
+  // ngspice reports no R/C current in an `.ac` run, and *asking* for one breaks
+  // its result write and then hangs runSim() forever — verified to be neither
+  // device-specific (R, C, even L alone all hang) nor an artefact of
+  // `savecurrents` being blunt (a targeted `.save @r1[i]` hangs identically).
+  // A 0 V source in series gives the device a branch current the engine can
+  // report; measured against theory on an R-C divider it is exact to all
+  // printed digits, phase included.
+  { name: "AC: a resistor and a capacitor get a series sense source", run: (fail) => {
+    const out = insertCurrentSenses(["V1 in 0 AC 1", "R1 in mid 1k", "C1 mid 0 100n"]);
+    const want = [
+      "V1 in 0 AC 1",              // a source already has a branch current
+      "V__i_R1 in __i_R1 0",
+      "R1 __i_R1 mid 1k",
+      "V__i_C1 mid __i_C1 0",
+      "C1 __i_C1 0 100n",
+    ];
+    if (out.join(" | ") !== want.join(" | ")) fail(`rewrote to:\n  ${out.join("\n  ")}`);
+  } },
+
+  { name: "AC: devices that already have a branch current are left alone", run: (fail) => {
+    // V/E/H/L report `i(name)` natively; an extra source is pure overhead.
+    for (const line of ["V1 in 0 AC 1", "L1 a b 10m", "E1 a b c d 2"]) {
+      const out = insertCurrentSenses([line]);
+      if (out.length !== 1 || out[0] !== line) fail(`${line} was rewritten to ${out.join(" | ")}`);
+    }
+    // A transistor has no single "the current"; one sense source would misname
+    // whichever terminal happened to come first, so it stays untouched.
+    const q = insertCurrentSenses(["Q1 c b e 2N2222"]);
+    if (q.length !== 1) fail(`a BJT was rewritten to ${q.join(" | ")}`);
+  } },
+
+  { name: "AC: the sense source is reported as the device's own current", run: (fail) => {
+    const c = canonicalProbe("i(v__i_r1)");
+    if (c?.display !== "I(R1)") fail(`shown as ${c?.display}, expected I(R1)`);
+    if (c?.key !== "I:R1") fail(`key ${c?.key}, expected I:R1 (so I(R1) resolves to it)`);
+    // The probe the schematic asks for must find it.
+    const time = new Float64Array([0, 1]);
+    const result: SimulationResult = {
+      variables: ["frequency", "v(in)", "v(__i_r1)", "i(v__i_r1)"],
+      data: {
+        frequency: time, "v(in)": new Float64Array([1, 1]),
+        "v(__i_r1)": new Float64Array([1, 1]), "i(v__i_r1)": new Float64Array([5.32e-4, 8.93e-4]),
+      },
+      time,
+    };
+    if (matchResultVariable(result, getCurrentProbeCandidates("R1")) !== "i(v__i_r1)") {
+      fail("I(R1) did not resolve to its sense source");
+    }
+    // …and the node the source introduced is plumbing, not a signal the user
+    // should have to scroll past (it duplicates v(in): 0 V across the source).
+    const shown = dedupeProbes(result.variables).map((p) => p.display);
+    if (shown.includes("V(__i_r1)")) fail(`the synthetic node is offered as a probe: ${shown.join(", ")}`);
+    if (!shown.includes("I(R1)")) fail(`I(R1) is missing from the probe list: ${shown.join(", ")}`);
+  } },
+
+  // ── 6. AC differentials are phasor subtractions ───────────────────────────
+  { name: "AC: V(a,b) subtracts phasors, not magnitudes", run: (fail) => {
+    // Two signals of equal magnitude, 90° apart: |Va| − |Vb| = 0, while the true
+    // |Va − Vb| = √2. The degenerate case is the point — subtracting magnitudes
+    // reports exactly zero for a difference that is nothing of the sort, which
+    // is how this hid: a flat zero trace reads as "no signal", not "wrong maths".
+    const f = new Float64Array([1000]);
+    const result: SimulationResult = {
+      variables: ["frequency", "v(a)", "v(b)"],
+      data: { frequency: f, "v(a)": new Float64Array([1]), "v(b)": new Float64Array([1]) },
+      complex: {
+        "v(a)": { re: new Float64Array([1]), im: new Float64Array([0]) },
+        "v(b)": { re: new Float64Array([0]), im: new Float64Array([1]) },
+      },
+      time: f,
+    };
+    const d = resolveSeries(result, "V(a,b)")?.[0] ?? NaN;
+    if (Math.abs(d - Math.SQRT2) > 1e-9) fail(`V(a,b) = ${d}, expected √2 ≈ 1.41421`);
+  } },
+
+  { name: "AC: a differential against ground is the node's own magnitude", run: (fail) => {
+    const f = new Float64Array([1000]);
+    const result: SimulationResult = {
+      variables: ["frequency", "v(a)"],
+      data: { frequency: f, "v(a)": new Float64Array([5]) },
+      complex: { "v(a)": { re: new Float64Array([3]), im: new Float64Array([4]) } },
+      time: f,
+    };
+    const d = resolveSeries(result, "V(a,0)")?.[0] ?? NaN;
+    if (Math.abs(d - 5) > 1e-9) fail(`V(a,0) = ${d}, expected 5 (|3+4j|)`);
+  } },
+
+  { name: "a transient differential keeps subtracting the real samples", run: (fail) => {
+    // Real data carries no phase, and there the plain difference is correct —
+    // the phasor path must not disturb it.
+    const time = new Float64Array([0, 1, 2]);
+    const result: SimulationResult = {
+      variables: ["time", "v(a)", "v(b)"],
+      data: { time, "v(a)": new Float64Array([5, 5, 5]), "v(b)": new Float64Array([2, 2, 2]) },
+      time,
+    };
+    const d = resolveSeries(result, "V(a,b)");
+    if (!d || Math.abs(d[0] - 3) > 1e-9) fail(`V(a,b) = ${d?.[0]}, expected 3`);
   } },
 
   { name: "asking for one current adds one trace, not one per spelling", run: (fail) => {
