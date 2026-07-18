@@ -12,6 +12,7 @@ import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { DRAG_TOUCH_ACTION, isDragPointer } from "./pointerDrag.js";
+import { wireConnectorShape, wireNameTag } from "./wireLabelShape.js";
 
 export interface FlowPoint {
   x: number;
@@ -45,13 +46,6 @@ export interface WireData {
   [key: string]: unknown;
 }
 
-/** Unit vector per connector arrow direction. */
-const ARROW_VEC: Record<ArrowDir, [number, number]> = {
-  up: [0, -1],
-  down: [0, 1],
-  left: [-1, 0],
-  right: [1, 0],
-};
 
 /** Ctrl+R rotation order for a connector arrow (90° clockwise each step). */
 export const ARROW_ORDER: ArrowDir[] = ["up", "right", "down", "left"];
@@ -256,41 +250,36 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
           the connector's own name at the arrow tip. Shown whenever the wire is a
           connector, independent of the wire's own (net-name) label. */}
       {connector && (() => {
-        const [dx, dy] = ARROW_VEC[arrowDir];
-        const gap = 5, len = 22, headLen = 8, headHalf = 4.5;
-        const x1 = dock.x + dx * gap, y1 = dock.y + dy * gap;
-        const x2 = dock.x + dx * len, y2 = dock.y + dy * len;
-        const bx = dock.x + dx * (len - headLen), by = dock.y + dy * (len - headLen);
-        const px = -dy, py = dx;
-        const head = `${x2},${y2} ${bx + px * headHalf},${by + py * headHalf} ${bx - px * headHalf},${by - py * headHalf}`;
-        // Name box centred just past the arrow tip (works in every direction).
-        const w = (connName?.length ?? 0) * 6.8 + 8;
-        const tx = dock.x + dx * (len + 6 + (dx !== 0 ? w / 2 : 0));
-        const ty = dock.y + dy * (len + 6 + (dy !== 0 ? 7.5 : 0));
+        const s = wireConnectorShape(dock, arrowDir, connName ?? "");
         return (
           <g style={{ pointerEvents: "none" }}>
-            <circle cx={dock.x} cy={dock.y} r={3.5} fill="none" stroke={dirColor} strokeWidth={1.4} opacity={0.7} />
-            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={dirColor} strokeWidth={1.6} strokeLinecap="round" />
-            <polygon points={head} fill={dirColor} />
+            <circle cx={s.circle.cx} cy={s.circle.cy} r={s.circle.r} fill="none" stroke={dirColor} strokeWidth={1.4} opacity={0.7} />
+            <line x1={s.stem.x1} y1={s.stem.y1} x2={s.stem.x2} y2={s.stem.y2} stroke={dirColor} strokeWidth={1.6} strokeLinecap="round" />
+            <polygon points={s.head} fill={dirColor} />
             {connName && (
               <>
-                <rect x={tx - w / 2} y={ty - 7.5} width={w} height={15} rx={3} fill={selected ? "#1d4ed8" : "#475569"} />
-                <text x={tx} y={ty + 3.5} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{connName}</text>
+                <rect x={s.tag.x} y={s.tag.y} width={s.tag.width} height={s.tag.height} rx={3} fill={selected ? "#1d4ed8" : "#475569"} />
+                <text x={s.tag.textX} y={s.tag.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{connName}</text>
               </>
             )}
           </g>
         );
       })()}
-      {showBox && netLabel && (
-        <g
-          transform={`translate(${anchor.x}, ${anchor.y})`}
-          onPointerDown={onLabelPointerDown}
-          style={{ ...DRAG_TOUCH_ACTION, cursor: canvasLocked ? "default" : "move", pointerEvents: "all" }}
-        >
-          <rect x={-netLabel.length * 3.4 - 4} y={-19} width={netLabel.length * 6.8 + 8} height={15} rx={3} fill="#2563eb" />
-          <text x={0} y={-8} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{netLabel}</text>
-        </g>
-      )}
+      {showBox && netLabel && (() => {
+        // The tag is drawn relative to the anchor so the whole group can carry
+        // the drag handler; the shared shape is anchor-absolute, hence the shift.
+        const t = wireNameTag({ x: 0, y: 0 }, netLabel);
+        return (
+          <g
+            transform={`translate(${anchor.x}, ${anchor.y})`}
+            onPointerDown={onLabelPointerDown}
+            style={{ ...DRAG_TOUCH_ACTION, cursor: canvasLocked ? "default" : "move", pointerEvents: "all" }}
+          >
+            <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
+            <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{netLabel}</text>
+          </g>
+        );
+      })()}
     </>
   );
 }

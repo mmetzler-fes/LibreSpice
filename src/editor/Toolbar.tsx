@@ -153,7 +153,9 @@ export function Toolbar() {
     // "Display in circuit" puts the directives on the sheet, so they belong in
     // the export too — at the spot the user dragged the box to.
     const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    // `circuit` resolves the wires' net names — a wire stores only *whether* to
+    // show a label, never the text (see NetNameLookup).
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {

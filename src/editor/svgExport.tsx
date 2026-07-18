@@ -4,7 +4,8 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
-import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
+import { orthoVertices, pointAtT, type ArrowDir, type FlowPoint, type WireData } from "./WireTool.js";
+import { wireConnectorShape, wireNameTag } from "./wireLabelShape.js";
 import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
@@ -164,11 +165,64 @@ export interface DirectiveOverlay {
 }
 
 /** Serialise the current schematic to a standalone SVG string. */
+/**
+ * The bit of the circuit model needed to resolve a wire's net name. A wire
+ * stores only *whether* to show a label, never the text: the name is derived
+ * from the wire's source port → its net → the net's `nodeLabel` (see WireEdge).
+ * Structural, not a `Circuit` import, so the regression suite can pass a stub.
+ */
+export interface NetNameLookup {
+  components: Map<string, { ports: { id: string; netId?: string | null }[] }>;
+  nets: Map<string, { nodeLabel?: string }>;
+}
+
+/** A wire's on-screen labels, resolved and positioned (see wireLabelShape). */
+interface WireLabels {
+  netLabel: string | null;
+  connName: string | null;
+  connector: boolean;
+  arrowDir: ArrowDir;
+  dock: FlowPoint;
+  anchor: FlowPoint;
+  showBox: boolean;
+}
+
+/**
+ * Resolve what a wire displays, mirroring WireEdge's rules — minus `selected`,
+ * which has no meaning in an export: the net-name box shows when `showLabel` is
+ * on, or when a connector carries a *different* name (so both stay readable).
+ */
+function wireLabelsFor(edge: Edge, verts: FlowPoint[], circuit?: NetNameLookup): WireLabels | null {
+  const data = edge.data as WireData | undefined;
+  const showLabel = !!data?.showLabel;
+  const connector = !!data?.connector;
+  if (!circuit || verts.length === 0 || (!showLabel && !connector)) return null;
+
+  const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
+  const netId = port?.netId ?? null;
+  const netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
+  const connectorLabel = (data?.connectorLabel as string | undefined)?.trim() || undefined;
+  const connName = connector ? (connectorLabel ?? netLabel) : null;
+  const connDiffers = !!(connector && connectorLabel && connectorLabel !== netLabel);
+
+  const labelT = typeof data?.labelT === "number" ? data.labelT : 0.5;
+  const off = (data?.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
+  const dock = pointAtT(verts, labelT);
+  return {
+    netLabel, connName, connector,
+    arrowDir: (data?.arrowDir as ArrowDir | undefined) ?? "right",
+    dock,
+    anchor: { x: dock.x + off.x, y: dock.y + off.y },
+    showBox: !!netLabel && (showLabel || connDiffers),
+  };
+}
+
 export function buildSchematicSvg(
   nodes: Node[],
   edges: Edge[],
   norm: SymbolNorm,
   directives?: DirectiveOverlay,
+  circuit?: NetNameLookup,
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -193,6 +247,10 @@ export function buildSchematicSvg(
     wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint]));
   }
 
+  // Labels the wires carry (net name / connector). Resolved before the bounding
+  // box, since a connector's arrow and name box stick well clear of the wire.
+  const wireLabels = edges.map((e, i) => wireLabelsFor(e, wireVerts[i], circuit));
+
   // Bounding box over symbols, pins and every wire vertex (so a hand-routed
   // waypoint outside the component boxes is never clipped).
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -200,6 +258,21 @@ export function buildSchematicSvg(
   for (const n of nodes) { grow(n.position.x, n.position.y); grow(n.position.x + NODE_SIZE, n.position.y + NODE_SIZE); }
   for (const { x, y } of pinMap.values()) grow(x, y);
   for (const verts of wireVerts) for (const p of verts) grow(p.x, p.y);
+  // A connector's arrow + name box reach ~50px past the wire, and a dragged net
+  // name sits above its anchor: without these the labels get clipped at the edge.
+  for (const l of wireLabels) {
+    if (!l) continue;
+    if (l.connector) {
+      const s = wireConnectorShape(l.dock, l.arrowDir, l.connName ?? "");
+      grow(s.tag.x, s.tag.y);
+      grow(s.tag.x + s.tag.width, s.tag.y + s.tag.height);
+    }
+    if (l.showBox && l.netLabel) {
+      const t = wireNameTag(l.anchor, l.netLabel);
+      grow(t.x, t.y);
+      grow(t.x + t.width, t.y + t.height);
+    }
+  }
   // The directive box is usually dragged clear of the parts, so it drives the
   // bounds as much as they do.
   if (directiveBox) {
@@ -218,10 +291,42 @@ export function buildSchematicSvg(
     ),
   );
 
+  // Wire labels are drawn over the wires but under the symbols, exactly as the
+  // editor stacks them (edges render below nodes in React Flow).
+  const labels = wireLabels.map((l, i) => {
+    if (!l) return null;
+    const s = l.connector ? wireConnectorShape(l.dock, l.arrowDir, l.connName ?? "") : null;
+    const t = l.showBox && l.netLabel ? wireNameTag(l.anchor, l.netLabel) : null;
+    return (
+      <g key={`wl${i}`}>
+        {s && (
+          <>
+            <circle cx={s.circle.cx} cy={s.circle.cy} r={s.circle.r} fill="none" stroke="#334155" strokeWidth={1.4} opacity={0.7} />
+            <line x1={s.stem.x1} y1={s.stem.y1} x2={s.stem.x2} y2={s.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
+            <polygon points={s.head} fill="#334155" />
+            {l.connName && (
+              <>
+                <rect x={s.tag.x} y={s.tag.y} width={s.tag.width} height={s.tag.height} rx={3} fill="#475569" />
+                <text x={s.tag.textX} y={s.tag.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.connName}</text>
+              </>
+            )}
+          </>
+        )}
+        {t && (
+          <>
+            <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
+            <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.netLabel}</text>
+          </>
+        )}
+      </g>
+    );
+  });
+
   const svg = (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${minX} ${minY} ${width} ${height}`}>
       <rect x={minX} y={minY} width={width} height={height} fill="#ffffff" />
       {wires}
+      {labels}
       {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} />)}
       {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>

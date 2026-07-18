@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import { buildSchematicSvg } from "../svgExport.js";
+import { buildSchematicSvg, type NetNameLookup } from "../svgExport.js";
 import { orthoVertices } from "../WireTool.js";
 
 export interface TestReport {
@@ -25,6 +25,30 @@ function polylinePoints(svg: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(svg)) !== null) out.push(m[1]);
   return out;
+}
+
+/** Extracts the SVG's `viewBox` as [minX, minY, width, height]. */
+function viewBoxOf(svg: string): number[] | null {
+  const m = /viewBox="([^"]*)"/.exec(svg);
+  return m ? m[1].split(/\s+/).map(Number) : null;
+}
+
+/**
+ * Two sources joined by one wire that sits on a net named "VCC", exported with
+ * the given wire-label flags. The circuit lookup is a stub: only the source
+ * port's net and that net's `nodeLabel` matter (see NetNameLookup).
+ */
+function labelledWireSvg(data: Record<string, unknown>): string {
+  const a = vsource("V1", 0, 0), b = vsource("V2", 200, 200);
+  const edge: Edge = {
+    id: "w1", source: "V1", sourceHandle: "n", target: "V2", targetHandle: "p",
+    data: { waypoints: [], ...data },
+  } as Edge;
+  const circuit: NetNameLookup = {
+    components: new Map([["V1", { ports: [{ id: "V1-n", netId: "n7" }] }]]),
+    nets: new Map([["n7", { nodeLabel: "VCC" }]]),
+  };
+  return buildSchematicSvg([a, b], [edge], "default", undefined, circuit);
 }
 
 type Case = { name: string; run: (fail: (r: string) => void) => void };
@@ -112,6 +136,100 @@ const CASES: Case[] = [
       } as Edge;
       const pts = polylinePoints(buildSchematicSvg([a], [edge], "default"));
       if (pts.length !== 0) fail(`expected 0 polylines, got ${pts.length}`);
+    },
+  },
+
+  // ── Wire-carried labels ────────────────────────────────────────────────────
+  // A wire stores only *whether* to show a label (`showLabel` / `connector`),
+  // never the text: the name is resolved through the circuit model (source port
+  // → net → nodeLabel). The export had no access to it, so wire labels and
+  // connectors were silently missing from an exported SVG while node-based net
+  // labels were drawn. It now takes the lookup as its last argument.
+  {
+    name: "wire net-name label is exported",
+    run: (fail) => {
+      const svg = labelledWireSvg({ showLabel: true });
+      if (!svg.includes(">VCC<")) fail(`no VCC label in the export:\n${svg}`);
+    },
+  },
+  {
+    name: "an unlabelled wire stays unlabelled",
+    run: (fail) => {
+      // Same net, but neither flag set — the name must not leak into the export.
+      if (labelledWireSvg({}).includes(">VCC<")) fail("net name drawn on a wire that shows no label");
+    },
+  },
+  {
+    // Without the lookup the export must degrade quietly, not crash or invent a
+    // name — every existing caller (and every other test here) omits it.
+    name: "no circuit lookup → no wire label, no crash",
+    run: (fail) => {
+      const a = vsource("V1", 0, 0), b = vsource("V2", 200, 200);
+      const edge: Edge = {
+        id: "w1", source: "V1", sourceHandle: "n", target: "V2", targetHandle: "p",
+        data: { waypoints: [], showLabel: true },
+      } as Edge;
+      const svg = buildSchematicSvg([a, b], [edge], "default");
+      if (svg.includes(">VCC<")) fail("a name appeared without a circuit lookup");
+      if (!svg.includes("<polyline")) fail("the wire itself went missing");
+    },
+  },
+  {
+    // The connector draws its arrow and its own name box; the plain net-name box
+    // is then redundant (it would duplicate the same text) and stays off.
+    name: "wire connector exports arrow and name, without a duplicate box",
+    run: (fail) => {
+      const svg = labelledWireSvg({ connector: true, arrowDir: "right" });
+      if (!svg.includes("<polygon")) fail("no arrowhead in the export");
+      if (!svg.includes("<circle")) fail("no dock circle in the export");
+      const names = svg.match(/>VCC</g) ?? [];
+      if (names.length !== 1) fail(`expected the name once, got ${names.length}`);
+    },
+  },
+  {
+    // A connector whose name differs from the net's: both must stay readable, so
+    // the wire keeps its own box alongside the connector's (WireEdge's rule).
+    name: "connector with its own name keeps the wire's net name too",
+    run: (fail) => {
+      const svg = labelledWireSvg({ connector: true, connectorLabel: "OUT" });
+      if (!svg.includes(">OUT<")) fail("connector name missing");
+      if (!svg.includes(">VCC<")) fail("net name missing next to a differently-named connector");
+    },
+  },
+  {
+    // The arrow and name box reach ~50px past the wire, and a dragged label
+    // further still — so the bounding box has to account for them or the label
+    // is cropped at the sheet edge. Assert the property that matters (the tag
+    // lies inside the viewBox) rather than that the box grew: for a short name
+    // in the middle of the sheet it legitimately need not grow at all.
+    name: "wire labels are never clipped by the viewBox",
+    run: (fail) => {
+      const cases: Record<string, unknown>[] = [
+        // Pushed well outside the parts in each direction, plus a long name.
+        { connector: true, arrowDir: "left", connectorLabel: "A_VERY_LONG_PORT_NAME" },
+        { connector: true, arrowDir: "right", connectorLabel: "A_VERY_LONG_PORT_NAME" },
+        { connector: true, arrowDir: "up", connectorLabel: "SUPPLY_RAIL" },
+        { connector: true, arrowDir: "down", connectorLabel: "SUPPLY_RAIL" },
+        // A net-name label dragged to the far corner of its allowed offset.
+        { showLabel: true, labelT: 0, labelOffset: { x: -40, y: -40 } },
+      ];
+      for (const data of cases) {
+        const svg = labelledWireSvg(data);
+        const vb = viewBoxOf(svg);
+        if (!vb) { fail("no viewBox found"); continue; }
+        const [minX, minY, w, h] = vb;
+        // Every drawn box must sit inside the viewBox.
+        const re = /<rect x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(svg)) !== null) {
+          const [x, y, rw, rh] = m.slice(1).map(Number);
+          // The sheet's own background rect is the viewBox; skip it.
+          if (rw === w && rh === h) continue;
+          if (x < minX || y < minY || x + rw > minX + w || y + rh > minY + h) {
+            fail(`${JSON.stringify(data)}: label box (${x},${y},${rw},${rh}) escapes viewBox (${minX},${minY},${w},${h})`);
+          }
+        }
+      }
     },
   },
 ];
