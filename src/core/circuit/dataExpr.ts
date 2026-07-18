@@ -246,15 +246,28 @@ export function netVoltageExpr(circuit: Circuit, netId: string | null): string |
 /**
  * `I(dev)` for the current through a net, but only when it is a clean series
  * node — exactly two device terminals — so the current is unambiguous.
+ *
+ * Only real devices count: ground and net labels emit no netlist line, so they
+ * carry no branch current and must not make a series node look like a junction.
  */
 export function netCurrentExpr(circuit: Circuit, netId: string | null): string | null {
   if (!netId || netId === "0") return null;
   const labels: string[] = [];
   for (const comp of circuit.components.values()) {
-    if (comp.id.startsWith("ground")) continue;
+    if (comp.getNetlistLine() === "") continue;
     for (const port of comp.ports) if (port.netId === netId) labels.push(comp.label);
   }
   return labels.length === 2 ? `I(${labels[0]})` : null;
+}
+
+/**
+ * The device name inside an `I(dev)` expression, or `null`. Lets a caller turn
+ * a net/component current back into probe candidates (which also cover the
+ * `@dev[i]` forms of `.options savecurrents`) — kept next to the builders above
+ * so the two stay in step if the expression format ever changes.
+ */
+export function currentExprDevice(expr: string | null | undefined): string | null {
+  return expr?.match(/^I\((.+)\)$/i)?.[1] ?? null;
 }
 
 /** `V(a,b)` (or `V(a)` / `-V(b)`) for the voltage across a component. */

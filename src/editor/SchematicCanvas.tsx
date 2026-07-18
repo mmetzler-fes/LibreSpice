@@ -39,11 +39,12 @@ import type { ComponentDefinition } from "./componentDefinitions.js";
 import { createSpiceComponent, createSubcircuitComponent, getNextLabel, getValueLabel, nextComponentId } from "./componentFactory.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
-import { netVoltageExpr, netCurrentExpr, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
+import { netVoltageExpr, netCurrentExpr, currentExprDevice, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
 import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
+import { netLabelPlacement, type LeadPin } from "./netLabelLead.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -94,7 +95,7 @@ function CanvasInner() {
   };
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean; netId?: string | null; vExpr?: string | null } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean; netId?: string | null; vExpr?: string | null; iExpr?: string | null } | null>(null);
   /** Right-click menu on a wire: annotate the net's potential / current. */
   const [wireMenu, setWireMenu] = useState<{ edgeId: string; netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
@@ -192,8 +193,26 @@ function CanvasInner() {
   const placeComponent = useCallback(
     (type: ComponentType, cx: number, cy: number) => {
       // Center the node on the (snapped) cursor: node.position is its top-left.
-      const x = snapToGrid(cx) - NODE_SIZE / 2;
-      const y = snapToGrid(cy) - NODE_SIZE / 2;
+      let terminal = { x: snapToGrid(cx), y: snapToGrid(cy) };
+      // A net label dropped on a component pin steps one grid square clear of the
+      // part and is joined by a short lead, instead of covering the terminal with
+      // a zero-length wire between the two coincident pins (see netLabelLead).
+      let leadPin: LeadPin | null = null;
+      if (type === "netlabel") {
+        const symbolNorm = useUIStore.getState().symbolNorm;
+        const pins: LeadPin[] = useCircuitStore.getState().nodes
+          // Another net label's terminal is not a part to lead away from.
+          .filter((n) => (n.data as ComponentNodeData).componentType !== "netlabel")
+          .flatMap((n) => getNodePins(n, symbolNorm).map((p) => ({
+            nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y,
+            ownerCx: n.position.x + NODE_SIZE / 2, ownerCy: n.position.y + NODE_SIZE / 2,
+          })));
+        const placed = netLabelPlacement(terminal, pins);
+        terminal = placed.terminal;
+        leadPin = placed.pin;
+      }
+      const x = terminal.x - NODE_SIZE / 2;
+      const y = terminal.y - NODE_SIZE / 2;
       // Never reuse an id an import already handed out (see nextComponentId).
       const id = nextComponentId(type, useCircuitStore.getState().nodes.map((n) => n.id));
       // Ground uses label "0" internally; display label is separate
@@ -208,6 +227,25 @@ function CanvasInner() {
         data: { componentType: type, label, valueLabel, rotation: placementRotation },
       };
       addComponent(component, node);
+      if (leadPin) {
+        // The label now sits a grid step off the pin, so the auto-connect (which
+        // docks *coincident* pins) can no longer see the pairing — lay the lead
+        // itself. Deferred like the auto-connect so the node is in the store.
+        const pin = leadPin;
+        setTimeout(() => {
+          const { edges: cur, setEdges, connectPorts, regenerateNetlist } = useCircuitStore.getState();
+          const edge: Edge = {
+            id: `wire_${pin.nodeId}-${pin.handleId}__${id}-t_${Date.now()}`,
+            source: pin.nodeId, sourceHandle: pin.handleId,
+            target: id, targetHandle: "t",
+            type: "wire", data: { waypoints: [] },
+          };
+          setEdges([...cur, edge]);
+          try { connectPorts(`${pin.nodeId}-${pin.handleId}`, `${id}-t`); } catch { /* */ }
+          regenerateNetlist();
+        }, 0);
+        return;
+      }
       setTimeout(() => autoConnectNodePins(node), 0);
     },
     [addComponent, placementRotation, autoConnectNodePins],
@@ -357,15 +395,16 @@ function CanvasInner() {
       const data = node.data as ComponentNodeData;
       setWireMenu(null);
       setSelectedComponentId(node.id);
-      // Net labels get their own menu (net label ↔ connector), plus the option
-      // to plot the potential of the node they name — the same probe a wire on
-      // that net offers, so a named net is reachable however you right-click it.
+      // Net labels get their own menu (net label ↔ connector), plus the options
+      // to plot the potential of the node they name and the current through it —
+      // the same probes a wire on that net offers, so a named net is reachable
+      // however you right-click it.
       if (data?.componentType === "netlabel") {
         const netId = circuit.components.get(node.id)?.ports[0]?.netId ?? null;
         setNodeMenu({
           id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y,
           isNetlabel: true, connector: !!data.connector,
-          netId, vExpr: netVoltageExpr(circuit, netId),
+          netId, vExpr: netVoltageExpr(circuit, netId), iExpr: netCurrentExpr(circuit, netId),
         });
         return;
       }
@@ -538,12 +577,27 @@ function CanvasInner() {
     setWireMenu(null);
   };
 
-  // Pin the net's potential as a data-point badge, next to the label terminal.
-  const addNetlabelDataFlag = () => {
+  // Plot the current through the net a label names. `I(dev)` names one of the
+  // two devices in series on that net; probing by candidates rather than the
+  // bare expression also catches the `@dev[i]` forms of `.options savecurrents`.
+  const probeNetlabelCurrentInScope = () => {
+    const dev = currentExprDevice(nodeMenu?.iExpr);
+    if (dev) { addProbeCandidates(getCurrentProbeCandidates(dev)); setDockTab("waveform"); }
+    setNodeMenu(null);
+  };
+
+  // Pin a net probe (potential or current) as a data-point badge, next to the
+  // label terminal; U and I sit slightly apart so both stay readable.
+  const addNetlabelDataFlag = (kind: "V" | "I") => {
     const m = nodeMenu;
     const node = m && nodes.find((n) => n.id === m.id);
-    if (m?.vExpr && node) {
-      addDataFlag(node.position.x + NODE_SIZE + 6, node.position.y + NODE_SIZE / 2, m.vExpr);
+    const expr = kind === "V" ? m?.vExpr : m?.iExpr;
+    if (expr && node) {
+      addDataFlag(
+        node.position.x + NODE_SIZE + 6,
+        node.position.y + NODE_SIZE / 2 + (kind === "V" ? -11 : 11),
+        expr,
+      );
     }
     setNodeMenu(null);
   };
@@ -813,10 +867,18 @@ function CanvasInner() {
                 {nodeMenu.vExpr ? (
                   <>
                     <button style={nodeMenuItem} onClick={probeNetlabelVoltageInScope}>{nodeMenu.vExpr} im Oszi anzeigen</button>
-                    <button style={nodeMenuItem} onClick={addNetlabelDataFlag}>Datenpunkt: Potential {nodeMenu.vExpr}</button>
+                    <button style={nodeMenuItem} onClick={() => addNetlabelDataFlag("V")}>Datenpunkt: Potential {nodeMenu.vExpr}</button>
                   </>
                 ) : (
                   <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Kein Potential verfügbar</div>
+                )}
+                {nodeMenu.iExpr ? (
+                  <>
+                    <button style={nodeMenuItem} onClick={probeNetlabelCurrentInScope}>{nodeMenu.iExpr} im Oszi anzeigen</button>
+                    <button style={nodeMenuItem} onClick={() => addNetlabelDataFlag("I")}>Datenpunkt: Strom {nodeMenu.iExpr}</button>
+                  </>
+                ) : (
+                  <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Strom nur bei Reihenschaltung</div>
                 )}
               </>
             ) : nodeMenu.isGround ? null : (
