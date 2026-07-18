@@ -13,6 +13,8 @@ import { runNetRenameTests } from "./netRename.test.js";
 import { runAutoConnectTests } from "./autoConnect.test.js";
 import { runKeyboardViewportTests } from "./keyboardViewport.test.js";
 import { runToolbarTests } from "./toolbar.test.js";
+import { runWireConnectorTests } from "./wireConnector.test.js";
+import { runAscExamplesTests } from "./ascExamples.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -41,6 +43,9 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Net rename propagation", ...(await runNetRenameTests()) },
     { name: "Keyboard viewport", ...runKeyboardViewportTests() },
     { name: "Toolbar", ...runToolbarTests() },
+    { name: "Wire connector", ...runWireConnectorTests() },
+    // Reads every examples/*.asc, saves it to a temp file and re-reads it.
+    { name: "ASC examples round-trip", ...(await runAscExamplesTests()) },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];

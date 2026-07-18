@@ -28,6 +28,7 @@ import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
 import { NetLabelsPanel } from "./NetLabelsPanel.js";
+import { WirePropertiesPanel } from "./WirePropertiesPanel.js";
 import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
@@ -782,7 +783,7 @@ function CanvasInner() {
           // keyboard-safe: its fields (component values, net names) can sit at the
           // bottom, where iPadOS' autofill bar would cover them (see index.css).
           <aside className="keyboard-safe" style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
-            <PropertiesPanel />
+            {edges.some((e) => e.selected) ? <WirePropertiesPanel /> : <PropertiesPanel />}
             <NetLabelsPanel />
           </aside>
         )}

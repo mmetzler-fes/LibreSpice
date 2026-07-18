@@ -18,6 +18,9 @@ export interface FlowPoint {
   y: number;
 }
 
+/** Arrow direction for a wire acting as a net connector. */
+export type ArrowDir = "up" | "down" | "left" | "right";
+
 /** Payload stored on a wire edge. */
 export interface WireData {
   waypoints: FlowPoint[];
@@ -25,8 +28,75 @@ export interface WireData {
   sourceTap?: FlowPoint;
   /** Visual end point when the wire taps onto an existing wire (not a pin). */
   targetTap?: FlowPoint;
+  /** Show the net-name label permanently (not only while the wire is selected). */
+  showLabel?: boolean;
+  /** Draw a net-connector symbol (docking circle + direction arrow). */
+  connector?: boolean;
+  /** Arrowhead direction of the connector symbol. */
+  arrowDir?: ArrowDir;
+  /** Position of the label / dock point along the wire, 0..1 of its length. */
+  labelT?: number;
+  /** Label offset from the dock point (flow px), clamped to ~1 cm. */
+  labelOffset?: FlowPoint;
   /** Allows assignment to React Flow's `Edge["data"]` (Record<string, unknown>). */
   [key: string]: unknown;
+}
+
+/** Unit vector per connector arrow direction. */
+const ARROW_VEC: Record<ArrowDir, [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+};
+
+/** Ctrl+R rotation order for a connector arrow (90° clockwise each step). */
+export const ARROW_ORDER: ArrowDir[] = ["up", "right", "down", "left"];
+
+/** Total length of a polyline. */
+function polylineLength(verts: FlowPoint[]): number {
+  let len = 0;
+  for (let i = 0; i < verts.length - 1; i++) {
+    len += Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+  }
+  return len;
+}
+
+/** Point at parametric position `t` (0..1 of total length) along a polyline. */
+export function pointAtT(verts: FlowPoint[], t: number): FlowPoint {
+  if (verts.length === 0) return { x: 0, y: 0 };
+  if (verts.length === 1) return verts[0];
+  const total = polylineLength(verts);
+  if (total === 0) return verts[0];
+  let target = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < verts.length - 1; i++) {
+    const segLen = Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+    if (target <= segLen || i === verts.length - 2) {
+      const f = segLen === 0 ? 0 : target / segLen;
+      return { x: verts[i].x + (verts[i + 1].x - verts[i].x) * f, y: verts[i].y + (verts[i + 1].y - verts[i].y) * f };
+    }
+    target -= segLen;
+  }
+  return verts[verts.length - 1];
+}
+
+/** Nearest parametric position (0..1) on a polyline to point `p`. */
+export function projectToPolyline(verts: FlowPoint[], p: FlowPoint): number {
+  if (verts.length < 2) return 0;
+  const total = polylineLength(verts);
+  if (total === 0) return 0;
+  let acc = 0, bestD2 = Infinity, bestGlobal = 0;
+  for (let i = 0; i < verts.length - 1; i++) {
+    const { point, d2 } = projectToSegment(p, verts[i], verts[i + 1]);
+    const segLen = Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      const along = Math.hypot(point.x - verts[i].x, point.y - verts[i].y);
+      bestGlobal = acc + along;
+    }
+    acc += segLen;
+  }
+  return bestGlobal / total;
 }
 
 /** Snap distance to a pin, in flow units. */
@@ -73,13 +143,19 @@ export function orthoPath(points: FlowPoint[]): string {
   return "M " + v.map((p) => `${p.x} ${p.y}`).join(" L ");
 }
 
+/** Max distance (flow px) a dragged label may sit from the wire (~1 cm). */
+const LABEL_MAX_OFFSET = PX_PER_CM;
+
 /** Custom edge that routes through stored waypoints with right angles. */
 export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, sourceX, sourceY, targetX, targetY, data, selected, markerEnd }: EdgeProps) {
   const circuit = useCircuitStore((s) => s.circuit);
   const nodes = useCircuitStore((s) => s.nodes);
+  const updateEdgeData = useCircuitStore((s) => s.updateEdgeData);
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const canvasLocked = useUIStore((s) => s.canvasLocked);
+  const { screenToFlowPosition } = useReactFlow();
   const theme = useTheme();
 
   // Exact pin centre for an endpoint. React Flow anchors an edge at the handle's
@@ -103,14 +179,54 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   const verts = orthoVertices([start, ...waypoints, end]);
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
-  // Net id of this wire (from its source port), shown when selected.
+  const showLabel = !!data?.showLabel;
+  const connector = !!data?.connector;
+  const arrowDir = (data?.arrowDir as ArrowDir | undefined) ?? "right";
+
+  // Net id/name of this wire (from its source port). Needed whenever the label
+  // is shown permanently (`showLabel`) or transiently (while selected).
   let netLabel: string | null = null;
-  if (selected) {
+  if (selected || showLabel) {
     const port = circuit.components.get(source)?.ports.find((p) => p.id === `${source}-${sourceHandleId}`);
     const netId = port?.netId ?? null;
     netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
   }
-  const mid = verts[Math.floor(verts.length / 2)] ?? verts[0];
+
+  // The dock point rides along the wire at `labelT`; the label floats from it by
+  // `labelOffset` (up to ~1 cm). Both default to the wire's midpoint.
+  const labelT = typeof data?.labelT === "number" ? (data.labelT as number) : 0.5;
+  const labelOffset = (data?.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
+  const dock = pointAtT(verts, labelT);
+  const anchor = { x: dock.x + labelOffset.x, y: dock.y + labelOffset.y };
+
+  // Drag the label to slide it along the wire and up to ~1 cm away. The pointer's
+  // projection onto the wire sets the dock (`labelT`); the residual is the offset.
+  const onLabelPointerDown = (e: React.PointerEvent) => {
+    if (canvasLocked || !isDragPointer(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const flow = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+      const t = projectToPolyline(verts, flow);
+      const d = pointAtT(verts, t);
+      let ox = flow.x - d.x, oy = flow.y - d.y;
+      const mag = Math.hypot(ox, oy);
+      if (mag > LABEL_MAX_OFFSET) { ox = (ox / mag) * LABEL_MAX_OFFSET; oy = (oy / mag) * LABEL_MAX_OFFSET; }
+      updateEdgeData(id, { labelT: t, labelOffset: { x: ox, y: oy } });
+    };
+    const up = () => {
+      target.releasePointerCapture(e.pointerId);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const showAny = (showLabel || selected) && netLabel;
+  const dirColor = selected ? theme.accent : theme.wireStroke;
 
   return (
     <>
@@ -120,10 +236,32 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         markerEnd={markerEnd}
         style={{ stroke: selected ? theme.accent : theme.wireStroke, strokeWidth: 2 }}
       />
-      {selected && netLabel && mid && (
-        <g transform={`translate(${mid.x}, ${mid.y})`} style={{ pointerEvents: "none" }}>
+      {/* Net-connector symbol: a dock circle on the wire plus a direction arrow.
+          The circle stays subtly visible; a plain label leaves it invisible. */}
+      {showAny && connector && (() => {
+        const [dx, dy] = ARROW_VEC[arrowDir];
+        const gap = 5, len = 22, headLen = 8, headHalf = 4.5;
+        const x1 = dock.x + dx * gap, y1 = dock.y + dy * gap;
+        const x2 = dock.x + dx * len, y2 = dock.y + dy * len;
+        const bx = dock.x + dx * (len - headLen), by = dock.y + dy * (len - headLen);
+        const px = -dy, py = dx;
+        const head = `${x2},${y2} ${bx + px * headHalf},${by + py * headHalf} ${bx - px * headHalf},${by - py * headHalf}`;
+        return (
+          <g style={{ pointerEvents: "none" }}>
+            <circle cx={dock.x} cy={dock.y} r={3.5} fill="none" stroke={dirColor} strokeWidth={1.4} opacity={0.7} />
+            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={dirColor} strokeWidth={1.6} strokeLinecap="round" />
+            <polygon points={head} fill={dirColor} />
+          </g>
+        );
+      })()}
+      {showAny && netLabel && (
+        <g
+          transform={`translate(${anchor.x}, ${anchor.y})`}
+          onPointerDown={onLabelPointerDown}
+          style={{ ...DRAG_TOUCH_ACTION, cursor: canvasLocked ? "default" : "move", pointerEvents: "all" }}
+        >
           <rect x={-netLabel.length * 3.4 - 4} y={-19} width={netLabel.length * 6.8 + 8} height={15} rx={3} fill="#2563eb" />
-          <text x={0} y={-8} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{netLabel}</text>
+          <text x={0} y={-8} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{netLabel}</text>
         </g>
       )}
     </>

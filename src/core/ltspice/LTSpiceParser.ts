@@ -61,6 +61,8 @@ export class LTSpiceParser {
     const namedFlags: { name: string; x: number; y: number }[] = [];
     /** Flags already imported, keyed x,y,name — see the FLAG handler. */
     const seenFlags = new Set<string>();
+    /** IOPIN coordinates ("x,y"): a FLAG at one of these is a port/connector. */
+    const iopinCoords = new Set<string>();
     let directives = "";
     
     let currentSymbol: any = null;
@@ -130,6 +132,12 @@ export class LTSpiceParser {
           pins.push({ compId: id, handle: "t", x, y });
           namedFlags.push({ name: flagName, x, y });
         }
+      } else if (cmd === "IOPIN") {
+        // `IOPIN x y {In|Out|BiDir}` — pairs with a FLAG at the same point to
+        // mark it as a port/connector. The direction is semantic (not geometric);
+        // we treat any of them as "connector" and keep the arrow visual in-app.
+        const x = parseInt(parts[1], 10), y = parseInt(parts[2], 10);
+        if (!isNaN(x) && !isNaN(y)) iopinCoords.add(`${x},${y}`);
       } else if (cmd === "WIRE") {
         wires.push({
           x1: parseInt(parts[1], 10), y1: parseInt(parts[2], 10),
@@ -153,6 +161,16 @@ export class LTSpiceParser {
     }
     if (currentSymbol) {
       LTSpiceParser.finalizeSymbol(currentSymbol, nodes, components, pins);
+    }
+
+    // A named FLAG that coincides with an IOPIN is a connector (LTSpice port).
+    // IOPIN may follow its FLAG, so this is resolved once the whole file is read.
+    if (iopinCoords.size > 0) {
+      for (const node of nodes) {
+        if ((node.data as { componentType?: string }).componentType !== "netlabel") continue;
+        const fx = Math.round(node.position.x + CENTER), fy = Math.round(node.position.y + CENTER);
+        if (iopinCoords.has(`${fx},${fy}`)) (node.data as { connector?: boolean }).connector = true;
+      }
     }
 
     // Assign Nets using simple distance-based Union-Find

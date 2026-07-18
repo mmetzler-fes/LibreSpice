@@ -7,7 +7,8 @@ import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
 import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
 import { useUIStore } from "./uiStore.js";
-import type { FlowPoint } from "@editor/WireTool.js";
+import type { FlowPoint, ArrowDir } from "@editor/WireTool.js";
+import { ARROW_ORDER } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
@@ -55,6 +56,8 @@ interface CircuitActions {
   setLabelOffset: (id: string, kind: "label" | "value", offset: { x: number; y: number }) => void;
   /** Patch a node's `data` (visual-only fields, e.g. the net-label connector flag). Undoable. */
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  /** Patch a wire edge's `data` (visible label, connector, arrow direction, …). Undoable. */
+  updateEdgeData: (id: string, patch: Record<string, unknown>) => void;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   setSelectedComponentId: (id: string | null) => void;
@@ -235,6 +238,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const snap = { nodes: get().nodes, edges: get().edges };
     set((state) => ({
       nodes: state.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
+      _history: [...state._history, snap],
+      _future: [],
+    }));
+  },
+
+  updateEdgeData: (id, patch) => {
+    const snap = { nodes: get().nodes, edges: get().edges };
+    set((state) => ({
+      edges: state.edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, ...patch } } : e)),
       _history: [...state._history, snap],
       _future: [],
     }));
@@ -501,7 +513,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   canRedo: () => get()._future.length > 0,
 
   rotateSelected: () => {
-    const { selectedComponentId, rotateComponent } = get();
+    const { selectedComponentId, rotateComponent, edges, updateEdgeData } = get();
+    // A selected connector wire rotates its arrow instead of a component.
+    const selEdge = edges.find((e) => e.selected && (e.data as { connector?: boolean } | undefined)?.connector);
+    if (selEdge) {
+      const cur = (selEdge.data as { arrowDir?: ArrowDir }).arrowDir ?? "right";
+      const next = ARROW_ORDER[(ARROW_ORDER.indexOf(cur) + 1) % ARROW_ORDER.length];
+      updateEdgeData(selEdge.id, { arrowDir: next });
+      return;
+    }
     if (selectedComponentId) rotateComponent(selectedComponentId);
   },
 

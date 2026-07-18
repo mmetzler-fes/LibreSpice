@@ -125,6 +125,26 @@ function orthoVertices(points: Pt[]): Pt[] {
   return out;
 }
 
+/** Point at parametric position `t` (0..1 of total length) along a polyline —
+ *  mirrors WireTool.pointAtT, kept local so `core` needn't import the editor. */
+function dockPoint(verts: Pt[], t: number): Pt {
+  if (verts.length === 0) return { x: 0, y: 0 };
+  if (verts.length === 1) return verts[0];
+  let total = 0;
+  for (let i = 0; i < verts.length - 1; i++) total += Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+  if (total === 0) return verts[0];
+  let target = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < verts.length - 1; i++) {
+    const segLen = Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+    if (target <= segLen || i === verts.length - 2) {
+      const f = segLen === 0 ? 0 : target / segLen;
+      return { x: verts[i].x + (verts[i + 1].x - verts[i].x) * f, y: verts[i].y + (verts[i + 1].y - verts[i].y) * f };
+    }
+    target -= segLen;
+  }
+  return verts[verts.length - 1];
+}
+
 export class LTSpiceExporter {
   static export(nodes: Node[], edges: Edge[], directives: string, circuit: any, dataFlags: DataFlag[] = []): string {
     const header = ["Version 4", "SHEET 1 880 680"];
@@ -138,6 +158,8 @@ export class LTSpiceExporter {
       const data = node.data as {
         componentType: ComponentType; label: string; valueLabel?: string; rotation?: number;
         labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
+        /** Net-label acting as a port/connector → LTSpice FLAG + IOPIN. */
+        connector?: boolean;
         /** Library part / `.subckt`: its own `.asy` symbol, subcircuit name and pin order. */
         symbolName?: string; subName?: string; pins?: string[];
         /** The SYMBOL name this component was imported under (see LTSpiceParser). */
@@ -152,11 +174,14 @@ export class LTSpiceExporter {
         continue;
       }
 
-      // Net-label terminal → LTSpice `FLAG x y name` at its single pin.
+      // Net-label terminal → LTSpice `FLAG x y name` at its single pin. A
+      // connector (port) additionally gets an `IOPIN`, exactly as LTSpice writes
+      // a net label whose Port Type is In/Out/Bi-Direct.
       if (data.componentType === "netlabel") {
         const fx = Math.round(node.position.x + CENTER);
         const fy = Math.round(node.position.y + CENTER);
         flagLines.push(`FLAG ${fx} ${fy} ${String(data.label ?? "NET").trim() || "NET"}`);
+        if (data.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
         pinCoord.set(`${node.id}-t`, { x: fx, y: fy });
         continue;
       }
@@ -222,18 +247,44 @@ export class LTSpiceExporter {
       }
     }
 
-    // Named nets → FLAGs, for a net whose name is *not* already carried by a
-    // net-label terminal (which wrote its own FLAG above). Emitting one here as
-    // well gave every labelled net two flags, and each save/load cycle stacked
-    // another label on the same spot — the file grew and the schematic collected
-    // invisible duplicates.
+    // Wire-carried net labels / connectors (the editor's `visible` / `Net
+    // connector` on a wire) → a `FLAG` at the label's dock point, plus an
+    // `IOPIN` when it is a connector. LTSpice has no notion of a label owned by a
+    // wire, so this is its faithful representation: a flag (and port) sitting on
+    // the wire. Records the net so the named-net fallback below doesn't add a
+    // second flag for it.
+    const labelledNets = new Set<string>();
+    for (const node of nodes) {
+      if ((node.data as { componentType?: ComponentType }).componentType !== "netlabel") continue;
+      const netId = circuit?.components?.get(node.id)?.ports?.[0]?.netId;
+      if (netId) labelledNets.add(netId);
+    }
     if (circuit?.nets) {
-      const labelledNets = new Set<string>();
-      for (const node of nodes) {
-        if ((node.data as { componentType?: ComponentType }).componentType !== "netlabel") continue;
-        const netId = circuit.components.get(node.id)?.ports?.[0]?.netId;
-        if (netId) labelledNets.add(netId);
+      for (const edge of edges) {
+        const d = edge.data as { showLabel?: boolean; connector?: boolean; labelT?: number; waypoints?: Pt[] } | undefined;
+        if (!d?.showLabel && !d?.connector) continue;
+        const netId = circuit.components.get(edge.source)?.ports?.find((p: { id: string; netId?: string }) => p.id === `${edge.source}-${edge.sourceHandle}`)?.netId;
+        if (!netId || netId === "0" || labelledNets.has(netId)) continue;
+        const name = (circuit.nets.get(netId)?.nodeLabel ?? netId).trim();
+        if (!name) continue;
+        const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
+        const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
+        if (!a || !b) continue;
+        const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
+        const dock = dockPoint(orthoVertices([a, ...wps, b]), typeof d.labelT === "number" ? d.labelT : 0.5);
+        const fx = Math.round(dock.x), fy = Math.round(dock.y);
+        flagLines.push(`FLAG ${fx} ${fy} ${name}`);
+        if (d.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
+        labelledNets.add(netId);
       }
+    }
+
+    // Named nets → FLAGs, for a net whose name is *not* already carried by a
+    // net-label terminal or a wire label (both wrote their own FLAG above).
+    // Emitting one here as well gave every labelled net two flags, and each
+    // save/load cycle stacked another label on the same spot — the file grew and
+    // the schematic collected invisible duplicates.
+    if (circuit?.nets) {
       for (const [netId, net] of circuit.nets as Map<string, { nodeLabel: string; connectedPortIds: Set<string> }>) {
         if (netId === "0" || net.nodeLabel === netId || labelledNets.has(netId)) continue;
         for (const portId of net.connectedPortIds) {
