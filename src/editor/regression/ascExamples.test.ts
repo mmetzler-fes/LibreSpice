@@ -33,12 +33,6 @@ const st = () => useCircuitStore.getState();
  * Documented so the gap is visible and a future fix can drop the entry.
  */
 const KNOWN_ROUNDTRIP_ISSUES: Record<string, string> = {
-  // The original uses *diagonal* LTSpice wires for the cross-coupling
-  // (WIRE 304 288 448 176 / WIRE 496 288 352 176). LibreSpice has only
-  // orthogonal wires, so each becomes an L whose horizontal leg lies on y=288;
-  // the two Ls overlap and merge the Q1_B/Q2_B nets on re-import. A model
-  // limitation (no diagonal wires), not a plain exporter bug.
-  "04-4_AstabileKippstufe1.asc": "diagonal wires orthogonalise into overlapping segments (nets merge)",
   // A stale LibreSpice re-save with stacked duplicate flags (e.g. U+ and UE both
   // at (-72,208)); one label is dropped on the next save (FLAG 12→11). The clean
   // original is OP-nicht_inv_Verstärker.asc, which round-trips fine — this ae

@@ -235,7 +235,10 @@ export class LTSpiceExporter {
       const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
       if (!a || !b) continue;
       const wps = ((edge.data?.waypoints as Pt[] | undefined) ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
-      const verts = orthoVertices([a, ...wps, b]);
+      // A wire imported along a diagonal LTSpice segment keeps its exact path:
+      // orthogonalising it would insert a right-angle leg that can overlap a
+      // neighbouring net's leg and merge the two on re-import (see LTSpiceParser).
+      const verts = edge.data?.diagonal ? [a, ...wps, b] : orthoVertices([a, ...wps, b]);
       for (let i = 0; i < verts.length - 1; i++) {
         const p = verts[i], q = verts[i + 1];
         if (p.x === q.x && p.y === q.y) continue;

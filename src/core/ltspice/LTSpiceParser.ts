@@ -355,6 +355,18 @@ export class LTSpiceParser {
                              (!c2 || Math.hypot(v.x - c2.x, v.y - c2.y) > 12));
           }
         }
+        // Did this route follow a *diagonal* LTSpice wire? Orthogonalising such a
+        // segment on export can make two diagonals' right-angle legs overlap and
+        // wrongly merge their nets on the next import. Flag it so the exporter
+        // writes the diagonal verbatim instead (see LTSpiceExporter).
+        const start = c1 ?? { x: p1.x, y: p1.y };
+        const end = pinCenters.get(`${p2.compId}|${p2.handle}`) ?? { x: p2.x, y: p2.y };
+        const route = [start, ...waypoints, end];
+        let diagonal = false;
+        for (let k = 0; k < route.length - 1 && !diagonal; k++) {
+          if (Math.abs(route[k + 1].x - route[k].x) > 4 && Math.abs(route[k + 1].y - route[k].y) > 4) diagonal = true;
+        }
+
         edges.push({
           id: `edge_${edgeCounter++}`,
           source: p1.compId,
@@ -362,7 +374,7 @@ export class LTSpiceParser {
           target: p2.compId,
           targetHandle: p2.handle,
           type: "wire",
-          data: { waypoints },
+          data: diagonal ? { waypoints, diagonal: true } : { waypoints },
         });
       }
     }
