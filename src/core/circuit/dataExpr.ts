@@ -112,6 +112,20 @@ function deviceCurrent(result: SimulationResult, name: string): Val {
   if (!v) throw new EvalError(`unknown device ${name}`);
   return result.data[v];
 }
+/**
+ * A transistor terminal current, LTSpice's `Ic(Q1)` / `Ib(Q1)`. ngspice saves
+ * these as `@q1[ic]` (via `savecurrents`); `matchResultVariable` knows both
+ * spellings, so the LTSpice form is enough to look one up.
+ */
+function terminalCurrent(result: SimulationResult, term: string, name: string): Val {
+  const lower = name.toLowerCase();
+  const t = term.toLowerCase();
+  const v = matchResultVariable(result, [
+    `I${t}(${name})`, `@${lower}[i${t}]`, `i(@${lower}[i${t}])`,
+  ]);
+  if (!v) throw new EvalError(`unknown terminal current I${t}(${name})`);
+  return result.data[v];
+}
 
 const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_.]*|\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+|[()+\-*/,]/g;
 
@@ -166,6 +180,11 @@ function evalExpr(expr: string, result: SimulationResult): Val {
           return v;
         }
         if (fn === "i") { const d = eat(); eat(")"); return deviceCurrent(result, d); }
+        // `Ic(Q1)`, `Ib(Q1)`, `Id(M1)`, … — a transistor terminal current.
+        if (/^i[a-z]$/.test(fn) && !FUNCS[fn]) {
+          const d = eat(); eat(")");
+          return terminalCurrent(result, fn[1], d);
+        }
         const args: Val[] = [parseSum()];
         while (peek() === ",") { eat(","); args.push(parseSum()); }
         eat(")");

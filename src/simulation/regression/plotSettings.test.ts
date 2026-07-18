@@ -3,7 +3,7 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { buildPltDoc } from "../pltBuild.js";
 import { serializePlt, parsePlt } from "../pltFormat.js";
-import { applyPltText } from "../pltApply.js";
+import { applyPltText, decodePltBytes } from "../pltApply.js";
 import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
@@ -281,6 +281,26 @@ const CASES: Case[] = [
     if (p.xMin !== 10 || p.xMax !== 100000) fail(`x bounds ${p.xMin}..${p.xMax} != 10..100000`);
     if (plot().traceToPanel["V(in)"] !== "panel-0") fail("traces not assigned");
     if (parsePlt(LTSPICE_PLT)?.panes[0].traces.length !== 2) fail("traces not parsed");
+  } },
+
+  { name: "a UTF-16 .plt (what LTSpice actually writes) decodes", run: (fail) => {
+    // LTSpice writes UTF-16LE with no BOM. Read as UTF-8 the text comes back
+    // NUL-interleaved and every LTSpice-authored .plt was rejected as invalid —
+    // only the app's own UTF-8 output ever loaded.
+    const text = `[Transient Analysis]\n{\n   Npanes: 1\n   {\n      traces: 1 {524290,0,"Ic(Q1)/Ib(Q1)"}\n      Parametric: "Ic(Q1)"\n      X: ('m',0,-0.01,0.01,0.1)\n      Y[0]: (' ',0,-20,20,220)\n   }\n}\n`;
+    const utf16 = new Uint8Array(text.length * 2);
+    for (let i = 0; i < text.length; i++) {
+      utf16[i * 2] = text.charCodeAt(i) & 0xff;
+      utf16[i * 2 + 1] = text.charCodeAt(i) >> 8;
+    }
+    const decoded = decodePltBytes(utf16.buffer);
+    if (!decoded.includes("Parametric")) { fail("a UTF-16LE .plt did not decode to readable text"); return; }
+    if (parsePlt(decoded)?.panes[0].parametric !== "Ic(Q1)") {
+      fail("the decoded .plt lost its parametric x-axis");
+    }
+    // A plain UTF-8 file must still decode unchanged.
+    const utf8 = new TextEncoder().encode(text);
+    if (decodePltBytes(utf8.buffer) !== text) fail("a UTF-8 .plt was mangled by the UTF-16 sniffing");
   } },
 ];
 

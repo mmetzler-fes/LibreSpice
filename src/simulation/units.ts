@@ -34,7 +34,9 @@ function tokenize(src: string): Tok[] | null {
 /** Dimension of a single reference: currents vs. power vs. (default) voltage. */
 function refDim(ref: string): Dim {
   const s = ref.toLowerCase();
-  if (/\[i\]$/.test(s) || /^i\s*\(/.test(s)) return { v: 0, a: 1 };
+  // `i(...)` and the terminal currents `ic(q1)` / `id(m1)`, plus the raw
+  // `@dev[i]` / `@q1[ic]` vectors — all amperes.
+  if (/\[i\w*\]$/.test(s) || /^i[a-z]?\s*\(/.test(s)) return { v: 0, a: 1 };
   if (/\[p\]$/.test(s)) return { v: 1, a: 1 };
   return { v: 1, a: 0 }; // node voltages: V(...) or bare node names
 }

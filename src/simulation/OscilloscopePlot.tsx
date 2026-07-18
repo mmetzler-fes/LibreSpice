@@ -10,7 +10,7 @@ import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression 
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
-import { stripStepTag, applyPltText } from "./pltApply.js";
+import { stripStepTag, applyPltText, decodePltFile } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
 
@@ -292,6 +292,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     panels, traceToPanel, colors, expressions, hiddenExpressions, syncX, svgLight,
     addPanelRelative, movePanel, removePanel, setTracePanel, updatePanel, fitPanel, setColor,
     addExpression, updateExpression, toggleExpressionHidden, removeExpression, toggleSyncX,
+    setPanelXQuantity,
   } = usePlotStore();
   const pt = plotThemeFor(svgLight);
   // Active palette: bright for dark backgrounds, deep for light backgrounds.
@@ -547,6 +548,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
   // Load an LTSpice `.plt` file, starting the picker in the current .asc's folder.
   const handleLoadPlt = async () => {
+    const read = (f: File) => decodePltFile(f);
     if ("showOpenFilePicker" in window) {
       try {
         const [handle] = await (window as any).showOpenFilePicker({
@@ -554,7 +556,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           types: [{ description: "LTSpice Plot Settings", accept: { "text/plain": [".plt"], "application/octet-stream": [".plt"] } }],
           multiple: false,
         });
-        if (!applyPltText(await (await handle.getFile()).text())) alert("Invalid .plt file");
+        if (!applyPltText(await read(await handle.getFile()))) alert("Invalid .plt file");
         return;
       } catch (err: any) {
         if (err?.name === "AbortError") return;
@@ -566,7 +568,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     input.accept = ".plt";
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (file && !applyPltText(await file.text())) alert("Invalid .plt file");
+      if (file && !applyPltText(await read(file))) alert("Invalid .plt file");
     };
     input.click();
   };
@@ -795,6 +797,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               onSavePlt={handleSavePlt}
               onLoadPlt={handleLoadPlt}
               onUpdate={(patch) => updatePanel(panel.id, patch)}
+              onSetXQuantity={(q) => setPanelXQuantity(panel.id, q)}
               registerExport={registerExport}
               onExportAll={handleExportAllSvg}
             />
@@ -963,6 +966,8 @@ interface PlotPanelViewProps {
   onSavePlt: () => void;
   onLoadPlt: () => void;
   onUpdate: (patch: Partial<PlotPanel>) => void;
+  /** Set the x-axis quantity (parametric plot); undefined restores the time base. */
+  onSetXQuantity: (quantity: string | undefined) => void;
   /** Register/unregister this panel's export-SVG builder with the parent, so it
    *  can combine every panel into one file. */
   registerExport: (id: string, build: (() => SVGSVGElement | null) | null) => void;
@@ -972,7 +977,7 @@ interface PlotPanelViewProps {
 
 function PlotPanelView(props: PlotPanelViewProps) {
   const { panel, traces, seriesMap, time, xLabel, xUnit, colorFor, compact, index, count, syncX,
-    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate,
+    onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate, onSetXQuantity,
     registerExport, onExportAll } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
   // The x-axis is time by default; for a swept-parameter/`.dc` run it is the
@@ -1381,10 +1386,13 @@ function PlotPanelView(props: PlotPanelViewProps) {
             onMax={(v) => onUpdate({ xMax: v })}
             onTicks={(v) => onUpdate({ xTicks: v })}
             extra={
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#94a3b8" }}>
-                <input type="checkbox" checked={logX} onChange={(e) => onUpdate({ logX: e.target.checked })} />
-                logarithmic
-              </label>
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#94a3b8" }}>
+                  <input type="checkbox" checked={logX} onChange={(e) => onUpdate({ logX: e.target.checked })} />
+                  logarithmic
+                </label>
+                <XQuantityField value={panel.xTrace} onChange={onSetXQuantity} />
+              </>
             }
           />
           {(yGroups.length > 0 ? yGroups : [y0]).map((g, gi) => (
@@ -1721,6 +1729,44 @@ function AxisFields({ title, min, max, ticks, autoMin, autoMax, minLabel, maxLab
       <AxisInput label={maxLabel} value={max} auto={autoMax} onChange={onMax} />
       {extra}
     </div>
+  );
+}
+
+/**
+ * The quantity plotted on the x-axis (LTSpice's "Quantity Plotted" / `Parametric:`).
+ * Empty = the sweep base (time for a `.tran`). Anything else turns the panel
+ * parametric: both axes are then functions of time and the panel draws the curve
+ * they trace out — that is how a transistor characteristic Ic = f(Uce) comes out
+ * of an ordinary transient run. Committed on blur / Enter so a half-typed name
+ * never reaches the plot.
+ */
+function XQuantityField({ value, onChange }: { value?: string; onChange: (v: string | undefined) => void }) {
+  const pt = usePlotTheme();
+  const [text, setText] = useState<string | null>(null);
+  const commit = (raw: string) => {
+    const v = raw.trim();
+    setText(null);
+    onChange(v === "" || v.toLowerCase() === "time" ? undefined : v);
+  };
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#94a3b8" }}>
+      quantity
+      <input
+        value={text ?? value ?? ""}
+        placeholder="time"
+        title="x-axis quantity, e.g. Ic(Q1) or V(C) — empty = time (parametric plot)"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          if (e.key === "Escape") setText(null);
+        }}
+        style={{
+          width: 78, fontSize: 10, padding: "1px 4px", background: pt.inputBg,
+          color: pt.text, border: `1px solid ${pt.border}`, borderRadius: 3,
+        }}
+      />
+    </label>
   );
 }
 

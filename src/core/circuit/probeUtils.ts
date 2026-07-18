@@ -100,10 +100,14 @@ export function canonicalProbe(raw: string): CanonicalProbe | null {
   // collapse onto one another. Written the LTSpice way, `Ic(Q1)`.
   const cur = (d: string, term = ""): CanonicalProbe => {
     const dev = senseDeviceOf(d) ?? d;
+    // Only a genuine multi-terminal device has terminal currents. A diode's sole
+    // current is named `@d1[id]`, whose `d` is not a terminal letter — reading it
+    // as one would turn `I(D1)` into a phantom `Id(D1)` that nothing requests.
     const t = term.toLowerCase();
+    const isTerminal = t !== "" && deviceTerminals(dev).includes(t);
     return {
-      key: `I:${dev.toUpperCase()}${t ? `:${t.toUpperCase()}` : ""}`,
-      display: `I${t}(${dev.toUpperCase()})`,
+      key: `I:${dev.toUpperCase()}${isTerminal ? `:${t.toUpperCase()}` : ""}`,
+      display: `I${isTerminal ? t : ""}(${dev.toUpperCase()})`,
       kind: "I",
     };
   };

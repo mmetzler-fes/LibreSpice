@@ -1,5 +1,15 @@
 import { create } from "zustand";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
+import { useSimulationStore } from "@store/simulationStore.js";
+
+/**
+ * A trace name is an expression unless it is a bare probe like `V(out)` /
+ * `I(R1)` / `Ic(Q1)`. Lives here rather than in `pltApply` so both the `.plt`
+ * import and the store can use it without an import cycle.
+ */
+export function looksLikeExpression(name: string): boolean {
+  return !/^\s*[@A-Za-z_][\w.]*\s*(\([^()]*\))?\s*$/.test(name);
+}
 
 /** How the y-axis maps data values to screen: linear, log10, or decibel (20·log10|v|). */
 export type YScale = "linear" | "log" | "db";
@@ -75,6 +85,13 @@ interface PlotActions {
   removePanel: (id: string) => void;
   setTracePanel: (trace: string, panelId: string) => void;
   updatePanel: (id: string, patch: Partial<PlotPanel>) => void;
+  /**
+   * Set a panel's x-axis quantity (LTSpice's "Quantity Plotted" / `Parametric:`).
+   * Empty or "time" restores the sweep base. Anything else also has to be probed
+   * — the panel needs its series to draw against — but gets no `traceToPanel`
+   * entry: it is the x-axis, not a curve.
+   */
+  setPanelXQuantity: (id: string, quantity: string | undefined) => void;
   fitPanel: (id: string) => void;
   setColor: (trace: string, color: string) => void;
   addExpression: (expr: string) => void;
@@ -165,6 +182,17 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
       }
       return { panels: s.panels.map((p) => (p.id === id ? { ...p, ...patch } : p)) };
     }),
+
+  setPanelXQuantity: (id, quantity) => {
+    const x = quantity?.trim();
+    const xTrace = !x || x.toLowerCase() === "time" ? undefined : x;
+    set((s) => ({ panels: s.panels.map((p) => (p.id === id ? { ...p, xTrace } : p)) }));
+    if (!xTrace) return;
+    // A formula is a function of the plot; a plain probe has to be requested from
+    // the engine. `addProbe` queues it when no result is loaded yet.
+    if (looksLikeExpression(xTrace)) get().addExpression(xTrace);
+    else useSimulationStore.getState().addProbe(xTrace);
+  },
 
   fitPanel: (id) =>
     set((s) => ({
