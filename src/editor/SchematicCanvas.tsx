@@ -531,6 +531,12 @@ function CanvasInner() {
     setNodeMenu(null);
   };
 
+  // Plot the potential of the wire's net, as a scope trace (same as a net label).
+  const probeWireVoltageInScope = () => {
+    if (wireMenu?.vExpr) { addExpression(wireMenu.vExpr); setDockTab("waveform"); }
+    setWireMenu(null);
+  };
+
   // Pin the net's potential as a data-point badge, next to the label terminal.
   const addNetlabelDataFlag = () => {
     const m = nodeMenu;
@@ -832,6 +838,9 @@ function CanvasInner() {
         <ContextMenu x={wireMenu.x} y={wireMenu.y} minWidth={190} onClose={() => setWireMenu(null)}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>Leitung</div>
             <button style={nodeMenuItem} onClick={nameWireNet}>🏷 Netz benennen…</button>
+            {wireMenu.vExpr && (
+              <button style={nodeMenuItem} onClick={probeWireVoltageInScope}>{wireMenu.vExpr} im Oszi anzeigen</button>
+            )}
             {wireMenu.vExpr
               ? <button style={nodeMenuItem} onClick={() => addWireDataFlag(wireMenu.vExpr!)}>Datenpunkt: Potential {wireMenu.vExpr}</button>
               : <div style={{ ...nodeMenuItem, color: "#64748b", cursor: "default" }}>Kein Potential verfügbar</div>}

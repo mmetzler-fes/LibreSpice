@@ -137,6 +137,19 @@ CASES.push(
     if (/^FLAG\s+-?\d+\s+-?\d+\s+A$/m.test(asc)) fail("the net name A was written as a FLAG too (connector name B should stand in)");
   } },
 
+  { name: "renaming a connector leaves the wire's net name untouched", run: (fail) => {
+    const { netId } = twoResistorNet();
+    useCircuitStore.getState().renameNet(netId, "A");
+    // Give the connector its own, different name.
+    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true, connectorLabel: "B" });
+    const net = useCircuitStore.getState().circuit.nets.get(netId);
+    if (net?.nodeLabel !== "A") fail(`the wire's net name changed to "${net?.nodeLabel}" when the connector was renamed`);
+    // The wire still carries "A" (netName), independent of the connector's "B".
+    const wire = useCircuitStore.getState().edges.find((e) => e.id === "w_conn");
+    if ((wire?.data as { connectorLabel?: string }).connectorLabel !== "B") fail("the connector name was not stored");
+    if ((wire?.data as { netName?: string }).netName !== "A") fail(`the wire's netName is "${(wire?.data as { netName?: string }).netName}", not "A"`);
+  } },
+
   { name: "a connector with no own name falls back to the net name", run: (fail) => {
     const { netId } = twoResistorNet();
     useCircuitStore.getState().renameNet(netId, "SIG");

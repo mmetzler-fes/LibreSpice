@@ -197,10 +197,12 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   }
   // The connector carries its own name, defaulting to the net name but allowed to
   // differ (LTSpice lets a port's label differ from other labels on the net).
+  // Renaming the connector never touches the wire's net name.
   const connName = connector ? (connectorLabel ?? netLabel) : null;
-  // The single draggable name tag shows the connector's name when there is a
-  // connector, otherwise the plain net name.
-  const boxName = connector ? connName : netLabel;
+  // The connector's name differs from the wire's — then the wire keeps showing
+  // its own name alongside the connector, so a rename of one is never mistaken
+  // for the other.
+  const connDiffers = !!(connector && connectorLabel && connectorLabel !== netLabel);
 
   // The dock point rides along the wire at `labelT`; the label floats from it by
   // `labelOffset` (up to ~1 cm). Both default to the wire's midpoint.
@@ -235,9 +237,11 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
     window.addEventListener("pointerup", up);
   };
 
-  // The name tag shows when there is a connector (always — a connector names its
-  // net), when the plain label is switched visible, or transiently on selection.
-  const showBox = !!boxName && (connector || showLabel || selected);
+  // The wire's own name tag (always the net name): shown when `visible`, while
+  // selected, or whenever a connector carries a *different* name (so both stay
+  // readable). A plain connector (name == net name) is represented by the
+  // connector's own tag below, so the box would only duplicate it.
+  const showBox = !!netLabel && (showLabel || selected || connDiffers);
   const dirColor = selected ? theme.accent : theme.wireStroke;
 
   return (
@@ -248,8 +252,9 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         markerEnd={markerEnd}
         style={{ stroke: selected ? theme.accent : theme.wireStroke, strokeWidth: 2 }}
       />
-      {/* Net-connector symbol: a dock circle on the wire plus a direction arrow,
-          shown whenever the wire is a connector (independent of the plain label). */}
+      {/* Net-connector symbol: a dock circle on the wire, a direction arrow, and
+          the connector's own name at the arrow tip. Shown whenever the wire is a
+          connector, independent of the wire's own (net-name) label. */}
       {connector && (() => {
         const [dx, dy] = ARROW_VEC[arrowDir];
         const gap = 5, len = 22, headLen = 8, headHalf = 4.5;
@@ -258,22 +263,32 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         const bx = dock.x + dx * (len - headLen), by = dock.y + dy * (len - headLen);
         const px = -dy, py = dx;
         const head = `${x2},${y2} ${bx + px * headHalf},${by + py * headHalf} ${bx - px * headHalf},${by - py * headHalf}`;
+        // Name box centred just past the arrow tip (works in every direction).
+        const w = (connName?.length ?? 0) * 6.8 + 8;
+        const tx = dock.x + dx * (len + 6 + (dx !== 0 ? w / 2 : 0));
+        const ty = dock.y + dy * (len + 6 + (dy !== 0 ? 7.5 : 0));
         return (
           <g style={{ pointerEvents: "none" }}>
             <circle cx={dock.x} cy={dock.y} r={3.5} fill="none" stroke={dirColor} strokeWidth={1.4} opacity={0.7} />
             <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={dirColor} strokeWidth={1.6} strokeLinecap="round" />
             <polygon points={head} fill={dirColor} />
+            {connName && (
+              <>
+                <rect x={tx - w / 2} y={ty - 7.5} width={w} height={15} rx={3} fill={selected ? "#1d4ed8" : "#475569"} />
+                <text x={tx} y={ty + 3.5} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{connName}</text>
+              </>
+            )}
           </g>
         );
       })()}
-      {showBox && boxName && (
+      {showBox && netLabel && (
         <g
           transform={`translate(${anchor.x}, ${anchor.y})`}
           onPointerDown={onLabelPointerDown}
           style={{ ...DRAG_TOUCH_ACTION, cursor: canvasLocked ? "default" : "move", pointerEvents: "all" }}
         >
-          <rect x={-boxName.length * 3.4 - 4} y={-19} width={boxName.length * 6.8 + 8} height={15} rx={3} fill="#2563eb" />
-          <text x={0} y={-8} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{boxName}</text>
+          <rect x={-netLabel.length * 3.4 - 4} y={-19} width={netLabel.length * 6.8 + 8} height={15} rx={3} fill="#2563eb" />
+          <text x={0} y={-8} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{netLabel}</text>
         </g>
       )}
     </>
