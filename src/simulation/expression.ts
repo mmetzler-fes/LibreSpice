@@ -275,3 +275,35 @@ export function stepView(result: SimulationResult, tag: string): SimulationResul
 export function exprCheckResult(result: SimulationResult, stepTags: string[] | null | undefined): SimulationResult {
   return stepTags?.length ? stepView(result, stepTags[0]) : result;
 }
+
+/**
+ * The x-axis series for one y-trace on a parametric panel — the quantity named
+ * by `xTrace`, taken from the same run as `yTrace`.
+ *
+ * Two things this must get right, and neither is obvious from the panel state:
+ *
+ * The quantity is resolved from the result, not from the traces the user has
+ * probed. Requiring V(C) to be ticked in the probe list before it can go on the
+ * x-axis is a trap — nothing says so, and the field then silently keeps showing
+ * the sweep base.
+ *
+ * A stepped family carries one run per step, so `V(C)` is not one series but
+ * one per curve. The y-trace's own step tag (`… @I1=5m`) selects the matching
+ * run; sharing a single x-series would draw every curve against the first
+ * step's x, which for an output-characteristic family collapses them onto one.
+ */
+export function parametricXSeries(
+  result: SimulationResult,
+  xTrace: string | undefined,
+  yTrace: string | undefined,
+  stepTags: string[] | null,
+  params: Record<string, number> = {},
+): Float64Array | null {
+  const name = xTrace?.trim();
+  if (!name) return null;
+  const at = yTrace ? yTrace.lastIndexOf(" @") : -1;
+  const tag = at >= 0 && stepTags?.includes(yTrace!.slice(at + 2)) ? yTrace!.slice(at + 2) : null;
+  const view = tag ? stepView(result, tag) : result;
+  if (isExpression(view, name)) return evalExpression(view, name, params).values ?? null;
+  return resolveSeries(view, name);
+}

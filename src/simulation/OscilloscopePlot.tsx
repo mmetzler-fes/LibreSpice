@@ -6,7 +6,7 @@ import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
-import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression } from "./expression.js";
+import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression, parametricXSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
@@ -342,6 +342,13 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
   // A stepped run tags every vector (`v(out) @1`), so both the plot and the
   // validation have to look at one step's view under the plain names.
+  /** x-series for a trace on a parametric panel (see parametricXSeries). */
+  const xSeriesFor = useCallback(
+    (xTrace: string | undefined, yTrace?: string) =>
+      result ? parametricXSeries(result, xTrace, yTrace, stepTags, paramMap) : null,
+    [result, stepTags, paramMap],
+  );
+
   const checkResult = result ? exprCheckResult(result, stepTags) : null;
 
   // Resolve each trace to a data series (raw variable or evaluated expression).
@@ -768,9 +775,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
         {panels.map((panel, i) => {
-          // A parametric panel puts one trace on the x-axis, so it is not drawn
+          // A parametric panel puts one quantity on the x-axis, so it is not drawn
           // as a curve; its series replaces the sweep/time base.
-          const xSeries = panel.xTrace ? seriesMap.map[panel.xTrace] : null;
+          const xSeries = panel.xTrace ? xSeriesFor(panel.xTrace, allTraces.find((t) => panelForTrace(t) === panel.id)) : null;
           const traces = allTraces.filter((t) => panelForTrace(t) === panel.id && t !== panel.xTrace);
           return (
             <PlotPanelView
@@ -779,6 +786,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               traces={traces}
               seriesMap={seriesMap.map}
               time={xSeries ?? result.time!}
+              xForTrace={panel.xTrace ? (t) => xSeriesFor(panel.xTrace, t) : undefined}
               xLabel={xSeries ? panel.xTrace : result.xLabel}
               xUnit={xSeries ? inferUnit(panel.xTrace!) : result.xUnit}
               colorFor={colorFor}
@@ -947,6 +955,13 @@ interface PlotPanelViewProps {
   traces: string[];
   seriesMap: Record<string, Float64Array | null>;
   time: Float64Array;
+  /**
+   * x-series for one trace on a parametric panel. A swept family carries one
+   * run per step, so each curve needs the x-quantity *from its own run* — a
+   * single shared array would draw all of them against the first step's x.
+   * Returns null for a non-parametric panel, where `time` serves everyone.
+   */
+  xForTrace?: (trace: string) => Float64Array | null;
   /** When set, the x-axis is a swept parameter (not time) — used for labels. */
   xLabel?: string;
   /** Physical unit of the x-axis (e.g. "V" for a `.dc` sweep); default seconds. */
@@ -976,7 +991,7 @@ interface PlotPanelViewProps {
 }
 
 function PlotPanelView(props: PlotPanelViewProps) {
-  const { panel, traces, seriesMap, time, xLabel, xUnit, colorFor, compact, index, count, syncX,
+  const { panel, traces, seriesMap, time, xForTrace, xLabel, xUnit, colorFor, compact, index, count, syncX,
     onDropTrace, onRemoveTrace, onAddRelative, onMove, onRemovePanel, onFit, onToggleSyncX, onSavePlt, onLoadPlt, onUpdate, onSetXQuantity,
     registerExport, onExportAll } = props;
   const margin = compact ? MARGIN_COMPACT : MARGIN;
@@ -1066,10 +1081,29 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const plotW = dims.w - margin.left - marginRight;
   const plotH = dims.h - margin.top - margin.bottom;
 
+  // Span of the x-axis across every drawn trace. Without a parametric x-axis all
+  // traces share `time` and this is just its first/last sample.
+  const xExtent: [number, number] = useMemo(() => {
+    if (!xForTrace) return [time[0], time[time.length - 1]];
+    let lo = Infinity, hi = -Infinity;
+    for (const t of traces) {
+      const xs = xForTrace(t) ?? time;
+      for (let i = 0; i < xs.length; i++) {
+        const v = xs[i];
+        if (!isFinite(v)) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    return isFinite(lo) && isFinite(hi) && lo !== hi ? [lo, hi] : [time[0], time[time.length - 1]];
+  }, [xForTrace, traces, time]);
+
   // x defaults to the saved-data window (tstart..tstop).
   const vr: ViewRange = {
-    xMin: panel.xMin ?? time[0],
-    xMax: panel.xMax ?? time[time.length - 1],
+    // Over every trace's x-series: on a parametric panel the runs need not share
+    // a range, and taking only the first would clip the others.
+    xMin: panel.xMin ?? xExtent[0],
+    xMax: panel.xMax ?? xExtent[1],
     yMin: y0.yMin,
     yMax: y0.yMax,
   };
@@ -1125,11 +1159,15 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const toSy = mkToSy(y0); // left axis
   const groupOf = (t: string) => yGroups.find((g) => g.traces.includes(t)) ?? y0;
 
-  const buildPath = (data: Float64Array, sy: (v: number) => number): string => {
+  /** The x-samples a trace is drawn against: its own on a parametric panel. */
+  const xsOf = (trace: string): Float64Array => xForTrace?.(trace) ?? time;
+
+  const buildPath = (data: Float64Array, sy: (v: number) => number, xs: Float64Array = time): string => {
     let d = "";
     let first = true;
-    for (let i = 0; i < time.length; i++) {
-      const x = toSx(time[i]);
+    const n = Math.min(xs.length, data.length);
+    for (let i = 0; i < n; i++) {
+      const x = toSx(xs[i]);
       const y = sy(data[i]);
       if (!isFinite(x) || !isFinite(y)) { first = true; continue; }
       d += first ? `M${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
@@ -1155,18 +1193,20 @@ function PlotPanelView(props: PlotPanelViewProps) {
     ? logMinorTicks(ymap.inv(Math.min(yfLo, yfHi)), ymap.inv(Math.max(yfLo, yfHi)))
     : minorTicksLinear(yTicks.map((t) => t.v), 2);
 
-  const nearestIndex = (t: number): number => {
-    let lo = 0, hi = time.length - 1;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (time[mid] < t) lo = mid + 1; else hi = mid; }
-    if (lo > 0 && Math.abs(time[lo - 1] - t) < Math.abs(time[lo] - t)) return lo - 1;
+  /** Nearest sample index within a trace's own x-series (binary search). */
+  const nearestIndex = (t: number, xs: Float64Array = time): number => {
+    let lo = 0, hi = xs.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (xs[mid] < t) lo = mid + 1; else hi = mid; }
+    if (lo > 0 && Math.abs(xs[lo - 1] - t) < Math.abs(xs[lo] - t)) return lo - 1;
     return lo;
   };
 
   // Snap the cursor to the nearest sample and read its x/y.
   const cursorInfo = cursor
     ? (() => {
-        const idx = nearestIndex(cursor.t);
-        const sampleT = time[idx];
+        const cx = xsOf(cursor.trace);
+        const idx = nearestIndex(cursor.t, cx);
+        const sampleT = cx[idx];
         const value = seriesMap[cursor.trace]?.[idx] ?? NaN;
         const sy = mkToSy(groupOf(cursor.trace))(value);
         return { idx, sampleT, value, sx: toSx(sampleT), sy, color: colorFor(cursor.trace) };
@@ -1175,8 +1215,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
 
   // Screen positions for each stamp (snapped to the nearest sample).
   const stampInfos = stamps.map((st, i) => {
-    const idx = nearestIndex(st.t);
-    const sampleT = time[idx];
+    const sx = xsOf(st.trace);
+    const idx = nearestIndex(st.t, sx);
+    const sampleT = sx[idx];
     const value = seriesMap[st.trace]?.[idx] ?? NaN;
     return { i, trace: st.trace, sampleT, value, sx: toSx(sampleT), sy: mkToSy(groupOf(st.trace))(value), color: colorFor(st.trace), top: st.top, left: st.left };
   });
@@ -1500,7 +1541,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <g clipPath={`url(#osc-clip-${panel.id})`}>
               {traces.map((t) => {
                 const d = seriesMap[t];
-                return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
+                return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)), xsOf(t))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
             {/* Stamped cursor positions: dashed marker + dot (readout shown as HTML below SVG) */}

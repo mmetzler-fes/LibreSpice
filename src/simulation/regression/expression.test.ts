@@ -1,5 +1,5 @@
 import type { SimulationResult } from "@store/simulationStore.js";
-import { evalExpression, exprCheckResult, stepView } from "../expression.js";
+import { evalExpression, exprCheckResult, stepView, parametricXSeries } from "../expression.js";
 import { inferUnit } from "../units.js";
 
 export interface TestReport {
@@ -124,6 +124,54 @@ const CASES: Case[] = [
     },
   },
 ];
+
+/** A stepped result: one run per tag, each with its own v(c) and Ic. */
+function makeStepped(): SimulationResult {
+  const time = new Float64Array([0, 10, 20]);   // sweep base V1
+  const data: Record<string, Float64Array> = { time };
+  const variables = ["time"];
+  // Higher base current -> more collector current -> more drop across R1, so
+  // each run ends at its own v(c). That difference is the whole point.
+  for (const [tag, drop] of [["I1=1m", 1.5], ["I1=20m", 10]] as const) {
+    data[`v(c) @${tag}`] = new Float64Array([0, 10 - drop / 2, 20 - drop]);
+    data[`i(@q1[ic]) @${tag}`] = new Float64Array([0, drop / 20, drop / 10]);
+    variables.push(`v(c) @${tag}`, `i(@q1[ic]) @${tag}`);
+  }
+  return { variables, data, time, step: { param: "I1", values: ["I1=1m", "I1=20m"] } };
+}
+
+CASES.push(
+  { name: "parametric x-axis picks each curve's own run", run: (fail) => {
+    const r = makeStepped();
+    const tags = r.step!.values;
+    const a = parametricXSeries(r, "V(C)", "i(@q1[ic]) @I1=1m", tags);
+    const b = parametricXSeries(r, "V(C)", "i(@q1[ic]) @I1=20m", tags);
+    if (!a || !b) { fail("V(C) did not resolve for a stepped run"); return; }
+    // Sharing one x-series would lay both curves over the first step's x — the
+    // failure that made an output-characteristic family collapse into one line.
+    if (a[2] === b[2]) fail(`both steps got the same x (${a[2]}); each needs its own run`);
+    if (a[2] !== 18.5) fail(`step I1=1m ends at x=${a[2]}, expected 18.5`);
+    if (b[2] !== 10) fail(`step I1=20m ends at x=${b[2]}, expected 10`);
+  } },
+
+  { name: "parametric x-axis resolves however the quantity is spelled", run: (fail) => {
+    const r = makeStepped();
+    const tags = r.step!.values;
+    // ngspice answers "v(c)"; the user types what the schematic shows.
+    for (const name of ["V(C)", "v(c)", "  V(c) "]) {
+      if (!parametricXSeries(r, name, "i(@q1[ic]) @I1=1m", tags)) fail(`"${name}" did not resolve`);
+    }
+    if (parametricXSeries(r, "", "i(@q1[ic]) @I1=1m", tags)) fail("an empty quantity must mean the sweep base");
+    if (parametricXSeries(r, "V(nonexistent)", "i(@q1[ic]) @I1=1m", tags)) fail("an unknown quantity must resolve to null");
+  } },
+
+  { name: "parametric x-axis works without any stepping", run: (fail) => {
+    const r = makeResult({ "v(c)": [0, 5, 10], "i(r1)": [0, 1, 2] });
+    const xs = parametricXSeries(r, "V(C)", "i(r1)", null);
+    if (!xs) { fail("V(C) did not resolve for a plain run"); return; }
+    if (xs[2] !== 10) fail(`expected x to end at 10, got ${xs[2]}`);
+  } },
+);
 
 export function runExpressionTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];
