@@ -2,7 +2,7 @@ import { Resistor } from "@core/components/passives/Resistor.js";
 import { Capacitor } from "@core/components/passives/Capacitor.js";
 import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
-import { normalizeMeasDirective } from "@core/circuit/NetlistGenerator.js";
+import { normalizeMeasDirective, normalizeParamDirective } from "@core/circuit/NetlistGenerator.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -72,6 +72,43 @@ const CASES: Case[] = [
     if (normalizeMeasDirective(tran) !== tran) fail(`non-.meas line touched: ${normalizeMeasDirective(tran)}`);
   } },
 ];
+
+CASES.push(
+  { name: ".param without an equals sign is rewritten for ngspice", run: (fail) => {
+    // LTSpice writes `.param T 1ms`; ngspice needs `.param T=1ms`. Handed the
+    // space form the bundled engine does not report a syntax error — it never returns,
+    // and because runSim() blocks the thread the run timeout cannot fire either.
+    // A08_PWM4.asc sat on "running" for ever because of this one missing `=`.
+    const cases: [string, string][] = [
+      [".param T 1ms", ".param T=1ms"],
+      [".param Rvar 1k", ".param Rvar=1k"],
+      [".param a 1 b 2", ".param a=1 b=2"],
+      [".param x {a+b}", ".param x={a+b}"],
+      [".PARAM  T  1ms", ".PARAM  T=1ms"],
+    ];
+    for (const [input, want] of cases) {
+      const got = normalizeParamDirective(input);
+      if (got !== want) fail(`"${input}" became "${got}", expected "${want}"`);
+    }
+  } },
+
+  { name: ".param already in ngspice form is left alone", run: (fail) => {
+    // Rewriting an expression that merely contains spaces would corrupt it.
+    const untouched = [".param ti=g*T/100", ".param a=1 b=2", ".param lonely"];
+    for (const line of untouched) {
+      const got = normalizeParamDirective(line);
+      if (got !== line) fail(`"${line}" was rewritten to "${got}"`);
+    }
+    // Spaces around the equals sign are LTSpice-legal and must collapse, not split.
+    if (normalizeParamDirective(".param ti = g*T/100") !== ".param ti=g*T/100") {
+      fail("`.param ti = g*T/100` did not collapse to `ti=g*T/100`");
+    }
+    // Only .param lines are touched.
+    if (normalizeParamDirective(".tran 4u 4ms uic") !== ".tran 4u 4ms uic") {
+      fail("a .tran line was rewritten");
+    }
+  } },
+);
 
 export function runNetlistPrefixTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];

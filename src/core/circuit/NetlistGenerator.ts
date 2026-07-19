@@ -151,7 +151,7 @@ export class NetlistGenerator {
 
     // Append custom directive lines, normalising LTSpice syntax for ngspice.
     for (const dl of directiveLines) {
-      lines.push(normalizeMeasDirective(normalizeTranDirective(normalizeDcDirective(dl))));
+      lines.push(normalizeParamDirective(normalizeMeasDirective(normalizeTranDirective(normalizeDcDirective(dl)))));
     }
 
     lines.push(".end");
@@ -278,6 +278,57 @@ export function normalizeMeasDirective(line: string): string {
   return expandDiffProbes(
     line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
   );
+}
+
+/**
+ * `.param T 1ms` → `.param T=1ms`. LTSpice accepts a space between a parameter
+ * and its value; ngspice needs the `=`.
+ *
+ * This is not a cosmetic difference. Handed the space form, the bundled ngspice
+ * does not report a syntax error — it never returns at all, and since `runSim()`
+ * is a blocking WASM call the run timeout cannot fire either (its `setTimeout`
+ * never gets a turn). The circuit simply sits on "running" for ever, with
+ * nothing in the log to say why. Measured against the engine: `.param T 1ms`
+ * alone hangs it, even when nothing uses `T`.
+ *
+ * Values are taken as single tokens, with braces and parentheses kept whole, so
+ * `.param a 1 b {x+y}` and an already-correct `.param c=2` both survive. A
+ * trailing name with no value is left as written rather than guessed at.
+ */
+export function normalizeParamDirective(line: string): string {
+  const m = line.match(/^(\s*\.param\s+)(.*)$/i);
+  if (!m) return line;
+
+  // Split on whitespace, but never inside {...} or (...).
+  const tokens: string[] = [];
+  let depth = 0, cur = "";
+  for (const ch of m[2]) {
+    if (ch === "{" || ch === "(") depth++;
+    else if (ch === "}" || ch === ")") depth--;
+    if (/\s/.test(ch) && depth === 0) { if (cur) { tokens.push(cur); cur = ""; } continue; }
+    cur += ch;
+  }
+  if (cur) tokens.push(cur);
+
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.includes("=")) {
+      // `name = value` split across tokens by the spaces around the `=`.
+      if (t.endsWith("=") && i + 1 < tokens.length) { out.push(t + tokens[++i]); continue; }
+      out.push(t);
+      continue;
+    }
+    if (i + 1 < tokens.length && tokens[i + 1] === "=" && i + 2 < tokens.length) {
+      out.push(`${t}=${tokens[i + 2]}`); i += 2; continue;
+    }
+    if (i + 1 < tokens.length && tokens[i + 1].startsWith("=")) {
+      out.push(`${t}${tokens[++i]}`); continue;
+    }
+    if (i + 1 < tokens.length) { out.push(`${t}=${tokens[++i]}`); continue; }
+    out.push(t); // dangling name — leave it be rather than invent a value
+  }
+  return m[1] + out.join(" ");
 }
 
 /**
