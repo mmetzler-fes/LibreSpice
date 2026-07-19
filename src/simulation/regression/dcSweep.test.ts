@@ -1,4 +1,4 @@
-import { parseStepDirectives, isTempSweep, withTemp, withParam, withDcSource } from "../paramSweep.js";
+import { parseStepDirectives, isTempSweep, withTemp, withParam, withDcSource, parseMeasurements } from "../paramSweep.js";
 import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
@@ -57,6 +57,33 @@ const CASES: Case[] = [
     if (!/^\.param RM=50$/m.test(withParam(base, "RM", 50))) fail("a normal param sweep broke");
   } },
 ];
+
+CASES.push(
+  { name: "a .meas result without a time window is still read", run: (fail) => {
+    // ngspice prints AVG/RMS with a `from=…to=` trailer but a PARAM measurement
+    // bare, because it has no time window. Requiring the trailer dropped exactly
+    // those — the pr1 curve of A08_PWM4 was missing for that reason alone.
+    const log = [
+      "===== ngspice output =====",
+      "Circuit: * PWM",
+      ".param T=1ms",                       // must not be mistaken for a result
+      "",
+      "  Measurements for Transient Analysis",
+      "",
+      "u1mittel            =  5.00001e+00 from=  0.00000e+00 to=  4.00000e-03",
+      "u1eff               =  7.07107e+00 from=  1.00000e-11 to=  4.00000e-03",
+      "pr1                 =  5.00001e+00",
+      "",
+    ].join("\n");
+    const m = parseMeasurements(log);
+    const by = (n: string) => m.find((x) => x.name === n)?.value;
+    if (m.length !== 3) fail(`expected 3 measurements, got ${m.length}: ${m.map((x) => x.name).join(", ")}`);
+    if (by("pr1") !== "5.00001e+00") fail(`the trailer-less PARAM result was not read (got ${by("pr1")})`);
+    if (by("u1eff") !== "7.07107e+00") fail(`u1eff came back as ${by("u1eff")}`);
+    // The echoed netlist sits before the block header and must stay out of it.
+    if (m.some((x) => x.name === "T")) fail("`.param T=1ms` from the netlist echo was read as a measurement");
+  } },
+);
 
 export function runDcSweepTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];

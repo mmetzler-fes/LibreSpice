@@ -276,7 +276,35 @@ export function normalizeDcDirective(line: string): string {
 export function normalizeMeasDirective(line: string): string {
   if (!/^\s*\.meas\b/i.test(line)) return line;
   return expandDiffProbes(
-    line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
+    normalizeMeasParam(
+      line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
+    ),
+  );
+}
+
+/**
+ * `.meas TRAN P PARAM expr` → `.meas TRAN P PARAM='expr'`. LTSpice writes the
+ * expression straight after the keyword; ngspice answers
+ * "syntax error for measure statement; missing '='!" and reports the
+ * measurement as `failed`.
+ *
+ * The whole remainder is quoted because the expression may contain spaces
+ * (`PARAM a + b`). Measured against the engine, the `Ohm` suffix, the `**`
+ * operator and a reference to an earlier `.meas` result are all fine once the
+ * `=` is there — the missing sign was the only thing wrong with
+ * `.meas TRAN PR1 PARAM U1eff**2/10Ohm`.
+ */
+function normalizeMeasParam(line: string): string {
+  return line.replace(
+    /(\bparam\b)(\s*=\s*|\s+)(.+)$/i,
+    (whole, kw: string, sep: string, rest: string) => {
+      if (sep.includes("=")) return whole;               // already ngspice form
+      const expr = rest.trim();
+      if (!expr) return whole;
+      // A quoted or braced expression carries its own delimiters.
+      const wrapped = /^['"{].*['"}]$/.test(expr) ? expr : `'${expr}'`;
+      return `${kw}=${wrapped}`;
+    },
   );
 }
 

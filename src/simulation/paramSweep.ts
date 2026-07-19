@@ -232,8 +232,19 @@ export interface Measurement {
 /** Extract `.meas` results (`name = value from=/at= …`) from the ngspice log. */
 export function parseMeasurements(log: string): Measurement[] {
   const out: Measurement[] = [];
+  // Scoped to the block ngspice prints under "Measurements for …" rather than
+  // matched anywhere in the log. The trailer has to be optional — a `PARAM`
+  // measurement has no time window and prints a bare `pr1 = 5.00001e+00`, so
+  // requiring `from=`/`at=`/`to=` silently dropped exactly those results — and
+  // without the block boundary a bare `name = number` would also pick up the
+  // echoed netlist (`.param T=1ms`) and the option list.
+  let inBlock = false;
   for (const line of log.split(/\r?\n/)) {
-    const m = line.match(/^\s*(\w+)\s*=\s*([-+]?[\d.]+(?:e[-+]?\d+)?)\s+(?:from=|at=|to=)/i);
+    if (/^\s*Measurements for\b/i.test(line)) { inBlock = true; continue; }
+    if (!inBlock) continue;
+    // The block ends at the next banner (===== …) or section header.
+    if (/^\s*=====/.test(line)) { inBlock = false; continue; }
+    const m = line.match(/^\s*(\w+)\s*=\s*([-+]?[\d.]+(?:e[-+]?\d+)?)\s*(?:\s(?:from|at|to)=.*)?$/i);
     if (m) out.push({ name: m[1], value: m[2] });
   }
   return out;

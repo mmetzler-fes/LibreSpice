@@ -92,6 +92,26 @@ CASES.push(
     }
   } },
 
+  { name: ".meas PARAM gets the equals sign ngspice insists on", run: (fail) => {
+    // LTSpice writes `.meas TRAN P PARAM <expr>`; ngspice answers "syntax error
+    // for measure statement; missing '='!" and reports the measurement as
+    // `failed`. Isolated against the engine: the Ohm suffix, the ** operator and
+    // the reference to an earlier .meas result are all fine once the `=` is
+    // there — the sign was the only thing missing.
+    const cases: [string, string][] = [
+      [".meas TRAN PR1 PARAM U1eff**2/10Ohm", ".meas TRAN PR1 PARAM='U1eff**2/10Ohm'"],
+      [".meas TRAN P PARAM a + b", ".meas TRAN P PARAM='a + b'"],
+    ];
+    for (const [input, want] of cases) {
+      const got = normalizeMeasDirective(input);
+      if (got !== want) fail(`"${input}" became "${got}", expected "${want}"`);
+    }
+    // Already-correct forms must survive untouched, however they are delimited.
+    for (const line of [".meas TRAN PR1 PARAM='a/10'", ".meas TRAN P PARAM={a+b}", ".meas TRAN U1eff RMS V(U1)"]) {
+      if (normalizeMeasDirective(line) !== line) fail(`"${line}" was rewritten`);
+    }
+  } },
+
   { name: ".param already in ngspice form is left alone", run: (fail) => {
     // Rewriting an expression that merely contains spaces would corrupt it.
     const untouched = [".param ti=g*T/100", ".param a=1 b=2", ".param lonely"];
