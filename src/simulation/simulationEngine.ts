@@ -105,10 +105,13 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
   try {
     // A `.dc` with a `list` (or nested) second source can't run in ngspice, so
     // sweep it app-side: one `.dc <primary>` per secondary value, one curve each.
+    // Only a `.step` sweep produces a measurement-per-step curve; every other
+    // path clears a previous one rather than leaving it stranded.
     const dc = parseDcSweep(netlist);
-    if (dc) return await runDcSweep(netlist, dc, setLog);
+    if (dc) { useSimulationStore.getState().setMeasResult(null); return await runDcSweep(netlist, dc, setLog); }
 
     if (steps.length === 0 || steps.every((s) => s.values.length === 0)) {
+      useSimulationStore.getState().setMeasResult(null);
       // Strip any (unparseable) `.step` too — ngspice can't execute it.
       const nl = stripStepDirectives(netlist);
       const { result, log } = await runOnce(nl);
@@ -156,6 +159,11 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
     setProgress(null);
     const lastLog = runs[runs.length - 1]?.log ?? "";
     const paramName = steps.map((s) => s.name).join(", ");
+
+    // The `.meas` results as their own plot over the swept parameter. Set even
+    // when empty, so a re-run without measurements clears the previous one
+    // instead of leaving a stale curve on screen.
+    useSimulationStore.getState().setMeasResult(buildMeasurementSweep(runs, steps));
 
     // An `.op` run yields a single value per signal (no time/frequency axis). For
     // such a sweep the natural plot is the swept parameter on the x-axis and the
@@ -226,6 +234,67 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
     sim = null;
     throw new Error(`Simulation failed: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/**
+ * The `.meas` results of a swept run, as their own plot: one point per step,
+ * with the swept parameter on the x-axis.
+ *
+ * This is LTSpice's `.log.raw` window. It has to be a *separate* result rather
+ * than extra traces on the signal plot, because the two have incompatible x
+ * axes: a transient sweep of 101 steps carries ~1160 time points per step, while
+ * each measurement contributes a single number per step. One `SimulationResult`
+ * holds one x vector, so they cannot share it.
+ *
+ * Returns null when there is nothing to draw — no `.meas` at all, or a sweep so
+ * short that a "curve" would be a single point.
+ */
+export function buildMeasurementSweep(
+  runs: { combo: { assignments: { name: string; value: number }[] }; log: string }[],
+  steps: StepSpec[],
+): SimulationResult | null {
+  const first = steps[0];
+  if (!first || first.values.length < 2) return null;
+  const idxOf = new Map(first.values.map((v, i) => [v, i] as const));
+
+  const series = new Map<string, Float64Array>();
+  const outerTags: string[] = [];
+  let any = false;
+  for (const { combo, log } of runs) {
+    const fv = combo.assignments.find((a) => a.name === first.name)?.value;
+    const i = fv != null ? idxOf.get(fv) : undefined;
+    if (i == null) continue;
+    // Further stepped params fan out into separate curves, exactly as they do
+    // for the signal plot.
+    const outerTag = combo.assignments
+      .filter((a) => a.name !== first.name)
+      .map((a) => `${a.name}=${formatSpiceNumber(a.value)}`)
+      .join(" ");
+    if (outerTag && !outerTags.includes(outerTag)) outerTags.push(outerTag);
+    for (const m of parseMeasurements(log)) {
+      const key = outerTag ? `${m.name} @${outerTag}` : m.name;
+      let arr = series.get(key);
+      // A measurement that fails for some steps and succeeds for others leaves
+      // gaps rather than zeros, so the curve breaks instead of diving to 0.
+      if (!arr) { arr = new Float64Array(first.values.length).fill(NaN); series.set(key, arr); }
+      const v = Number(m.value);
+      if (isFinite(v)) { arr[i] = v; any = true; }
+    }
+  }
+  if (!any) return null;
+
+  const time = Float64Array.from(first.values);
+  const out: SimulationResult = {
+    variables: ["time"], data: { time }, time,
+    // `.step V1 …` sweeps a source and so carries its unit; `.step param g …`
+    // sweeps an arbitrary quantity whose unit the netlist cannot tell us.
+    xLabel: first.name, xUnit: first.isSource ? sourceUnit(first.name) : undefined,
+  };
+  for (const [k, arr] of series) { out.data[k] = arr; out.variables.push(k); }
+  if (outerTags.length > 0) {
+    out.step = { param: steps.slice(1).map((s) => s.name).join(", "), values: outerTags };
+  }
+  return out;
 }
 
 /**

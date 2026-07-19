@@ -1,4 +1,6 @@
 import { parseStepDirectives, isTempSweep, withTemp, withParam, withDcSource, parseMeasurements } from "../paramSweep.js";
+import { buildMeasurementSweep } from "../simulationEngine.js";
+import type { StepSpec } from "../paramSweep.js";
 import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
@@ -82,6 +84,72 @@ CASES.push(
     if (by("u1eff") !== "7.07107e+00") fail(`u1eff came back as ${by("u1eff")}`);
     // The echoed netlist sits before the block header and must stay out of it.
     if (m.some((x) => x.name === "T")) fail("`.param T=1ms` from the netlist echo was read as a measurement");
+  } },
+);
+
+/** A fake sweep log: the block ngspice prints, with the given values. */
+const measLog = (vals: Record<string, number | "failed">) =>
+  ["  Measurements for Transient Analysis", "",
+   ...Object.entries(vals).map(([n, v]) =>
+     `${n.padEnd(20)}= ${v === "failed" ? " failed" : `${v.toExponential(5)} from=  0.0 to=  4.0e-03`}`),
+  ].join("\n");
+
+const gStep: StepSpec = { name: "g", values: [0, 50, 100], isSource: false, truncated: false };
+const runsFor = (perStep: Record<string, number | "failed">[]) =>
+  perStep.map((vals, i) => ({ combo: { assignments: [{ name: "g", value: gStep.values[i] }] }, log: measLog(vals) }));
+
+CASES.push(
+  { name: "measurement sweep puts each .meas on the stepped parameter", run: (fail) => {
+    // The A08_PWM4 shape: u1eff rises as sqrt(duty), u1mittel linearly.
+    const r = buildMeasurementSweep(runsFor([
+      { u1mittel: 0, u1eff: 0.008 },
+      { u1mittel: 5, u1eff: 7.07107 },
+      { u1mittel: 9.99625, u1eff: 9.99875 },
+    ]), [gStep]);
+    if (!r) { fail("no measurement result was built"); return; }
+    if (r.xLabel !== "g") fail(`x-axis is "${r.xLabel}", expected the stepped param "g"`);
+    if (r.xUnit !== undefined) fail("a .step param has no knowable unit, so the axis must stay unitless");
+    if (![...r.time!].every((v, i) => v === gStep.values[i])) fail("the x values are not the step values");
+    const eff = r.data["u1eff"];
+    if (!eff) { fail("u1eff missing from the series"); return; }
+    if (Math.abs(eff[1] - 7.07107) > 1e-4) fail(`u1eff at g=50 is ${eff[1]}, expected 7.07107`);
+    if (r.data["u1mittel"]?.[2] === undefined) fail("u1mittel missing");
+  } },
+
+  { name: "a measurement that fails for some steps leaves gaps, not zeros", run: (fail) => {
+    // A zero would be plotted as a real reading and read as "the value dropped".
+    const r = buildMeasurementSweep(runsFor([
+      { pr1: "failed" }, { pr1: 5 }, { pr1: 10 },
+    ]), [gStep]);
+    if (!r) { fail("no result"); return; }
+    const pr1 = r.data["pr1"]!;
+    if (!Number.isNaN(pr1[0])) fail(`the failed step became ${pr1[0]}, expected NaN so the curve breaks`);
+    if (pr1[1] !== 5 || pr1[2] !== 10) fail("the surviving steps were not carried through");
+  } },
+
+  { name: "nothing to plot yields no measurement result at all", run: (fail) => {
+    // No .meas in the netlist: the scope must not offer an empty second view.
+    if (buildMeasurementSweep(runsFor([{}, {}, {}]), [gStep])) fail("a result was built from logs without measurements");
+    // A single step is a point, not a curve.
+    const one: StepSpec = { name: "g", values: [0], isSource: false, truncated: false };
+    const single = [{ combo: { assignments: [{ name: "g", value: 0 }] }, log: measLog({ u1eff: 1 }) }];
+    if (buildMeasurementSweep(single, [one])) fail("a one-step sweep produced a curve");
+  } },
+
+  { name: "a second stepped param fans the measurements into tagged curves", run: (fail) => {
+    const tStep: StepSpec = { name: "T", values: [1, 2], isSource: false, truncated: false };
+    const runs = [];
+    for (const T of tStep.values) for (const g of gStep.values) {
+      runs.push({ combo: { assignments: [{ name: "g", value: g }, { name: "T", value: T }] },
+                  log: measLog({ u1eff: g / 10 + T }) });
+    }
+    const r = buildMeasurementSweep(runs, [gStep, tStep]);
+    if (!r) { fail("no result"); return; }
+    const names = r.variables.filter((v) => v !== "time");
+    if (!names.some((n) => n.includes("@T=1")) || !names.some((n) => n.includes("@T=2"))) {
+      fail(`expected one curve per T, got: ${names.join(", ")}`);
+    }
+    if (r.step?.param !== "T") fail(`the outer step is reported as "${r.step?.param}", expected "T"`);
   } },
 );
 

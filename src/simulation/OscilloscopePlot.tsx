@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useCircuitStore } from "@store/circuitStore.js";
-import { canonicalProbe, dedupeProbes } from "@core/circuit/probeUtils.js";
+import { canonicalProbe, dedupeProbes, matchResultVariable } from "@core/circuit/probeUtils.js";
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
@@ -279,7 +279,13 @@ interface OscilloscopePlotProps {
 }
 
 export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
-  const { result, selectedVariables, toggleVariable, setSelectedVariables } = useSimulationStore();
+  const { result: signalResult, measResult, scopeView, setScopeView,
+    selectedVariables, toggleVariable, setSelectedVariables } = useSimulationStore();
+  // The scope draws one of two results. They cannot be merged: a transient sweep
+  // carries ~1000 time points per step while a measurement contributes a single
+  // number per step, and a result holds one x vector (see measResult).
+  const hasMeas = !!measResult;
+  const result = scopeView === "measurements" && measResult ? measResult : signalResult;
   const { autoProbeCurrent, toggleAutoProbeCurrent } = useUIStore();
   const analysisType = useCircuitStore((s) => s.simulationConfig.type);
   const circuitName = useCircuitStore((s) => s.circuitName);
@@ -337,8 +343,15 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     // Hidden functions stay in the list but aren't drawn.
     const shown = expressions.filter((e) => !hiddenExpressions.includes(e));
     const exprTraces = stepTags ? shown.flatMap((e) => stepTags.map((t) => `${e} @${t}`)) : shown;
-    return [...new Set([...selectedVariables, ...exprTraces])];
-  }, [selectedVariables, expressions, hiddenExpressions, stepTags]);
+    const known = new Set(result?.variables ?? []);
+    // Both views share one selection list, so filter it to what the shown result
+    // can actually resolve — otherwise switching to signals drags the
+    // measurement names along as empty traces, and back again.
+    const sel = known.size > 0
+      ? selectedVariables.filter((v) => known.has(v) || (result != null && matchResultVariable(result, [v]) !== null))
+      : selectedVariables;
+    return [...new Set([...sel, ...exprTraces])];
+  }, [selectedVariables, expressions, hiddenExpressions, stepTags, result]);
 
   // A stepped run tags every vector (`v(out) @1`), so both the plot and the
   // validation have to look at one step's view under the plain names.
@@ -640,6 +653,29 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       }}>
         <div style={{ padding: compact ? "6px 8px" : "10px 12px", borderBottom: `1px solid ${pt.border}`, background: pt.sidebarBg }}>
           <span style={{ fontSize: 10, fontWeight: 600, color: pt.heading, textTransform: "uppercase" }}>Probes</span>
+          {/* Only offered when the run actually produced measurements, so the
+              control does not sit there dead for the common single-run case. */}
+          {hasMeas && (
+            <div style={{ display: "flex", gap: 0, marginTop: 6, border: `1px solid ${pt.border}`, borderRadius: 4, overflow: "hidden" }}>
+              {([["signals", "Signale"], ["measurements", "Messwerte"]] as const).map(([view, label]) => (
+                <button
+                  key={view}
+                  onClick={() => setScopeView(view)}
+                  title={view === "measurements"
+                    ? "Die .meas-Ergebnisse über dem gestuften Parameter"
+                    : "Die simulierten Signale über der Zeit"}
+                  style={{
+                    flex: 1, padding: "3px 6px", fontSize: 10, cursor: "pointer", border: "none",
+                    background: scopeView === view ? pt.activeBg : "transparent",
+                    color: scopeView === view ? pt.heading : pt.textMuted,
+                    fontWeight: scopeView === view ? 600 : 400,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <label
             title="Add a component's current to the probes when you click it in the schematic"
             style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, cursor: "pointer", color: pt.textMuted, fontSize: 10 }}

@@ -41,6 +41,16 @@ export interface SimulationResult {
 interface SimulationState {
   status: SimulationStatus;
   result: SimulationResult | null;
+  /**
+   * The `.meas` results of a swept run, one point per step — LTSpice's
+   * `.log.raw` window. Kept apart from {@link result} rather than merged into
+   * it: a transient sweep carries ~1000 time points *per step*, a measurement a
+   * single number per step, and one result holds one x vector. Null whenever the
+   * run had no `.meas`, or no `.step` to plot them against.
+   */
+  measResult: SimulationResult | null;
+  /** Which of the two the scope is showing. */
+  scopeView: "signals" | "measurements";
   errorMessage: string | null;
   selectedVariables: string[];
   hoveredVariable: string | null;
@@ -55,6 +65,8 @@ interface SimulationState {
 interface SimulationActions {
   setStatus: (status: SimulationStatus) => void;
   setResult: (result: SimulationResult | null) => void;
+  setMeasResult: (result: SimulationResult | null) => void;
+  setScopeView: (view: "signals" | "measurements") => void;
   setErrorMessage: (msg: string | null) => void;
   setSelectedVariables: (vars: string[]) => void;
   toggleVariable: (variable: string) => void;
@@ -77,6 +89,8 @@ interface SimulationActions {
 export const useSimulationStore = create<SimulationState & SimulationActions>((set, get) => ({
   status: "idle",
   result: null,
+  measResult: null,
+  scopeView: "signals",
   errorMessage: null,
   selectedVariables: [],
   hoveredVariable: null,
@@ -155,6 +169,21 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   },
   setHoveredVariable: (hoveredVariable) => set({ hoveredVariable }),
   setLog: (log) => set({ log }),
+  /**
+   * Measurement traces are switched on as they arrive. Unlike signal probes,
+   * which the user picks deliberately, every `.meas` in the netlist was written
+   * *because* someone wanted that number — so the plot shows them all, the way
+   * LTSpice opens its log window with the lot.
+   */
+  setMeasResult: (measResult) => {
+    if (!measResult) { set({ measResult: null }); return; }
+    const names = measResult.variables.filter((v) => v !== "time");
+    set((s) => ({
+      measResult,
+      selectedVariables: [...new Set([...s.selectedVariables, ...names])],
+    }));
+  },
+  setScopeView: (scopeView) => set({ scopeView }),
   setProgress: (progress) => set({ progress }),
   renameNetVariable: (oldLabel, newLabel) => {
     if (oldLabel === newLabel) return;
@@ -174,6 +203,6 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
     });
   },
   loadProbes: (probes) =>
-    set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [...probes], log: "", progress: null }),
-  reset: () => set({ status: "idle", result: null, errorMessage: null, selectedVariables: [], pendingProbes: [], log: "", progress: null }),
+    set({ status: "idle", result: null, measResult: null, scopeView: "signals", errorMessage: null, selectedVariables: [], pendingProbes: [...probes], log: "", progress: null }),
+  reset: () => set({ status: "idle", result: null, measResult: null, scopeView: "signals", errorMessage: null, selectedVariables: [], pendingProbes: [], log: "", progress: null }),
 }));
