@@ -2,14 +2,19 @@
 // two places that actually ship them: `scripts/example-links.json` and the
 // landing page `site/index.html`.
 //
-// Why not bake them from the .asc files (see bake-example-links.mjs)? Because a
-// baked payload carries only the schematic. The links the user exports from the
-// running app also carry the diagram configuration and the active scope probes,
-// and those are the point — a link without them opens on an empty plot. The
-// `.plt` beside a circuit is not a substitute either: 05-1-2_Transistor2_2.plt
-// has no `Parametric:` line, while the exported payload does carry its V(C)
-// x-axis. So the scratchpad is the source of truth here, and this script only
-// transcribes it.
+// Why transcribe rather than generate the payloads from the .asc files? Because
+// a payload built from the schematic alone carries only the schematic. The links
+// exported from the running app also carry the diagram configuration and the
+// active scope probes, and those are the point — a link without them opens on an
+// empty plot. The `.plt` beside a circuit is not a substitute either:
+// 05-1-2_Transistor2_2.plt has no `Parametric:` line, while the exported payload
+// does carry its V(C) x-axis. So the scratchpad is the source of truth, and this
+// script only transcribes it.
+//
+// A `bake:examples` script used to generate them that way. It was removed: on
+// top of dropping the plot settings it rebuilt site/index.html from a template
+// of its own, which by then no longer had the page's quote, attribution or
+// licence notice — running it would have silently deleted all three.
 //
 // Scratchpad shape: `##` opens a section, `###` an entry, and the *last* `#z=…`
 // under an entry wins (the user pastes a fresh export below the old one, often
