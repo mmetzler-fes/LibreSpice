@@ -87,7 +87,7 @@ export interface ComponentNodeData {
  */
 function MovableLabel({
   nodeId, kind, base, offset, color, fontSize, fontWeight = 500, transform = "translate(-100%, -50%)",
-  maxOffset, style, children,
+  maxOffset, clampAround, style, children,
 }: {
   nodeId: string;
   kind: "label" | "value";
@@ -97,8 +97,16 @@ function MovableLabel({
   fontSize: number;
   fontWeight?: number;
   transform?: string;
-  /** Cap on how far the caption may be dragged from its default spot (flow px). */
+  /** Cap on how far the caption may be dragged (flow px). */
   maxOffset?: number;
+  /**
+   * Point the `maxOffset` circle is centred on, in the same node-local space as
+   * `base`. For a net terminal that is the docking point, not the caption's
+   * default spot: the tether belongs to the connection the name describes, so
+   * the reachable area stays the same however the default tag position moves.
+   * Omitted, the cap is measured from the default spot itself.
+   */
+  clampAround?: { x: number; y: number };
   /** Extra styling merged in (the net tags draw themselves as a boxed chip). */
   style?: React.CSSProperties;
   children: React.ReactNode;
@@ -123,8 +131,16 @@ function MovableLabel({
       // Keep the caption tethered: past the cap it slides along the circle of
       // that radius rather than stopping dead, so the drag still tracks.
       if (maxOffset !== undefined) {
-        const mag = Math.hypot(x, y);
-        if (mag > maxOffset) { x = (x / mag) * maxOffset; y = (y / mag) * maxOffset; }
+        // Measure from `clampAround` when given, so the circle is centred there
+        // and not on wherever the caption happens to start.
+        const cx = clampAround ? base.left + x - clampAround.x : x;
+        const cy = clampAround ? base.top + y - clampAround.y : y;
+        const mag = Math.hypot(cx, cy);
+        if (mag > maxOffset) {
+          const k = maxOffset / mag;
+          x += cx * (k - 1);
+          y += cy * (k - 1);
+        }
       }
       return { x, y };
     };
@@ -603,6 +619,7 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
         transform={tagBase.transform}
         offset={data.labelOffset}
         maxOffset={PX_PER_CM}
+        clampAround={{ x: c, y: c }}
         color={pal.netTagText}
         fontSize={11}
         style={{

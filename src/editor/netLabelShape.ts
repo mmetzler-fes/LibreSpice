@@ -68,9 +68,15 @@ export function netLabelShape(portType: PortType = "None"): NetLabelShape {
   if (portType === "Out" || portType === "BiDir") heads.push(arrowHead(ox, oy, dx, dy));
   if (portType === "In" || portType === "BiDir") heads.push(arrowHead(ix, iy, -dx, -dy));
 
-  // The tag sits to the right of the circle, clear of the upward arrow, and is
-  // always drawn upright for readability.
-  const tag = { x: C + R + 7, y: C, anchor: "start" as const, baseline: "middle" as const };
+  // The tag sits centred above the symbol — above the bare circle for a label,
+  // above the arrow tip for a connector, so it never overlaps either. Always
+  // drawn upright for readability.
+  const tag = {
+    x: C,
+    y: C - (portType === "None" ? R : LEN) - 7,
+    anchor: "middle" as const,
+    baseline: "bottom" as const,
+  };
 
   return {
     circle: { cx: C, cy: C, r: R },

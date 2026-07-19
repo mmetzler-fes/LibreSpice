@@ -134,6 +134,21 @@ CASES.push(
     if (counts.Out !== 1) fail(`Out drew ${counts.Out} arrowheads, expected 1`);
     if (counts.In !== 1) fail(`In drew ${counts.In} arrowheads, expected 1`);
     if (counts.BiDir !== 2) fail(`BiDir drew ${counts.BiDir} arrowheads, expected 2`);
+    // The tag sits above the symbol, and for a connector above the arrow tip —
+    // drawn at the label's spot it would land on top of the arrowhead.
+    const label = netLabelShape("None"), conn = netLabelShape("BiDir");
+    if (label.tag.anchor !== "middle" || label.tag.baseline !== "bottom") {
+      fail("the tag must be centred above the symbol");
+    }
+    if (!(label.tag.y < label.circle.cy - label.circle.r)) fail("the label tag overlaps its circle");
+    // The arrow runs up from the centre, so its tip is the smallest y it reaches.
+    const tipY = Math.min(conn.stem!.y1, conn.stem!.y2);
+    if (!(conn.tag.y < tipY)) fail(`the connector tag (y=${conn.tag.y}) is not clear of the arrow tip (y=${tipY})`);
+    // Both stay within the 1 cm the label may be dragged from the dock, or the
+    // default position would already sit outside its own tether.
+    const reach = Math.hypot(conn.tag.x - conn.circle.cx, conn.tag.y - conn.circle.cy);
+    if (reach > 96 / 2.54) fail(`the connector tag starts ${reach.toFixed(1)}px from the dock, past the 1 cm cap`);
+
     // In and Out point opposite ways, so their heads must not coincide.
     if (netLabelShape("In").heads[0] === netLabelShape("Out").heads[0]) {
       fail("In and Out drew the same arrowhead");
