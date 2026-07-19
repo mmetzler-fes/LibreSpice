@@ -112,6 +112,41 @@ const CASES: Case[] = [
   } },
 ];
 
+CASES.push(
+  { name: "output characteristics of 05-1-2_Transistor2 match the LTSpice reference", run: async (fail) => {
+    // The circuit that exposed the problem: `.dc V1 0 20 0.1  I1 list 1m…20m`
+    // over a 2N2222 with a 10 Ω collector resistor. Reference values read off a
+    // plot produced in LTSpice with its own 2N2222 model, at V1 = 20 V.
+    //
+    // What made this fail was a *missing* parameter, not a wrong one: the
+    // generic fallback `NPN(Bf=200 Is=1f Vaf=100)` carries no IKF, so hFE never
+    // rolls off at high current. Ic then rose to the load-line limit of
+    // V1/R1 = 2 A instead of the ~1 A the real device manages, and the top three
+    // curves collapsed onto each other.
+    const text = await shippedModels();
+    const ref: Record<string, number> = {
+      "1m": 0.150, "2m": 0.245, "3m": 0.320, "5m": 0.420,
+      "7m": 0.550, "10m": 0.640, "15m": 0.810, "20m": 0.950,
+    };
+    const d = await sim(
+      `* Transistor2\nQ1 C B 0 2N2222\nI1 0 B DC 5m\nR1 U1 C 10\nV1 U1 0 DC 10\n${text}\n` +
+      `.options savecurrents\n.dc V1 0V 20V 0.1V I1 list 1mA 2mA 3mA 5mA 7mA 10mA 15mA 20mA\n.end\n`,
+    );
+    const curves = Object.keys(d).filter((k) => k.includes("q1[ic]"));
+    if (curves.length !== 8) { fail(`expected 8 stepped curves, got ${curves.length}`); return; }
+    for (const key of curves) {
+      const ib = key.match(/I1=(\S+)$/)?.[1] ?? "";
+      const want = ref[ib];
+      if (want === undefined) { fail(`unexpected step tag in "${key}"`); continue; }
+      const got = last(d, key);
+      // 20 %: the reference is read off a plot, and the model is a fit.
+      if (off(got, want) > 0.2) {
+        fail(`Ic at Ib=${ib} is ${(got * 1e3).toFixed(0)} mA, LTSpice gives ${(want * 1e3).toFixed(0)} mA`);
+      }
+    }
+  } },
+);
+
 export async function runModelTests(): Promise<TestReport> {
   const failures: { name: string; reason: string }[] = [];
   let failed = 0;

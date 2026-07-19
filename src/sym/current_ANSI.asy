@@ -1,14 +1,14 @@
 Version 4
 SymbolType CELL
-CIRCLE Normal -30 10 30 70
-LINE Normal 0 0 0 10
-LINE Normal 0 70 0 80
-LINE Normal 0 24 0 46
-LINE Normal 0 56 -5 47
-LINE Normal 0 56 5 47
-LINE Normal -5 47 5 47
-WINDOW 0 34 24 Left 2
-WINDOW 3 34 56 Left 2
+CIRCLE Normal -24 16 24 64
+LINE Normal 0 0 0 16
+LINE Normal 0 64 0 80
+LINE Normal 0 26 0 44
+LINE Normal 0 54 -5 45
+LINE Normal 0 54 5 45
+LINE Normal -5 45 5 45
+WINDOW 0 28 26 Left 2
+WINDOW 3 28 54 Left 2
 SYMATTR Value I
 SYMATTR Prefix I
 SYMATTR Description Current source (ANSI), DC, AC, PULSE, SINE, PWL, EXP or SFFM

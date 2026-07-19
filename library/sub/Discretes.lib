@@ -31,6 +31,23 @@
 + CJC=8p MJC=0.4 VJC=0.7 CJE=30p MJE=0.4 VJE=0.7
 + TF=796p TR=20n XTB=1.5 EG=1.11)
 
+* 2N2222 / 2N2907 — dieselben Chips ohne das Suffix A. Die A-Varianten heben nur
+* die Sperrspannungen an (Vceo 40 statt 30 V bzw. -60 statt -40 V); das
+* Gummel-Poon-Modell bildet Durchbruch gar nicht ab, die Parameter sind also
+* identisch. Beide Schreibweisen sind noetig, weil LTSpice-Schaltplaene mal die
+* eine, mal die andere verwenden — examples/ nutzt durchweg die kurze.
+.model 2N2222 NPN (
++ IS=1e-14 BF=200 VAF=100 IKF=0.3 ISE=1e-14 NE=1.5
++ BR=3 VAR=20 IKR=0.1 ISC=0 NC=2 RB=10 RE=0.1 RC=0.3
++ CJC=8p MJC=0.33 VJC=0.75 CJE=25p MJE=0.33 VJE=0.75
++ TF=531p TR=10n XTB=1.5 EG=1.11)
+
+.model 2N2907 PNP (
++ IS=1e-14 BF=200 VAF=80 IKF=0.4 ISE=1.2e-14 NE=1.6
++ BR=4 VAR=30 IKR=0.15 ISC=0 NC=2 RB=12 RE=0.15 RC=0.6
++ CJC=8p MJC=0.4 VJC=0.7 CJE=30p MJE=0.4 VJE=0.7
++ TF=796p TR=20n XTB=1.5 EG=1.11)
+
 * 2N7002 — N-Kanal-MOSFET, Logikpegel-Schalter (Fairchild 2N7000/2N7002)
 * Datenblatt: Vgs(th) 1.0/2.1/2.5 V; Rds(on) typ 1.2 Ohm @ Vgs=10V/Id=500mA,
 *             typ 1.7 Ohm @ Vgs=5V/Id=50mA; Id 115 mA dauernd; Vdss = 60 V

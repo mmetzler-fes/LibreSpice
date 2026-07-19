@@ -137,11 +137,24 @@ export class BJT extends Semiconductor {
     return `${this.spiceRef("Q")} ${c} ${b} ${e} ${this.model}`;
   }
 
-  /** Generic BJT fallback matching the selected polarity. */
+  /**
+   * Generic BJT fallback, used when the model name is defined nowhere else (a
+   * freshly placed part, or a schematic naming a type we don't ship).
+   *
+   * Mirrors the general-purpose small-signal transistors in
+   * `library/sub/Discretes.lib` — a 2N2222 for NPN, a 2N2907 for PNP — because
+   * that is what an unqualified "transistor" in a teaching schematic means.
+   *
+   * `IKF` is the parameter that matters most here and the one the old
+   * three-parameter fallback lacked. Without it the current gain never rolls off
+   * at high collector current, so an output-characteristic sweep kept climbing
+   * until it hit the load line instead of flattening out near 1 A: with
+   * Ib = 20 mA it delivered 1.99 A where the real device manages 0.95 A.
+   */
   getModelDirective(): string | null {
     return this.type === "PNP"
-      ? `.model ${this.model} PNP(Bf=200 Is=1f Vaf=100)`
-      : `.model ${this.model} NPN(Bf=200 Is=1f Vaf=100)`;
+      ? `.model ${this.model} PNP(IS=1e-14 BF=200 VAF=80 IKF=0.4 ISE=1.2e-14 NE=1.6 BR=4 RB=12 RE=0.15 RC=0.6 CJC=8p CJE=30p TF=796p TR=20n XTB=1.5)`
+      : `.model ${this.model} NPN(IS=1e-14 BF=200 VAF=100 IKF=0.3 ISE=1e-14 NE=1.5 BR=3 RB=10 RE=0.1 RC=0.3 CJC=8p CJE=25p TF=531p TR=10n XTB=1.5)`;
   }
 
   getProperties(): Property[] {
@@ -192,11 +205,23 @@ export class MOSFET extends Semiconductor {
     return `${this.spiceRef("M")} ${d} ${g} ${s} ${b} ${this.model}`;
   }
 
-  /** Generic MOSFET fallback matching the selected polarity. */
+  /**
+   * Generic MOSFET fallback, mirroring the small-signal switches in
+   * `library/sub/Discretes.lib` — a 2N7002 for N-channel, a BSS84 for P-channel.
+   *
+   * The old `Kp=20u` was not merely imprecise: at Vgs = 5 V it passed 0.09 mA
+   * where a real 2N7002 passes ~155 mA, so nothing it switched could drive a
+   * load. `KP` and `RD`/`RS` here are the values fitted to the datasheet
+   * Rds(on) figures (see the shipped library and models.test).
+   *
+   * `KAPPA`, never `LAMBDA`: LAMBDA belongs to LEVEL 1, and in a LEVEL-3 model
+   * ngspice does not ignore it but exits with "strtod: Invalid argument", which
+   * reaches the user only as a run that never returns.
+   */
   getModelDirective(): string | null {
     return this.type === "PMOS"
-      ? `.model ${this.model} PMOS(Vto=-2 Kp=20u)`
-      : `.model ${this.model} NMOS(Vto=2 Kp=20u)`;
+      ? `.model ${this.model} PMOS(LEVEL=3 VTO=-1.4 KP=0.16 GAMMA=0.6 PHI=0.6 KAPPA=0.2 RD=3.5 RS=3.5 CBD=10p CBS=10p TOX=1e-7)`
+      : `.model ${this.model} NMOS(LEVEL=3 VTO=2.1 KP=0.4391 GAMMA=0.5 PHI=0.6 KAPPA=0.2 RD=0.45 RS=0.45 CBD=25p CBS=25p TOX=1e-7)`;
   }
 
   getProperties(): Property[] {
