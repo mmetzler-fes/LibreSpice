@@ -1,19 +1,20 @@
 Version 4
 SymbolType CELL
-LINE Normal 28 25 22 25
-LINE Normal 25 32 28 25
-LINE Normal 22 25 25 32
-LINE Normal 25 19 25 32
-LINE Normal 16 32 16 16
-LINE Normal 16 80 16 96
-ARC Normal 8 48 24 64 16 64 16 48
-ARC Normal 8 64 24 80 16 80 16 64
-ARC Normal 8 32 24 48 16 48 16 32
-WINDOW 0 36 44 Left 2
-WINDOW 3 36 71 Left 2
+LINE Normal 16 16 16 30
+LINE Normal 16 86 16 96
+ARC Normal 9 30 23 44 16 44 16 30
+ARC Normal 9 44 23 58 16 58 16 44
+ARC Normal 9 58 23 72 16 72 16 58
+ARC Normal 9 72 23 86 16 86 16 72
+LINE Normal 6 17 6 23
+LINE Normal 6 28 3 23
+LINE Normal 6 28 9 23
+LINE Normal 3 23 9 23
+WINDOW 0 30 44 Left 2
+WINDOW 3 30 70 Left 2
 SYMATTR Value L
 SYMATTR Prefix L
-SYMATTR Description Inductor  with visible current direction
+SYMATTR Description Inductor, with current-direction arrow
 PIN 16 16 NONE 0
 PINATTR PinName A
 PINATTR SpiceOrder 1

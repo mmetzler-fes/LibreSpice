@@ -1,23 +1,24 @@
 Version 4
 SymbolType CELL
-LINE Normal 48 48 48 96
-LINE Normal 16 80 48 80
-LINE Normal 40 48 48 48
-LINE Normal 16 48 40 44
-LINE Normal 16 48 40 52
-LINE Normal 40 44 40 52
-LINE Normal 16 8 16 24
-LINE Normal 16 40 16 56
-LINE Normal 16 72 16 88
-LINE Normal 0 80 8 80
-LINE Normal 8 16 8 80
-LINE Normal 48 16 16 16
-LINE Normal 48 0 48 16
-WINDOW 0 56 32 Left 2
-WINDOW 3 56 72 Left 2
+LINE Normal 0 80 6 80
+LINE Normal 6 14 6 82
+LINE Normal 18 10 18 26
+LINE Normal 18 38 18 58
+LINE Normal 18 70 18 86
+LINE Normal 18 18 48 18
+LINE Normal 48 0 48 18
+LINE Normal 18 78 48 78
+LINE Normal 48 78 48 96
+LINE Normal 48 48 48 78
+LINE Normal 42 48 48 48
+LINE Normal 18 48 40 43
+LINE Normal 18 48 40 53
+LINE Normal 40 43 40 53
+WINDOW 0 60 40 Left 2
+WINDOW 3 60 64 Left 2
 SYMATTR Value NMOS
 SYMATTR Prefix MN
-SYMATTR Description N-Channel MOSFET transistor
+SYMATTR Description MOSFET, N-channel
 PIN 48 0 NONE 0
 PINATTR PinName D
 PINATTR SpiceOrder 1

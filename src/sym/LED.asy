@@ -1,23 +1,23 @@
 Version 4
 SymbolType CELL
-LINE Normal 0 44 32 44
-LINE Normal 0 20 32 20
-LINE Normal 32 20 16 44
-LINE Normal 0 20 16 44
-LINE Normal 16 0 16 20
-LINE Normal 16 44 16 64
-LINE Normal 16 44 16 20
-LINE Normal 46 33 34 26
-LINE Normal 44 29 46 33
-LINE Normal 41 33 46 33
-LINE Normal 42 40 30 33
-LINE Normal 40 36 42 40
-LINE Normal 37 40 42 40
-WINDOW 0 24 0 Left 2
-WINDOW 3 24 64 Left 2
+LINE Normal 2 18 30 18
+LINE Normal 2 18 16 46
+LINE Normal 30 18 16 46
+LINE Normal 2 46 30 46
+LINE Normal 16 0 16 64
+LINE Normal 34 30 48 18
+LINE Normal 47 19 45 25
+LINE Normal 47 19 41 20
+LINE Normal 45 25 41 20
+LINE Normal 34 42 48 30
+LINE Normal 47 31 45 37
+LINE Normal 47 31 41 32
+LINE Normal 45 37 41 32
+WINDOW 0 34 22 Left 2
+WINDOW 3 34 44 Left 2
 SYMATTR Value D
 SYMATTR Prefix D
-SYMATTR Description Light Emitting Diode
+SYMATTR Description Light-emitting diode, IEC/EN
 PIN 16 0 NONE 0
 PINATTR PinName +
 PINATTR SpiceOrder 1

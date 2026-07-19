@@ -1,21 +1,21 @@
 Version 4
 SymbolType CELL
-LINE Normal 0 96 0 88
-LINE Normal 0 16 0 24
-LINE Normal 0 88 0 24
-LINE Normal 36 82 36 31
-LINE Normal 32 70 36 82
-LINE Normal 36 82 40 70
-LINE Normal 16 91 8 91
-LINE Normal 12 25 12 17
-LINE Normal 16 21 8 21
-LINE Normal 40 70 32 70
-CIRCLE Normal -31 25 31 87
-WINDOW 0 24 16 Left 2
-WINDOW 3 42 55 Left 2
+CIRCLE Normal -30 26 30 86
+LINE Normal 0 16 0 26
+LINE Normal 0 86 0 96
+LINE Normal 0 26 0 86
+LINE Normal 6 36 14 36
+LINE Normal 10 32 10 40
+LINE Normal 6 76 14 76
+LINE Normal 38 32 38 78
+LINE Normal 38 84 34 78
+LINE Normal 38 84 42 78
+LINE Normal 34 78 42 78
+WINDOW 0 44 40 Left 2
+WINDOW 3 44 68 Left 2
 SYMATTR Value V
 SYMATTR Prefix V
-SYMATTR Description ISO Voltage Source, either DC, AC, PULSE, SINE, PWL, EXP, or SFFM
+SYMATTR Description Voltage source (IEC/EN), DC, AC, PULSE, SINE, PWL, EXP or SFFM
 PIN 0 16 NONE 0
 PINATTR PinName +
 PINATTR SpiceOrder 1

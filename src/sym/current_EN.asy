@@ -1,18 +1,18 @@
 Version 4
 SymbolType CELL
-LINE Normal 11 16 8 9
-LINE Normal 11 16 14 9
-LINE Normal 14 9 8 9
-LINE Normal 0 80 0 74
-LINE Normal 0 0 0 18
-LINE Normal -28 46 28 46
-LINE Normal 11 3 11 9
-CIRCLE Normal 28 74 -28 18
-WINDOW 0 25 67 Left 2
-WINDOW 3 18 10 Left 2
+CIRCLE Normal -30 10 30 70
+LINE Normal 0 0 0 10
+LINE Normal 0 70 0 80
+LINE Normal -30 40 30 40
+LINE Normal 10 1 10 9
+LINE Normal 10 17 6 11
+LINE Normal 10 17 14 11
+LINE Normal 6 11 14 11
+WINDOW 0 34 24 Left 2
+WINDOW 3 34 56 Left 2
 SYMATTR Value I
 SYMATTR Prefix I
-SYMATTR Description EN/ISO current source with visible current direction, either DC, AC, PULSE, SINE, PWL, EXP, or SFFM
+SYMATTR Description Current source (IEC/EN), DC, AC, PULSE, SINE, PWL, EXP or SFFM
 PIN 0 0 NONE 0
 PINATTR PinName +
 PINATTR SpiceOrder 1

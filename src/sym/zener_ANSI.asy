@@ -1,18 +1,18 @@
 Version 4
 SymbolType CELL
-LINE Normal 0 44 -4 48
-LINE Normal 32 44 36 40
-LINE Normal 0 44 32 44
-LINE Normal 0 20 32 20
-LINE Normal 32 20 16 44
-LINE Normal 0 20 16 44
-LINE Normal 16 0 16 20
-LINE Normal 16 44 16 64
-WINDOW 0 24 0 Left 2
-WINDOW 3 24 64 Left 2
+LINE Normal 2 18 30 18
+LINE Normal 2 18 16 46
+LINE Normal 30 18 16 46
+LINE Normal 2 46 30 46
+LINE Normal 16 0 16 18
+LINE Normal 16 46 16 64
+LINE Normal 2 46 -2 50
+LINE Normal 30 46 34 42
+WINDOW 0 34 22 Left 2
+WINDOW 3 34 44 Left 2
 SYMATTR Value D
 SYMATTR Prefix D
-SYMATTR Description Zener Diode
+SYMATTR Description Zener diode, ANSI
 PIN 16 0 NONE 0
 PINATTR PinName +
 PINATTR SpiceOrder 1

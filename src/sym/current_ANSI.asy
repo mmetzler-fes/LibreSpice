@@ -1,17 +1,17 @@
 Version 4
 SymbolType CELL
-LINE Normal 0 56 4 44
-LINE Normal 0 56 -4 44
-LINE Normal -4 44 4 44
-LINE Normal 0 24 0 44
-LINE Normal 0 80 0 72
-LINE Normal 0 0 0 8
-CIRCLE Normal -32 8 32 72
-WINDOW 0 24 0 Left 2
-WINDOW 3 24 80 Left 2
+CIRCLE Normal -30 10 30 70
+LINE Normal 0 0 0 10
+LINE Normal 0 70 0 80
+LINE Normal 0 24 0 46
+LINE Normal 0 56 -5 47
+LINE Normal 0 56 5 47
+LINE Normal -5 47 5 47
+WINDOW 0 34 24 Left 2
+WINDOW 3 34 56 Left 2
 SYMATTR Value I
 SYMATTR Prefix I
-SYMATTR Description Current source, either DC, AC, PULSE, SINE, PWL, EXP, or SFFM
+SYMATTR Description Current source (ANSI), DC, AC, PULSE, SINE, PWL, EXP or SFFM
 PIN 0 0 NONE 0
 PINATTR PinName +
 PINATTR SpiceOrder 1

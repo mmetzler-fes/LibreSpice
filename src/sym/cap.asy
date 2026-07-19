@@ -1,18 +1,18 @@
 Version 4
 SymbolType CELL
-LINE Normal 16 35 16 64
-LINE Normal 16 29 16 0
-LINE Normal 0 29 32 29
-LINE Normal 0 35 32 35
-LINE Normal 26 16 20 16
-LINE Normal 23 23 26 16
-LINE Normal 20 16 23 23
-LINE Normal 23 7 23 23
-WINDOW 0 28 15 Left 2
-WINDOW 3 26 50 Left 2
+LINE Normal 16 0 16 30
+LINE Normal 16 38 16 64
+LINE Normal 1 30 31 30
+LINE Normal 1 38 31 38
+LINE Normal 9 4 9 10
+LINE Normal 9 15 6 10
+LINE Normal 9 15 12 10
+LINE Normal 6 10 12 10
+WINDOW 0 26 12 Left 2
+WINDOW 3 26 52 Left 2
 SYMATTR Value C
 SYMATTR Prefix C
-SYMATTR Description Capacitor with visible current direction
+SYMATTR Description Capacitor, with current-direction arrow
 PIN 16 0 NONE 0
 PINATTR PinName A
 PINATTR SpiceOrder 1

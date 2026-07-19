@@ -1,20 +1,17 @@
 Version 4
 SymbolType CELL
-LINE Normal 16 84 16 96
-LINE Normal 16 16 16 36
-LINE Normal 24 36 8 36
-LINE Normal 24 84 24 36
-LINE Normal 8 84 24 84
-LINE Normal 8 36 8 84
-LINE Normal 26 25 20 25
-LINE Normal 23 32 26 25
-LINE Normal 20 25 23 32
-LINE Normal 23 32 23 19
-WINDOW 0 27 44 Left 2
-WINDOW 3 27 75 Left 2
+LINE Normal 16 16 16 30
+LINE Normal 16 82 16 96
+RECTANGLE Normal 7 30 25 82
+LINE Normal 10 17 10 23
+LINE Normal 10 28 7 23
+LINE Normal 10 28 13 23
+LINE Normal 7 23 13 23
+WINDOW 0 30 44 Left 2
+WINDOW 3 30 70 Left 2
 SYMATTR Value R
 SYMATTR Prefix R
-SYMATTR Description A Resistor(European style graphic)
+SYMATTR Description Resistor, IEC/EN rectangular body, with current-direction arrow
 PIN 16 16 NONE 0
 PINATTR PinName A
 PINATTR SpiceOrder 1

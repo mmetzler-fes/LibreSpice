@@ -1,17 +1,18 @@
 Version 4
 SymbolType CELL
-LINE Normal 16 88 16 96
-LINE Normal 0 80 16 88
-LINE Normal 32 64 0 80
-LINE Normal 0 48 32 64
-LINE Normal 32 32 0 48
-LINE Normal 16 16 16 24
-LINE Normal 16 24 32 32
-WINDOW 0 36 40 Left 2
-WINDOW 3 36 76 Left 2
+LINE Normal 16 16 16 28
+LINE Normal 16 84 16 96
+LINE Normal 16 28 26 34
+LINE Normal 26 34 6 44
+LINE Normal 6 44 26 54
+LINE Normal 26 54 6 64
+LINE Normal 6 64 26 74
+LINE Normal 26 74 16 84
+WINDOW 0 32 42 Left 2
+WINDOW 3 32 74 Left 2
 SYMATTR Value R
 SYMATTR Prefix R
-SYMATTR Description A resistor
+SYMATTR Description Resistor, ANSI zigzag body
 PIN 16 16 NONE 0
 PINATTR PinName A
 PINATTR SpiceOrder 1

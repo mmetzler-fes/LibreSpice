@@ -1,17 +1,19 @@
 Version 4
 SymbolType CELL
-LINE Normal 44 76 36 84
-LINE Normal 64 96 44 76
-LINE Normal 64 96 36 84
-LINE Normal 40 80 16 64
-LINE Normal 16 80 16 16
-LINE Normal 16 32 64 0
-LINE Normal 16 48 0 48
-WINDOW 0 56 32 Left 2
-WINDOW 3 56 68 Left 2
+LINE Normal 18 20 18 76
+LINE Normal 0 48 18 48
+LINE Normal 18 36 64 6
+LINE Normal 64 6 64 0
+LINE Normal 18 60 64 90
+LINE Normal 64 90 64 96
+LINE Normal 55 84 41 80
+LINE Normal 55 84 46 73
+LINE Normal 41 80 46 73
+WINDOW 0 72 40 Left 2
+WINDOW 3 72 64 Left 2
 SYMATTR Value NPN
 SYMATTR Prefix QN
-SYMATTR Description Bipolar NPN transistor
+SYMATTR Description Bipolar junction transistor, NPN
 PIN 64 0 NONE 0
 PINATTR PinName C
 PINATTR SpiceOrder 1

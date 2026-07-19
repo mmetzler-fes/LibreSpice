@@ -1,16 +1,16 @@
 Version 4
 SymbolType CELL
-LINE Normal 16 36 16 64
-LINE Normal 16 0 16 28
-LINE Normal 8 12 8 20
-LINE Normal 4 16 12 16
-LINE Normal 0 28 32 28
-ARC Normal -16 36 48 100 32 40 0 40
-WINDOW 0 24 8 Left 2
-WINDOW 3 24 57 Left 2
+LINE Normal 16 0 16 30
+LINE Normal 16 40 16 64
+LINE Normal 2 30 30 30
+ARC Normal -12 34 44 90 30 42 2 42
+LINE Normal 6 10 6 18
+LINE Normal 2 14 10 14
+WINDOW 0 26 10 Left 2
+WINDOW 3 26 54 Left 2
 SYMATTR Value C
 SYMATTR Prefix C
-SYMATTR Description Polarized Capacitor
+SYMATTR Description Capacitor, polarised (electrolytic)
 PIN 16 0 NONE 0
 PINATTR PinName A
 PINATTR SpiceOrder 1

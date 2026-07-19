@@ -1,10 +1,11 @@
 Version 4
 SymbolType CELL
-ARC Normal 0 40 32 72 4 68 4 44
-ARC Normal 0 64 32 96 16 96 4 68
-ARC Normal 0 16 32 48 4 44 16 16
-WINDOW 0 36 40 Left 2
-WINDOW 3 36 80 Left 2
+ARC Normal 6 16 26 36 16 36 16 16
+ARC Normal 6 36 26 56 16 56 16 36
+ARC Normal 6 56 26 76 16 76 16 56
+ARC Normal 6 76 26 96 16 96 16 76
+WINDOW 0 32 42 Left 2
+WINDOW 3 32 74 Left 2
 SYMATTR Value L
 SYMATTR Prefix L
 SYMATTR Description Inductor
