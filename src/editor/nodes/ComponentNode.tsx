@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../../theme.js";
@@ -21,9 +21,11 @@ import {
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, PX_PER_CM, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
+import { NODE_SIZE, GRID, PX_PER_CM, rotatePoint, handleForOrder, getLocalPins, getNodePins } from "../pinGeometry.js";
 import type { PortType } from "@core/components/special/Special.js";
-import { netLabelShape } from "../netLabelShape.js";
+import { netLabelShape, tagTransform } from "../netLabelShape.js";
+import { terminalDirection } from "../netTerminalOrientation.js";
+import type { FlowPoint } from "../WireTool.js";
 import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
 
@@ -574,6 +576,45 @@ function AsyComponentNode({
 }
 
 /**
+ * The axis a net terminal's symbol should extend along: away from the wire
+ * attached to its dock, so the name never runs back across its own net.
+ *
+ * The far end of each wire is its first waypoint when it has one, otherwise the
+ * pin at the other end — the waypoint is what the wire's *first segment* aims
+ * at, which is the piece that actually leaves the dock.
+ */
+function useTerminalDirection(nodeId: string): FlowPoint {
+  const nodes = useCircuitStore((s) => s.nodes);
+  const edges = useCircuitStore((s) => s.edges);
+  const symbolNorm = useUIStore((s) => s.symbolNorm);
+
+  return useMemo(() => {
+    const self = nodes.find((n) => n.id === nodeId);
+    if (!self) return { x: 0, y: -1 };
+    const dock = { x: self.position.x + NODE_SIZE / 2, y: self.position.y + NODE_SIZE / 2 };
+
+    const pinAt = (id: string | null | undefined, handle: string | null | undefined) => {
+      const n = id ? nodes.find((x) => x.id === id) : undefined;
+      if (!n || !handle) return null;
+      return getNodePins(n, symbolNorm).find((p) => p.handleId === handle) ?? null;
+    };
+
+    const farEnds: FlowPoint[] = [];
+    for (const e of edges) {
+      const atSource = e.source === nodeId;
+      if (!atSource && e.target !== nodeId) continue;
+      const waypoints = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
+      // Waypoints are stored source → target, so walk them from our own end.
+      const first = atSource ? waypoints[0] : waypoints[waypoints.length - 1];
+      if (first) { farEnds.push(first); continue; }
+      const far = atSource ? pinAt(e.target, e.targetHandle) : pinAt(e.source, e.sourceHandle);
+      if (far) farEnds.push({ x: far.x, y: far.y });
+    }
+    return terminalDirection(dock, farEnds);
+  }, [nodes, edges, nodeId, symbolNorm]);
+}
+
+/**
  * Net-label terminal (LTSpice `FLAG name`) and net connector (`FLAG` + `IOPIN`):
  * a single connection point with the net name in a tag. Placing two with the
  * same name connects those nets.
@@ -582,6 +623,9 @@ function AsyComponentNode({
  * circle plus a name tag — differing only in the connector's direction arrow and
  * the tag tint that tells them apart at a glance. The port type drives the
  * arrow: `None` draws none, so a connector set to `None` looks like a label.
+ *
+ * Which way the symbol faces is recomputed from the wiring on every render
+ * rather than stored, the way LTSpice does it (see terminalDirection).
  */
 function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: ComponentNodeData; selected?: boolean }) {
   const c = NODE_SIZE / 2;
@@ -589,14 +633,13 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
   const name = data.label || (isConnector ? "PORT" : "NET");
   const pal = useTheme();
   const color = selected ? "#2563eb" : pal.netLabelStroke;
+  const dir = useTerminalDirection(nodeId);
   // A plain net label has no direction, so it always renders the `None` shape.
   const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
-  const shape = netLabelShape(portType);
+  const shape = netLabelShape(portType, dir);
   // Tag position mirrors netLabelShape's anchor/baseline (the Handle itself is
   // the hollow terminal circle, so we only draw the arrow + tag here).
-  const tagBase = shape.tag.baseline === "middle"
-    ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
-    : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
+  const tagBase = { left: shape.tag.x, top: shape.tag.y, transform: tagTransform(shape.tag) };
   return (
     <div
       draggable={false}

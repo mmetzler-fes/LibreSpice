@@ -4,6 +4,7 @@ import { pointAtT, projectToPolyline, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { netLabelShape } from "../netLabelShape.js";
+import { terminalDirection } from "../netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -152,6 +153,58 @@ CASES.push(
     // In and Out point opposite ways, so their heads must not coincide.
     if (netLabelShape("In").heads[0] === netLabelShape("Out").heads[0]) {
       fail("In and Out drew the same arrowhead");
+    }
+  } },
+);
+
+CASES.push(
+  { name: "a terminal faces away from the wire on its dock", run: (fail) => {
+    const dock = { x: 100, y: 100 };
+    const cases: [string, { x: number; y: number }, { x: number; y: number }][] = [
+      ["wire leaves right", { x: 180, y: 100 }, { x: -1, y: 0 }],
+      ["wire leaves left", { x: 20, y: 100 }, { x: 1, y: 0 }],
+      ["wire leaves down", { x: 100, y: 180 }, { x: 0, y: -1 }],
+      ["wire leaves up", { x: 100, y: 20 }, { x: 0, y: 1 }],
+      // A diagonal run snaps to its dominant axis, like every other wire here.
+      ["diagonal, mostly right", { x: 180, y: 120 }, { x: -1, y: 0 }],
+    ];
+    for (const [what, far, want] of cases) {
+      const got = terminalDirection(dock, [far]);
+      if (got.x !== want.x || got.y !== want.y) {
+        fail(`${what}: got (${got.x},${got.y}), expected (${want.x},${want.y})`);
+      }
+    }
+    // Nothing wired up yet: default upward, matching the placement ghost.
+    const bare = terminalDirection(dock, []);
+    if (bare.x !== 0 || bare.y !== -1) fail(`unwired terminal faced (${bare.x},${bare.y}), expected up`);
+    // A zero-length wire says nothing about direction and must be skipped, not
+    // taken as "no direction at all".
+    const degenerate = terminalDirection(dock, [{ ...dock }, { x: 20, y: 100 }]);
+    if (degenerate.x !== 1 || degenerate.y !== 0) fail("a coincident far end must be skipped, not decide the facing");
+  } },
+
+  { name: "LTSpice's own layout is reproduced (04-4_AstabileKippstufe1)", run: (fail) => {
+    // The four connectors in that example are *all* `In`, yet LTSpice draws two
+    // leftwards and two rightwards — proof the facing comes from the wiring, not
+    // the port type. Coordinates lifted verbatim from the FLAG/WIRE lines.
+    const cases: [string, { x: number; y: number }, { x: number; y: number }, number][] = [
+      // [name, dock (FLAG), far end of its wire, expected tag x-side]
+      ["Q1_C", { x: 160, y: 176 }, { x: 176, y: 176 }, -1], // wire right → tag left
+      ["Q2_C", { x: 640, y: 176 }, { x: 624, y: 176 }, +1], // wire left  → tag right
+      ["Q1_B", { x: 320, y: 288 }, { x: 304, y: 288 }, +1], // wire left  → tag right
+      ["Q2_B", { x: 480, y: 288 }, { x: 496, y: 288 }, -1], // wire right → tag left
+    ];
+    for (const [name, dock, far, side] of cases) {
+      const dir = terminalDirection(dock, [far]);
+      if (Math.sign(dir.x) !== side) {
+        fail(`${name}: symbol faces x=${dir.x}, expected ${side}`);
+        continue;
+      }
+      // The tag must hang off that same side, clear of the circle.
+      const shape = netLabelShape("In", dir);
+      const anchor = side < 0 ? "end" : "start";
+      if (shape.tag.anchor !== anchor) fail(`${name}: tag anchored "${shape.tag.anchor}", expected "${anchor}"`);
+      if (Math.sign(shape.tag.x - shape.circle.cx) !== side) fail(`${name}: tag sits on the wrong side of the dock`);
     }
   } },
 );

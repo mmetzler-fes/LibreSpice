@@ -2,7 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { SymbolPreview } from "./SymbolPreview.js";
 import { NODE_SIZE, snapToGrid } from "./pinGeometry.js";
-import { netLabelShape } from "./netLabelShape.js";
+import { netLabelShape, tagTransform } from "./netLabelShape.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
@@ -109,12 +109,15 @@ function NetLabelGhost({ portType = "None", name = "NET" }: {
   const shape = netLabelShape(portType);
   const c = NODE_SIZE / 2;
   const color = "#2563eb";
-  // The name tag is laid out exactly as NetLabelNode does it — same anchor, same
-  // box — so the preview and the connector that appears are the same picture; an
-  // SVG text drawn "roughly there" reads as a displaced label.
-  const tagStyle: React.CSSProperties = shape.tag.baseline === "middle"
-    ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
-    : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
+  // The name tag is laid out exactly as NetTerminalNode does it — same anchor,
+  // same box — so the preview and the terminal that appears are the same
+  // picture; an SVG text drawn "roughly there" reads as a displaced label.
+  //
+  // The ghost has no wire yet, so the shape falls back to its default (upward)
+  // direction; the placed terminal re-derives it from whatever it docks onto.
+  const tagStyle: React.CSSProperties = {
+    left: shape.tag.x, top: shape.tag.y, transform: tagTransform(shape.tag),
+  };
   return (
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE }}>
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color, display: "block" }}>

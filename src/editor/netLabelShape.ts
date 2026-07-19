@@ -1,5 +1,6 @@
 import { NODE_SIZE } from "./pinGeometry.js";
 import type { PortType } from "@core/components/special/Special.js";
+import type { FlowPoint } from "./WireTool.js";
 
 /** Local-space centre of the node box; the net-label terminal sits here. */
 const C = NODE_SIZE / 2;
@@ -14,21 +15,22 @@ export interface NetLabelShape {
    * `BiDir`, none for `None`.
    */
   heads: string[];
-  /** Anchor for the (always upright) name tag, placed clear of the arrow. */
-  tag: { x: number; y: number; anchor: "start" | "middle"; baseline: "middle" | "bottom" };
+  /**
+   * Anchor for the (always upright) name tag, placed clear of the symbol.
+   * `anchor`/`baseline` say which corner of the tag box the point refers to.
+   */
+  tag: {
+    x: number;
+    y: number;
+    anchor: "start" | "middle" | "end";
+    baseline: "top" | "middle" | "bottom";
+  };
 }
 
-/**
- * The arrow axis: straight up, out of the node centre.
- *
- * Fixed, not rotatable. LTSpice stores a flag as `FLAG x y name` (plus an
- * `IOPIN` for a connector) and records no orientation at all, so a turned symbol
- * could not survive a round-trip through `.asc` — the direction a connector
- * carries is its *port type*, not its angle.
- */
-const DX = 0, DY = -1;
-
 const R = 5, LEN = 24, HEAD_LEN = 8, HEAD_HALF = 4.5;
+
+/** Default direction: straight up, used when nothing is wired to the dock. */
+const UP: FlowPoint = { x: 0, y: -1 };
 
 /**
  * Triangle with its tip at (tx,ty) pointing along (dx,dy), as polygon points.
@@ -48,16 +50,19 @@ function arrowHead(tx: number, ty: number, dx: number, dy: number): string {
  * optional direction arrow, and a horizontally-readable name tag. Shared by the
  * editor node and the SVG export so the two look identical.
  *
- * The terminal sits at the node centre and the symbol has one fixed
- * orientation (see {@link DX}), so wiring — and `getLocalPins` — never has to
- * follow the drawing.
+ * The terminal stays at the node centre whichever way the symbol faces, so
+ * wiring — and `getLocalPins` — never has to follow the drawing.
+ *
+ * `dir` is the axis the symbol extends along, away from its wire (see
+ * {@link terminalDirection}); it is derived from the wiring at render time
+ * rather than stored, exactly as LTSpice does it.
  *
  * The four port types map to the four shapes the schematic needs: `None` is a
  * bare docking circle (a plain label), `Out` points away from the circle, `In`
  * points back into it, and `BiDir` carries a head at each end.
  */
-export function netLabelShape(portType: PortType = "None"): NetLabelShape {
-  const dx = DX, dy = DY;
+export function netLabelShape(portType: PortType = "None", dir: FlowPoint = UP): NetLabelShape {
+  const dx = dir.x, dy = dir.y;
 
   const gap = R + 1;
   // Inner end (just clear of the circle) and outer end of the arrow axis.
@@ -68,14 +73,17 @@ export function netLabelShape(portType: PortType = "None"): NetLabelShape {
   if (portType === "Out" || portType === "BiDir") heads.push(arrowHead(ox, oy, dx, dy));
   if (portType === "In" || portType === "BiDir") heads.push(arrowHead(ix, iy, -dx, -dy));
 
-  // The tag sits centred above the symbol — above the bare circle for a label,
-  // above the arrow tip for a connector, so it never overlaps either. Always
-  // drawn upright for readability.
+  // The tag sits just past the symbol along the same axis — past the bare circle
+  // for a label, past the arrow tip for a connector — so it never overlaps
+  // either, and always reads upright.
+  const reach = (portType === "None" ? R : LEN) + 7;
   const tag = {
-    x: C,
-    y: C - (portType === "None" ? R : LEN) - 7,
-    anchor: "middle" as const,
-    baseline: "bottom" as const,
+    x: C + dx * reach,
+    y: C + dy * reach,
+    // The tag box hangs off the side the symbol points away from, so it grows
+    // outward rather than back across the circle.
+    anchor: (dx > 0 ? "start" : dx < 0 ? "end" : "middle") as "start" | "middle" | "end",
+    baseline: (dy > 0 ? "top" : dy < 0 ? "bottom" : "middle") as "top" | "middle" | "bottom",
   };
 
   return {
@@ -83,5 +91,20 @@ export function netLabelShape(portType: PortType = "None"): NetLabelShape {
     stem: portType === "None" ? null : { x1: ix, y1: iy, x2: ox, y2: oy },
     heads,
     tag,
+  };
+}
+
+/** CSS `transform` that pins a tag box to its {@link NetLabelShape.tag} anchor. */
+export function tagTransform(tag: NetLabelShape["tag"]): string {
+  const tx = tag.anchor === "start" ? "0" : tag.anchor === "end" ? "-100%" : "-50%";
+  const ty = tag.baseline === "top" ? "0" : tag.baseline === "bottom" ? "-100%" : "-50%";
+  return `translate(${tx}, ${ty})`;
+}
+
+/** Top-left corner of a tag box of the given size at its anchor. */
+export function tagBoxOrigin(tag: NetLabelShape["tag"], width: number, height: number) {
+  return {
+    x: tag.x - (tag.anchor === "start" ? 0 : tag.anchor === "end" ? width : width / 2),
+    y: tag.y - (tag.baseline === "top" ? 0 : tag.baseline === "bottom" ? height : height / 2),
   };
 }

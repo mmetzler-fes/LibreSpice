@@ -3,7 +3,8 @@ import type { Node, Edge } from "@xyflow/react";
 import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
-import { netLabelShape } from "./netLabelShape.js";
+import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
+import { terminalDirection } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
 import { wireNameTag } from "./wireLabelShape.js";
@@ -45,7 +46,7 @@ function transformFor(rotation: number, mirrored: boolean, cx: number, cy: numbe
   return parts.length ? parts.join(" ") : undefined;
 }
 
-function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
+function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: FlowPoint }) {
   const data = node.data as ComponentNodeData;
   const type = data.componentType;
   const rotation = data.rotation ?? 0;
@@ -69,13 +70,12 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
     const isConnector = type === "netconnector";
     const name = data.label || (isConnector ? "PORT" : "NET");
     const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
-    const shape = netLabelShape(portType);
+    const shape = netLabelShape(portType, dir);
     const th = 16;
     const tagW = Math.max(20, name.length * 6.8 + 12);
     const off = data.labelOffset ?? { x: 0, y: 0 };
-    const rectX = (shape.tag.anchor === "start" ? shape.tag.x : shape.tag.x - tagW / 2) + off.x;
-    const rectY = (shape.tag.baseline === "middle" ? shape.tag.y - th / 2 : shape.tag.y - th) + off.y;
-    const textX = shape.tag.anchor === "start" ? rectX + 6 : shape.tag.x + off.x;
+    const origin = tagBoxOrigin(shape.tag, tagW, th);
+    const rectX = origin.x + off.x, rectY = origin.y + off.y;
     return (
       <g transform={`translate(${x} ${y})`}>
         {shape.stem && (
@@ -84,7 +84,7 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
         {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
         <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
         <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill={isConnector ? "#fde9c8" : "#e2e8f0"} stroke="#94a3b8" strokeWidth={1} />
-        <text x={textX} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor={shape.tag.anchor}>{name}</text>
+        <text x={rectX + tagW / 2} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor="middle">{name}</text>
       </g>
     );
   }
@@ -285,12 +285,36 @@ export function buildSchematicSvg(
     );
   });
 
+  // Which way each net terminal faces, from the wire attached to its dock — the
+  // same rule the editor node applies (see terminalDirection), so the exported
+  // sheet is laid out exactly like the one on screen.
+  const termDirs = new Map<string, FlowPoint>();
+  for (const n of nodes) {
+    const t = (n.data as ComponentNodeData).componentType;
+    if (t !== "netlabel" && t !== "netconnector") continue;
+    const dock = { x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 };
+    const farEnds: FlowPoint[] = [];
+    for (const e of edges) {
+      const atSource = e.source === n.id;
+      if (!atSource && e.target !== n.id) continue;
+      const wps = ((e.data as WireData | undefined)?.waypoints ?? []);
+      // Waypoints run source → target, so walk them from this terminal's end.
+      const first = atSource ? wps[0] : wps[wps.length - 1];
+      if (first) { farEnds.push(first); continue; }
+      const far = atSource
+        ? (e.target && e.targetHandle ? pinMap.get(`${e.target}-${e.targetHandle}`) : undefined)
+        : (e.source && e.sourceHandle ? pinMap.get(`${e.source}-${e.sourceHandle}`) : undefined);
+      if (far) farEnds.push(far);
+    }
+    termDirs.set(n.id, terminalDirection(dock, farEnds));
+  }
+
   const svg = (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${minX} ${minY} ${width} ${height}`}>
       <rect x={minX} y={minY} width={width} height={height} fill="#ffffff" />
       {wires}
       {labels}
-      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} />)}
+      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)} />)}
       {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>
   );
