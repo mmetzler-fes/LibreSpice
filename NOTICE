@@ -1,0 +1,50 @@
+LibreSpice
+Copyright (C) 2026 Martin Metzler
+
+Dieses Programm steht unter der GNU Affero General Public License, Version 3
+oder (nach Wahl) einer späteren Version. Der vollständige Lizenztext liegt in
+der Datei LICENSE. Es wird ohne jede Gewährleistung bereitgestellt.
+
+Diese Datei dokumentiert die Herkunft der mitgelieferten Bestandteile.
+
+
+1. Verhältnis zu LTspice
+------------------------
+
+LibreSpice liest und schreibt das Dateiformat von LTspice — Schaltpläne (.asc),
+Symbole (.asy) und Plot-Einstellungen (.plt) —, um mit vorhandenen Schaltplänen
+interoperabel zu sein. Dafür sind Bezeichner, Koordinatenkonventionen und
+Pin-Reihenfolgen dieses Formats nachgebildet.
+
+LibreSpice enthält keine Programmdateien, Symbolbibliotheken oder
+Modellbibliotheken von LTspice. Die mitgelieferten Symbole unter src/sym/ und
+library/sym/ sind eigene Zeichnungen. Übernommen sind aus dem Format allein die
+Pin-Positionen und SpiceOrder-Angaben, ohne die ein in LTspice gezeichneter
+Schaltplan nicht korrekt eingelesen werden könnte.
+
+LTspice ist eine Marke von Analog Devices, Inc. LibreSpice steht in keiner
+Verbindung zu Analog Devices und wird von dort weder unterstützt noch geprüft.
+
+
+2. Simulationskern
+------------------
+
+Die Simulation läuft über eecircuit-engine (MIT-Lizenz, Copyright (c) 2024
+EElab.dev), das ngspice als WebAssembly einbettet. ngspice geht auf SPICE3 der
+University of California, Berkeley zurück und steht unter einer BSD-artigen
+Lizenz.
+
+
+3. Bauteilmodelle
+-----------------
+
+Die im Programm hinterlegten .model-Zeilen (etwa für 2N2222 oder 1N4148) sind
+kurze Parametersätze der Art, wie Hersteller sie in Datenblättern
+veröffentlichen.
+
+
+4. Weitere Abhängigkeiten
+-------------------------
+
+Die verwendeten npm-Pakete stehen unter MIT, ISC beziehungsweise Apache-2.0.
+Ihre Lizenztexte liegen den Paketen selbst bei.

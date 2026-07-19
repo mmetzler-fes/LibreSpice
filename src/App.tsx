@@ -115,6 +115,47 @@ export function App() {
         {activeTab === "netlist" && <NetlistView />}
         {activeTab === "oscilloscope" && <OscilloscopeView />}
       </main>
+
+      {/* Urheber und Lizenz. Der Quelltext-Link ist nicht nur Höflichkeit: nach
+          §13 AGPL muss wer die Anwendung über ein Netz benutzt an ihren Quelltext
+          kommen, und ein Aufruf über einen Share-Link landet direkt hier, ohne
+          die Startseite je zu sehen. */}
+      <footer
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          height: 22,
+          flexShrink: 0,
+          borderTop: `1px solid ${theme.borderMuted}`,
+          background: theme.headerBg,
+          fontSize: 10.5,
+          color: theme.textMuted,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+        }}
+      >
+        <span>© 2026 Martin Metzler</span>
+        <span aria-hidden="true">·</span>
+        <a
+          href="https://www.gnu.org/licenses/agpl-3.0.html"
+          target="_blank"
+          rel="license noopener noreferrer"
+          style={{ color: "inherit" }}
+        >
+          GNU AGPL v3
+        </a>
+        <span aria-hidden="true">·</span>
+        <a
+          href="https://github.com/mmetzler-fes/LibreSpice"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "inherit" }}
+        >
+          Quelltext
+        </a>
+      </footer>
     </div>
   );
 }

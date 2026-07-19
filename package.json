@@ -14,7 +14,8 @@
     "test:editor": "node scripts/run-editor-tests.mjs",
     "bake:examples": "node scripts/bake-example-links.mjs"
   },
-  "author": "",
+  "author": "Martin Metzler",
+  "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@chakra-ui/react": "^3.0.0",
     "@emotion/react": "^11.14.0",
