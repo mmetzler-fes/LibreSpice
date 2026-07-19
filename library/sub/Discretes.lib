@@ -52,6 +52,14 @@
 * Datenblatt: Vgs(th) 1.0/2.1/2.5 V; Rds(on) typ 1.2 Ohm @ Vgs=10V/Id=500mA,
 *             typ 1.7 Ohm @ Vgs=5V/Id=50mA; Id 115 mA dauernd; Vdss = 60 V
 * Erreicht:   1.203 Ohm bzw. 1.700 Ohm — KP und RD/RS gemeinsam darauf gefittet
+* Gilt fuer den LINEAREN Bereich, in dem ein Schalter arbeitet. Im
+* Saettigungsbereich liefert das Modell rund den doppelten Strom: 5272 mA statt
+* der 2700 mA, die das Datenblatt als Id(ON) typ bei Vgs=10 V nennt. Bewusst so
+* belassen — die Bauteile werden hier als Schalter eingesetzt. Nicht per
+* Parameter reparierbar: THETA, VTO und VMAX wurden durchprobiert und bringen
+* zwischen -5 % und +16 %, weil THETA und VMAX ueber die Kanallaenge wirken, die
+* ohne explizites W/L auf 100 um steht. Es braeuchte eine Extraktion mit
+* gesetzter Geometrie ueber beide Bereiche.
 * KAPPA, nicht LAMBDA: LAMBDA gehoert zu LEVEL 1 und beendet ngspice bei
 * LEVEL 3 mit "strtod: Invalid argument" statt es zu ignorieren.
 .model 2N7002 NMOS (
