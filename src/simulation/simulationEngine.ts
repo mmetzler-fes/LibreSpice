@@ -4,7 +4,7 @@ import { useSimulationStore } from "@store/simulationStore.js";
 import { formatSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import {
   parseStepDirectives, stepCombinations, stripStepDirectives, withParam, parseMeasurements, type Measurement,
-  parseDcSweep, withDcSource, type DcSweep, type StepSpec,
+  parseDcSweep, withDcSource, isTempSweep, withTemp, type DcSweep, type StepSpec,
 } from "./paramSweep.js";
 import { splitMeasDirectives, evaluateMeasurements } from "./measure.js";
 
@@ -142,7 +142,9 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
       if (i > 0 && !(await yieldAndContinue())) break;
       const combo = combos[i];
       const nl = combo.assignments.reduce(
-        (acc, a) => (isSource.get(a.name) ? withDcSource(acc, a.name, a.value) : withParam(acc, a.name, a.value)),
+        (acc, a) => isTempSweep(a.name) ? withTemp(acc, a.value)
+          : isSource.get(a.name) ? withDcSource(acc, a.name, a.value)
+          : withParam(acc, a.name, a.value),
         base,
       );
       const { result, log } = await runOnce(nl);
@@ -195,6 +197,11 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
     // Time/frequency analyses: keep each combination as its own curve over the
     // shared x-axis, suffixing every signal with the combination tag.
     const merged: SimulationResult = { variables: [], data: {}, time: undefined, step: { param: paramName, values: [] } };
+    // A `.dc` run has no "time" variable — ngspice returns the swept source's
+    // value as the first vector and convertResult adopts it as the scale (and
+    // drops it as a signal). The axis still needs the source's own name and unit,
+    // which only the netlist knows.
+    const dcAxis = dcSweepAxis(base);
     for (const { combo, result } of runs) {
       merged.step!.values.push(combo.tag);
       if (!merged.time && result.time) {
@@ -203,8 +210,8 @@ export async function runSimulation(netlistIn: string): Promise<SimulationResult
         merged.variables.push("time");
         // Carry the x-axis labelling (e.g. frequency/Hz for `.ac`) onto the
         // merged sweep so its plot names the axis just like a single run.
-        merged.xLabel = result.xLabel;
-        merged.xUnit = result.xUnit;
+        merged.xLabel = dcAxis?.label ?? result.xLabel;
+        merged.xUnit = dcAxis?.unit ?? result.xUnit;
       }
       for (const v of result.variables) {
         if (v === "time" || v === "frequency") continue;
@@ -293,14 +300,13 @@ async function runDcSweep(netlist: string, dc: DcSweep, setLog: (s: string) => v
     lastLog = log;
     const tag = `${dc.secondary.name}=${formatSpiceNumber(value)}`;
     merged.step!.values.push(tag);
-    const xVar = result.variables[0]; // the `.dc` sweep vector (x-axis)
     if (!merged.time && result.time) {
       merged.time = result.time;
       merged.data["time"] = result.time;
       merged.variables.push("time");
     }
     for (const v of result.variables) {
-      if (v === xVar || v === "time" || v === "frequency") continue;
+      if (v === "time" || v === "frequency") continue;
       const key = `${v} @${tag}`;
       merged.data[key] = result.data[v];
       merged.variables.push(key);
@@ -339,8 +345,15 @@ function convertResult(result: ResultType): SimulationResult {
   // `v(xu1.ng)`, `i(@b.xu1.bout[i])`) — like LTSpice, only top-level nodes and
   // device currents are probeable. This also keeps the auto-probe and the (huge)
   // probe list meaningful when a macromodel has many internal parts.
-  const isAxis = (v: string) => v === "time" || v === "frequency";
-  const kept = variables.filter((v) => isAxis(v) || !v.includes("."));
+  // A `.dc` run has no "time" or "frequency" vector: ngspice returns the swept
+  // source's value as the first variable, under its own name (e.g. `v(v1)`), and
+  // `time` above adopts it as the scale. It is the x-axis, so it must not also be
+  // offered as a signal — plotted, it is just a diagonal line through the chart.
+  // Guarded on length, because an `.op` run has no axis at all and its first
+  // variable is a genuine (single-point) result.
+  const sweepAxis = !variables.includes("time") && !variables.includes("frequency")
+    && (time?.length ?? 0) > 1 ? variables[0] : null;
+  const kept = variables.filter((v) => !v.includes(".") && v !== sweepAxis);
   const keptData: Record<string, Float64Array> = {};
   for (const v of kept) if (data[v]) keptData[v] = data[v];
   if (time && !keptData["time"]) keptData["time"] = time;

@@ -185,6 +185,33 @@ export function withDcSource(netlist: string, name: string, value: number): stri
     .join("\n");
 }
 
+/**
+ * Is this `.step` name the simulation temperature rather than a source or a
+ * parameter? LTSpice treats `temp` as a reserved global, so `.step temp 0 100 10`
+ * sweeps the ambient temperature — with or without the `param` keyword.
+ *
+ * Without this it parses as a *source* named `temp` (no `param` keyword, see
+ * parseStepLine), and the substitution then matches no component line at all:
+ * every run would use the same default 27 °C and the sweep would draw a stack of
+ * identical curves.
+ */
+export function isTempSweep(name: string): boolean {
+  return /^temp$/i.test(name);
+}
+
+/**
+ * Set the simulation temperature, replacing any existing `.temp` line. ngspice
+ * takes it in °C, which is also what LTSpice's `.step temp` means.
+ */
+export function withTemp(netlist: string, value: number): string {
+  const lines = netlist.split(/\r?\n/).filter((l) => !/^\s*\.temp\b/i.test(l));
+  const tempLine = `.temp ${value}`;
+  const endIdx = lines.findIndex((l) => /^\s*\.end\s*$/i.test(l));
+  if (endIdx >= 0) lines.splice(endIdx, 0, tempLine);
+  else lines.push(tempLine);
+  return lines.join("\n");
+}
+
 /** Inject `.param NAME=value`, replacing any existing definition of NAME. */
 export function withParam(netlist: string, name: string, value: number): string {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

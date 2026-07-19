@@ -21,6 +21,7 @@ import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.t
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
 import { runTerminalCurrentTests } from "../../simulation/regression/terminalCurrent.test.js";
 import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasure.test.js";
+import { runDcSweepTests } from "../../simulation/regression/dcSweep.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -35,6 +36,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Long press", ...(await runLongPressTests()) },
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Plot settings (.plt)", ...runPlotSettingsTests() },
+    { name: "DC sweep + .step", ...runDcSweepTests() },
     { name: "Probe selection", ...runProbeSelectionTests() },
     { name: "Current measurements", ...runCurrentMeasureTests() },
     { name: "Terminal currents", ...runTerminalCurrentTests() },
