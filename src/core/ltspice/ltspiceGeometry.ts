@@ -82,8 +82,13 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   zener: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   schottky: [{ handle: "a", dx: 16, dy: 0 }, { handle: "k", dx: 16, dy: 64 }],
   vsource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
-  // LTSpice's current.asy puts "+" (SpiceOrder 1) at the bottom, "-" at the top.
-  isource: [{ handle: "p", dx: 0, dy: 80 }, { handle: "n", dx: 0, dy: 0 }],
+  // LTSpice's current.asy puts "+" (SpiceOrder 1) at the *top* (`PIN 0 0`) and
+  // "-" at the bottom (`PIN 0 80`) — same way round as its voltage source, and as
+  // our own current_ANSI.asy. Having it the other way round silently reversed
+  // every imported current source: a `.dc` over a base current then drove the
+  // current *out* of the base, so the transistor never turned on (Ib came back
+  // negative and the operating point ran away).
+  isource: [{ handle: "p", dx: 0, dy: 0 }, { handle: "n", dx: 0, dy: 80 }],
   sinesource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
   pulsesource: [{ handle: "p", dx: 0, dy: 16 }, { handle: "n", dx: 0, dy: 96 }],
   // BJT/MOSFET terminals as in LTSpice's npn/pnp/nmos/pmos symbols (origin at
