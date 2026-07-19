@@ -52,7 +52,9 @@ function parseMeasBody(body: string): Pick<MeasSpec, "fn" | "expr" | "target"> |
   const when = body.match(/^when\s+(.+?)\s*=\s*([^\s=]+)\s*$/i);
   if (when) return { fn: "when", expr: when[1].trim(), target: when[2].trim() };
 
-  const find = body.match(/^find\s+(.+?)\s+at\s+(\S+)\s*$/i);
+  // Both spellings: the netlist generator has already rewritten LTSpice's
+  // `AT 2ms` to ngspice's `at=2ms` by the time this sees the line.
+  const find = body.match(/^find\s+(.+?)\s+at\s*=?\s*(\S+)\s*$/i);
   if (find) return { fn: "find", expr: find[1].trim(), target: find[2].trim() };
 
   return null;

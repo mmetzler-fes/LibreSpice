@@ -177,7 +177,9 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
    */
   setMeasResult: (measResult) => {
     if (!measResult) { set({ measResult: null }); return; }
-    const names = measResult.variables.filter((v) => v !== "time");
+    // The swept parameter rides along as a trace but stays off: it is the x-axis
+    // drawn as a diagonal, and on a shared y-axis it would squash the readings.
+    const names = measResult.variables.filter((v) => v !== "time" && v !== measResult.xLabel);
     set((s) => ({
       measResult,
       selectedVariables: [...new Set([...s.selectedVariables, ...names])],

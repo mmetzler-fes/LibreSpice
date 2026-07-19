@@ -277,7 +277,9 @@ export function normalizeMeasDirective(line: string): string {
   if (!/^\s*\.meas\b/i.test(line)) return line;
   return expandDiffProbes(
     normalizeMeasParam(
-      line.replace(/\b(from|to)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
+      // `at` belongs here with `from`/`to`: LTSpice writes `FIND V(x) AT 2ms`,
+      // ngspice answers "bad syntax of WHEN" and fails the measurement.
+      line.replace(/\b(from|to|at)\s+([^\s]+)/gi, (_m, kw, val) => `${kw.toLowerCase()}=${val}`),
     ),
   );
 }

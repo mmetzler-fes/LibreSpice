@@ -106,6 +106,11 @@ CASES.push(
       const got = normalizeMeasDirective(input);
       if (got !== want) fail(`"${input}" became "${got}", expected "${want}"`);
     }
+    // `AT` needs the same sign: LTSpice writes `FIND V(x) AT 2ms`, ngspice
+    // answers "bad syntax of WHEN" and fails the measurement.
+    if (normalizeMeasDirective(".meas TRAN F FIND V(U1) AT 2ms") !== ".meas TRAN F FIND V(U1) at=2ms") {
+      fail(`FIND … AT was not rewritten: ${normalizeMeasDirective(".meas TRAN F FIND V(U1) AT 2ms")}`);
+    }
     // Already-correct forms must survive untouched, however they are delimited.
     for (const line of [".meas TRAN PR1 PARAM='a/10'", ".meas TRAN P PARAM={a+b}", ".meas TRAN U1eff RMS V(U1)"]) {
       if (normalizeMeasDirective(line) !== line) fail(`"${line}" was rewritten`);

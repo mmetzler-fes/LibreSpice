@@ -291,6 +291,16 @@ export function buildMeasurementSweep(
     xLabel: first.name, xUnit: first.isSource ? sourceUnit(first.name) : undefined,
   };
   for (const [k, arr] of series) { out.data[k] = arr; out.variables.push(k); }
+  // The swept parameter itself, as a trace — LTSpice shows it alongside the
+  // measurements. Offered but not switched on by default: it is the x-axis drawn
+  // as a diagonal, and since inferUnit() cannot tell these names apart it would
+  // share a y-axis with the measurements and flatten them (g runs 0…100 where
+  // the readings run 0…10). Tick it and drag it to a panel of its own for
+  // LTSpice's two-pane look. A measurement of the same name keeps the slot.
+  if (!out.data[first.name]) {
+    out.data[first.name] = Float64Array.from(first.values);
+    out.variables.push(first.name);
+  }
   if (outerTags.length > 0) {
     out.step = { param: steps.slice(1).map((s) => s.name).join(", "), values: outerTags };
   }
