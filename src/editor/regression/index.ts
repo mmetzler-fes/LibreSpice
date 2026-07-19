@@ -22,6 +22,7 @@ import { runProbeSelectionTests } from "../../simulation/regression/probeSelecti
 import { runTerminalCurrentTests } from "../../simulation/regression/terminalCurrent.test.js";
 import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasure.test.js";
 import { runDcSweepTests } from "../../simulation/regression/dcSweep.test.js";
+import { runModelTests } from "../../simulation/regression/models.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -37,6 +38,8 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Plot settings (.plt)", ...runPlotSettingsTests() },
     { name: "DC sweep + .step", ...runDcSweepTests() },
+    // Runs every shipped .model through ngspice — a wrong-class parameter kills it.
+    { name: "Shipped device models", ...(await runModelTests()) },
     { name: "Probe selection", ...runProbeSelectionTests() },
     { name: "Current measurements", ...runCurrentMeasureTests() },
     { name: "Terminal currents", ...runTerminalCurrentTests() },

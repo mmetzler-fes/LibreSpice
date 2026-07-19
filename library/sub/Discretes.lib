@@ -1,0 +1,52 @@
+* LibreSpice — Standardmodelle fuer diskrete Halbleiter
+*
+* Die Parameter sind gegen die Datenblattwerte der jeweiligen Hersteller
+* gefittet und per Simulation nachgeprueft; die erreichten Werte stehen als
+* Kommentar am Modell. Es sind Naeherungen fuer Lehr- und Anschauungszwecke,
+* keine vom Hersteller herausgegebenen Modelle.
+*
+* Nachgerechnet wird das von src/simulation/regression/models.test.ts — dieser
+* Test schickt jedes Modell durch ngspice und prueft die Eckwerte, damit weder
+* ein Zahlendreher noch ein fuer die Modellklasse unzulaessiger Parameter
+* unbemerkt hineinrutscht.
+
+* 2N2222A — NPN, Kleinsignal-Schalttransistor (onsemi P2N2222A)
+* Datenblatt: hFE 75..300 @ Ic=10mA, 100..300 @ Ic=150mA; Vce(sat) <= 0.3 V
+*             @ Ic=150mA/Ib=15mA; fT = 300 MHz; Cobo = 8 pF; Vceo = 40 V
+* Erreicht:   hFE 201 @ 10 mA, 153 @ 115 mA; Vce(sat) = 0.118 V
+* TF = 1/(2*pi*fT) = 531 ps
+.model 2N2222A NPN (
++ IS=1e-14 BF=200 VAF=100 IKF=0.3 ISE=1e-14 NE=1.5
++ BR=3 VAR=20 IKR=0.1 ISC=0 NC=2 RB=10 RE=0.1 RC=0.3
++ CJC=8p MJC=0.33 VJC=0.75 CJE=25p MJE=0.33 VJE=0.75
++ TF=531p TR=10n XTB=1.5 EG=1.11)
+
+* 2N2907A — PNP, Gegenstueck zum 2N2222A (onsemi 2N2907A)
+* Datenblatt: hFE 100..300 @ Ic=-150mA; fT = 200 MHz; Cobo = 8 pF; Vceo = -60 V
+* Erreicht:   hFE 212 @ 10 mA, 168 @ 126 mA; Vce(sat) = 0.163 V
+* TF = 1/(2*pi*fT) = 796 ps
+.model 2N2907A PNP (
++ IS=1e-14 BF=200 VAF=80 IKF=0.4 ISE=1.2e-14 NE=1.6
++ BR=4 VAR=30 IKR=0.15 ISC=0 NC=2 RB=12 RE=0.15 RC=0.6
++ CJC=8p MJC=0.4 VJC=0.7 CJE=30p MJE=0.4 VJE=0.7
++ TF=796p TR=20n XTB=1.5 EG=1.11)
+
+* 2N7002 — N-Kanal-MOSFET, Logikpegel-Schalter (Fairchild 2N7000/2N7002)
+* Datenblatt: Vgs(th) 1.0/2.1/2.5 V; Rds(on) typ 1.2 Ohm @ Vgs=10V/Id=500mA,
+*             typ 1.7 Ohm @ Vgs=5V/Id=50mA; Id 115 mA dauernd; Vdss = 60 V
+* Erreicht:   1.203 Ohm bzw. 1.700 Ohm — KP und RD/RS gemeinsam darauf gefittet
+* KAPPA, nicht LAMBDA: LAMBDA gehoert zu LEVEL 1 und beendet ngspice bei
+* LEVEL 3 mit "strtod: Invalid argument" statt es zu ignorieren.
+.model 2N7002 NMOS (
++ LEVEL=3 VTO=2.1 KP=0.4391 GAMMA=0.5 PHI=0.6 KAPPA=0.2
++ RD=0.45 RS=0.45 CGSO=1n CGDO=0.35n CGBO=0.1n
++ CBD=25p CBS=25p TOX=1e-7 TPG=1)
+
+* BSS84 — P-Kanal-MOSFET (onsemi/Diodes BSS84)
+* Datenblatt: Vgs(th) bis -2 V; Rds(on) 8 Ohm @ Vgs=-10V/Id=-150mA,
+*             9.9 Ohm @ Vgs=-4.5V; Id -130 mA dauernd; Vdss = -50 V
+* Erreicht:   7.798 Ohm bzw. 9.900 Ohm
+.model BSS84 PMOS (
++ LEVEL=3 VTO=-1.4 KP=0.16 GAMMA=0.6 PHI=0.6 KAPPA=0.2
++ RD=3.5 RS=3.5 CGSO=1.2n CGDO=0.35n CGBO=0.1n
++ CBD=10p CBS=10p TOX=1e-7 TPG=1)

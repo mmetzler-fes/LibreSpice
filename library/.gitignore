@@ -9,4 +9,5 @@
 
 # --- curated defaults (tracked) ---
 !/sub/UniversalOpAmp2.lib
+!/sub/Discretes.lib
 !/sym/OpAmps/
