@@ -3,7 +3,7 @@ import { Capacitor } from "@core/components/passives/Capacitor.js";
 import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, LED, Zener, Schottky, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
-import { Ground, OpAmp, CustomSubcircuit, NetLabel } from "@core/components/special/Special.js";
+import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector } from "@core/components/special/Special.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
@@ -35,6 +35,7 @@ export function createSpiceComponent(
     case "pulsesource": return new PulseSource(id, label, pos);
     case "ground":      return new Ground(id, pos);
     case "netlabel":    return new NetLabel(id, label, pos);
+    case "netconnector": return new NetConnector(id, label, pos);
     case "subcircuit":  return new CustomSubcircuit(id, label, pos);
     default:            return new Resistor(id, label, pos);
   }
@@ -62,8 +63,19 @@ const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
   zener: "D", schottky: "D", opamp: "U",
   bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
-  netlabel: "NET", subcircuit: "X",
+  netlabel: "NET", netconnector: "PORT", subcircuit: "X",
 };
+
+/**
+ * Is this id a net terminal (net label or net connector) rather than a device?
+ * Both only name their net and emit no netlist line, so anything looking for a
+ * *real* component pin has to skip them. Imported connectors keep the
+ * `netlabel_` id they were created with before their IOPIN was seen, so both
+ * prefixes count.
+ */
+export function isNetTerminalId(id: string): boolean {
+  return id.startsWith("netlabel_") || id.startsWith("netconnector_");
+}
 
 /** Reference-designator prefix for a component type (e.g. resistor → "R"). */
 export function labelPrefix(type: ComponentType): string {

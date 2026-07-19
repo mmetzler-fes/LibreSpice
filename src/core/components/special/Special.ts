@@ -67,6 +67,66 @@ export class NetLabel extends SpiceComponent {
 }
 
 /**
+ * Port type of a net connector, spelled exactly as LTSpice writes it in an
+ * `IOPIN` line. `None` has no `IOPIN` at all — it is a bare `FLAG`, LTSpice's
+ * "Port Type: None" — so the value doubles as the export mapping.
+ */
+export type PortType = "None" | "In" | "Out" | "BiDir";
+
+export const PORT_TYPES: PortType[] = ["None", "In", "Out", "BiDir"];
+
+/**
+ * Net connector (LTSpice `FLAG name` + `IOPIN x y In|Out|BiDir`): a net label
+ * that additionally declares the net as an interface to the outside, so it
+ * becomes a pin when the sheet is used as a subcircuit.
+ *
+ * Electrically identical to a {@link NetLabel} — it names its net and nothing
+ * else — but kept as its own component because LTSpice stores the two
+ * differently, and because it carries a direction the label does not.
+ */
+export class NetConnector extends SpiceComponent {
+  portType: PortType;
+
+  constructor(id: string, label: string, position?: Point, portType: PortType = "BiDir") {
+    super(id, label || "PORT", position);
+    this.portType = portType;
+  }
+
+  protected createPorts(): Port[] {
+    return [new Port(`${this.id}-t`, "t", { x: 0, y: 0 })];
+  }
+
+  getNetlistLine(): string {
+    return "";
+  }
+
+  getNetLabel(): string | null {
+    const name = this.label.trim();
+    return name ? name : null;
+  }
+
+  getProperties(): Property[] {
+    return [
+      { key: "label", label: "Net name", value: this.label, type: "string" },
+      { key: "portType", label: "Port type", value: this.portType, type: "select", options: PORT_TYPES },
+    ];
+  }
+
+  setProperty(key: string, value: string | number): void {
+    if (key === "label") this.label = String(value);
+    else if (key === "portType" && PORT_TYPES.includes(value as PortType)) {
+      this.portType = value as PortType;
+    }
+  }
+
+  clone(): NetConnector {
+    const n = new NetConnector(this.id, this.label, { ...this.position }, this.portType);
+    n.rotation = this.rotation;
+    return n;
+  }
+}
+
+/**
  * Five-terminal operational amplifier backed by the LTSpice UniversalOpAmp2
  * symbol. Emits an `X` subcircuit call; the referenced model must be available
  * (e.g. imported via the library) for the circuit to simulate.

@@ -1,16 +1,21 @@
 import type { Edge, Node } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
-import { pointAtT, projectToPolyline, ARROW_ORDER, type FlowPoint } from "../WireTool.js";
+import { pointAtT, projectToPolyline, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
-import { createSpiceComponent, nextComponentId } from "../componentFactory.js";
+import { netLabelShape } from "../netLabelShape.js";
+import type { PortType } from "@core/components/special/Special.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
- * Wire-based net label / connector. The label and the connector symbol now live
- * on the wire edge (visible / connector / arrowDir in `edge.data`) instead of on
- * a separate node, so the geometry that slides the label along the wire and the
- * store logic that rotates the connector must stay correct.
+ * Net names on wires, and the net connector.
+ *
+ * A wire carries only a *name* (`showLabel` / `labelT` / `labelOffset` in
+ * `edge.data`), so the geometry that slides that name along the wire must stay
+ * correct. Ports are not wire attributes: a net connector is its own node,
+ * stored the way LTSpice stores it — a `FLAG` plus an `IOPIN x y In|Out|BiDir`
+ * at the same point — so the round-trip through `.asc` is the other half of what
+ * is covered here.
  */
 
 type Case = { name: string; run: (fail: (r: string) => void) => void };
@@ -41,32 +46,13 @@ const CASES: Case[] = [
     if (!near(p.x, want.x) || !near(p.y, want.y)) fail(`round-trip drifted to (${p.x},${p.y})`);
   } },
 
-  { name: "Ctrl-R rotates a selected connector wire's arrow, not a component", run: (fail) => {
-    const store = useCircuitStore.getState();
-    store.clearCircuit();
-    const edge: Edge = {
-      id: "wire_test", source: "a", sourceHandle: "p", target: "b", targetHandle: "n",
-      type: "wire", selected: true, data: { waypoints: [], connector: true, arrowDir: "up" },
-    };
-    store.setEdges([edge]);
-    for (let i = 1; i < ARROW_ORDER.length; i++) {
-      useCircuitStore.getState().rotateSelected();
-      const dir = (useCircuitStore.getState().edges[0].data as { arrowDir?: string }).arrowDir;
-      if (dir !== ARROW_ORDER[i]) { fail(`after ${i} rotations arrowDir=${dir}, expected ${ARROW_ORDER[i]}`); return; }
-    }
-    // One more wraps back to the first direction.
-    useCircuitStore.getState().rotateSelected();
-    const wrapped = (useCircuitStore.getState().edges[0].data as { arrowDir?: string }).arrowDir;
-    if (wrapped !== ARROW_ORDER[0]) fail(`arrow did not wrap: got ${wrapped}, expected ${ARROW_ORDER[0]}`);
-  } },
-
   { name: "updateEdgeData patches only the target edge and is undoable", run: (fail) => {
     const store = useCircuitStore.getState();
     store.clearCircuit();
     store.setEdges([
       { id: "w1", source: "a", sourceHandle: "p", target: "b", targetHandle: "n", type: "wire", data: { waypoints: [] } },
       { id: "w2", source: "c", sourceHandle: "p", target: "d", targetHandle: "n", type: "wire", data: { waypoints: [] } },
-    ]);
+    ] as Edge[]);
     useCircuitStore.getState().updateEdgeData("w1", { showLabel: true, labelT: 0.3 });
     const [w1, w2] = useCircuitStore.getState().edges;
     if (!(w1.data as { showLabel?: boolean }).showLabel) fail("w1 did not receive showLabel");
@@ -76,94 +62,82 @@ const CASES: Case[] = [
   } },
 ];
 
-CASES.push(
-  { name: "netlabel connector round-trips as FLAG + IOPIN", run: (fail) => {
-    // A connector net-label node must export a FLAG *and* an IOPIN (LTSpice's
-    // port), and re-import as a connector again.
-    const nodes: Node[] = [
-      { id: "netlabel_0", type: "component", position: { x: 100, y: 100 },
-        data: { componentType: "netlabel", label: "OUT", connector: true } },
-    ];
-    const asc = LTSpiceExporter.export(nodes, [], "", { components: new Map(), nets: new Map() }, []);
-    if (!/FLAG\s+\d+\s+\d+\s+OUT/.test(asc)) fail(`no FLAG OUT in export:\n${asc}`);
-    if (!/IOPIN\s+\d+\s+\d+\s+BiDir/.test(asc)) fail(`no IOPIN in export:\n${asc}`);
-    const back = LTSpiceParser.parse(asc);
-    const nl = back.nodes.find((n) => (n.data as { label?: string }).label === "OUT");
-    if (!nl) { fail("net label OUT did not re-import"); return; }
-    if (!(nl.data as { connector?: boolean }).connector) fail("connector flag lost on re-import");
-  } },
-
-  { name: "plain netlabel exports a FLAG but no IOPIN", run: (fail) => {
-    const nodes: Node[] = [
-      { id: "netlabel_0", type: "component", position: { x: 100, y: 100 },
-        data: { componentType: "netlabel", label: "SIG", connector: false } },
-    ];
-    const asc = LTSpiceExporter.export(nodes, [], "", { components: new Map(), nets: new Map() }, []);
-    if (!/FLAG\s+\d+\s+\d+\s+SIG/.test(asc)) fail(`no FLAG SIG:\n${asc}`);
-    if (/IOPIN/.test(asc)) fail(`plain label must not write IOPIN:\n${asc}`);
-    const back = LTSpiceParser.parse(asc);
-    const nl = back.nodes.find((n) => (n.data as { label?: string }).label === "SIG");
-    if (nl && (nl.data as { connector?: boolean }).connector) fail("plain label came back as a connector");
-  } },
-);
-
-// Build R1—R2 joined by one wire, return the store, the wire id and the net id.
-function twoResistorNet() {
-  const store = useCircuitStore.getState();
-  store.clearCircuit();
-  const mk = (label: string, x: number) => {
-    const id = nextComponentId("resistor", useCircuitStore.getState().nodes.map((n) => n.id));
-    store.addComponent(createSpiceComponent("resistor", id, label, x, 0),
-      { id, type: "component", position: { x, y: 0 }, data: { componentType: "resistor", label } });
-    return id;
-  };
-  const r1 = mk("R1", 0);
-  const r2 = mk("R2", 160);
-  store.setEdges([{ id: "w_conn", source: r1, sourceHandle: "n", target: r2, targetHandle: "p", type: "wire", data: { waypoints: [] } }]);
-  store.rebuildConnections();
-  const netId = useCircuitStore.getState().circuit.components.get(r1)!.ports.find((p) => p.id === `${r1}-n`)!.netId!;
-  return { netId };
+/** One net-connector node at a fixed point, with the given port type. */
+function connectorNodes(label: string, portType: PortType): Node[] {
+  return [
+    { id: "netconnector_0", type: "component", position: { x: 100, y: 100 },
+      data: { componentType: "netconnector", label, portType } },
+  ];
 }
 
+const emptyCircuit = { components: new Map(), nets: new Map() };
+
 CASES.push(
-  { name: "a differing connector name and wire name export as two aliased FLAGs", run: (fail) => {
-    // LTSpice: FLAG <connector name> + IOPIN at the port, and a second FLAG with
-    // the wire's own net name elsewhere on the net.
-    const { netId } = twoResistorNet();
-    useCircuitStore.getState().renameNet(netId, "A");
-    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true, connectorLabel: "B" });
-    const st = useCircuitStore.getState();
-    const asc = LTSpiceExporter.export(st.nodes, st.edges, "", st.circuit, st.dataFlags);
-    if (!/^FLAG\s+-?\d+\s+-?\d+\s+B$/m.test(asc)) fail(`connector FLAG "B" missing:\n${asc}`);
-    if (!/^IOPIN\s+-?\d+\s+-?\d+\s+BiDir$/m.test(asc)) fail(`IOPIN missing:\n${asc}`);
-    if (!/^FLAG\s+-?\d+\s+-?\d+\s+A$/m.test(asc)) fail(`the wire's net name "A" must also be a FLAG (aliased):\n${asc}`);
-    // The connector's FLAG and the net-name FLAG sit at different points.
-    const bAt = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+B$/m)?.[1];
-    const aAt = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+A$/m)?.[1];
-    if (bAt && aAt && bAt === aAt) fail(`both FLAGs sit on the same point ${bAt}`);
+  { name: "each port type round-trips as FLAG + its own IOPIN direction", run: (fail) => {
+    // LTSpice writes the direction verbatim (In / Out / BiDir), so the exported
+    // keyword and the re-imported port type must both survive unchanged.
+    for (const pt of ["In", "Out", "BiDir"] as PortType[]) {
+      const asc = LTSpiceExporter.export(connectorNodes("A", pt), [], "", emptyCircuit, []);
+      if (!new RegExp(`^FLAG\\s+-?\\d+\\s+-?\\d+\\s+A$`, "m").test(asc)) fail(`${pt}: no FLAG A:\n${asc}`);
+      if (!new RegExp(`^IOPIN\\s+-?\\d+\\s+-?\\d+\\s+${pt}$`, "m").test(asc)) fail(`${pt}: no "IOPIN … ${pt}":\n${asc}`);
+
+      const back = LTSpiceParser.parse(asc);
+      const n = back.nodes.find((x) => (x.data as { label?: string }).label === "A");
+      if (!n) { fail(`${pt}: connector A did not re-import`); continue; }
+      const d = n.data as { componentType?: string; portType?: string };
+      if (d.componentType !== "netconnector") fail(`${pt}: came back as ${d.componentType}, not a netconnector`);
+      if (d.portType !== pt) fail(`${pt}: port type came back as ${d.portType}`);
+    }
   } },
 
-  { name: "renaming a connector leaves the wire's net name untouched", run: (fail) => {
-    const { netId } = twoResistorNet();
-    useCircuitStore.getState().renameNet(netId, "A");
-    // Give the connector its own, different name.
-    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true, connectorLabel: "B" });
-    const net = useCircuitStore.getState().circuit.nets.get(netId);
-    if (net?.nodeLabel !== "A") fail(`the wire's net name changed to "${net?.nodeLabel}" when the connector was renamed`);
-    // The wire still carries "A" (netName), independent of the connector's "B".
-    const wire = useCircuitStore.getState().edges.find((e) => e.id === "w_conn");
-    if ((wire?.data as { connectorLabel?: string }).connectorLabel !== "B") fail("the connector name was not stored");
-    if ((wire?.data as { netName?: string }).netName !== "A") fail(`the wire's netName is "${(wire?.data as { netName?: string }).netName}", not "A"`);
+  { name: "the FLAG and its IOPIN sit on the same point", run: (fail) => {
+    // LTSpice pairs the two by coordinate — a mismatch silently drops the port.
+    const asc = LTSpiceExporter.export(connectorNodes("A", "In"), [], "", emptyCircuit, []);
+    const flag = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+A$/m)?.[1];
+    const iopin = asc.match(/^IOPIN\s+(-?\d+\s+-?\d+)\s+In$/m)?.[1];
+    if (!flag || !iopin) { fail(`missing FLAG/IOPIN:\n${asc}`); return; }
+    if (flag !== iopin) fail(`FLAG at ${flag} but IOPIN at ${iopin}`);
   } },
 
-  { name: "a connector with no own name falls back to the net name", run: (fail) => {
-    const { netId } = twoResistorNet();
-    useCircuitStore.getState().renameNet(netId, "SIG");
-    useCircuitStore.getState().updateEdgeData("w_conn", { connector: true }); // no connectorLabel
-    const st = useCircuitStore.getState();
-    const asc = LTSpiceExporter.export(st.nodes, st.edges, "", st.circuit, st.dataFlags);
-    if (!/^FLAG\s+-?\d+\s+-?\d+\s+SIG$/m.test(asc)) fail(`connector FLAG should use the net name SIG:\n${asc}`);
-    if (!/^IOPIN\b/m.test(asc)) fail("IOPIN missing");
+  { name: "port type None writes a bare FLAG and returns as a net label", run: (fail) => {
+    // LTSpice's "Port Type: None" has no IOPIN at all, so it is exactly a label.
+    const asc = LTSpiceExporter.export(connectorNodes("SIG", "None"), [], "", emptyCircuit, []);
+    if (!/^FLAG\s+-?\d+\s+-?\d+\s+SIG$/m.test(asc)) fail(`no FLAG SIG:\n${asc}`);
+    if (/IOPIN/.test(asc)) fail(`port type None must not write an IOPIN:\n${asc}`);
+    const back = LTSpiceParser.parse(asc);
+    const n = back.nodes.find((x) => (x.data as { label?: string }).label === "SIG");
+    if ((n?.data as { componentType?: string })?.componentType !== "netlabel") {
+      fail(`a bare FLAG must import as a netlabel, got ${(n?.data as { componentType?: string })?.componentType}`);
+    }
+  } },
+
+  { name: "a plain net label exports a FLAG but no IOPIN", run: (fail) => {
+    const nodes: Node[] = [
+      { id: "netlabel_0", type: "component", position: { x: 100, y: 100 },
+        data: { componentType: "netlabel", label: "SIG" } },
+    ];
+    const asc = LTSpiceExporter.export(nodes, [], "", emptyCircuit, []);
+    if (!/FLAG\s+-?\d+\s+-?\d+\s+SIG/.test(asc)) fail(`no FLAG SIG:\n${asc}`);
+    if (/IOPIN/.test(asc)) fail(`plain label must not write IOPIN:\n${asc}`);
+  } },
+
+  { name: "the four port types draw four distinct symbols", run: (fail) => {
+    // None = bare circle, Out/In = one arrowhead each, BiDir = two.
+    const counts: Record<string, number> = {};
+    for (const pt of ["None", "Out", "In", "BiDir"] as PortType[]) {
+      const s = netLabelShape(pt);
+      counts[pt] = s.heads.length;
+      if (pt === "None" && s.stem) fail("None must have no arrow stem");
+      if (pt !== "None" && !s.stem) fail(`${pt} must have an arrow stem`);
+    }
+    if (counts.None !== 0) fail(`None drew ${counts.None} arrowheads, expected 0`);
+    if (counts.Out !== 1) fail(`Out drew ${counts.Out} arrowheads, expected 1`);
+    if (counts.In !== 1) fail(`In drew ${counts.In} arrowheads, expected 1`);
+    if (counts.BiDir !== 2) fail(`BiDir drew ${counts.BiDir} arrowheads, expected 2`);
+    // In and Out point opposite ways, so their heads must not coincide.
+    if (netLabelShape("In").heads[0] === netLabelShape("Out").heads[0]) {
+      fail("In and Out drew the same arrowhead");
+    }
   } },
 );
 

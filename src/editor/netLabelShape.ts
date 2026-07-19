@@ -1,4 +1,5 @@
 import { NODE_SIZE } from "./pinGeometry.js";
+import type { PortType } from "@core/components/special/Special.js";
 
 /** Local-space centre of the node box; the net-label terminal sits here. */
 const C = NODE_SIZE / 2;
@@ -6,52 +7,75 @@ const C = NODE_SIZE / 2;
 export interface NetLabelShape {
   /** Hollow terminal circle (the connection point / port). */
   circle: { cx: number; cy: number; r: number };
-  /** Direction-arrow stem, from the circle edge outward. */
-  stem: { x1: number; y1: number; x2: number; y2: number };
-  /** Arrowhead as an SVG polygon `points` string. */
-  head: string;
+  /** Direction-arrow stem, from the circle edge outward. Absent for `None`. */
+  stem: { x1: number; y1: number; x2: number; y2: number } | null;
+  /**
+   * Arrowheads as SVG polygon `points` strings — one for `In`/`Out`, two for
+   * `BiDir`, none for `None`.
+   */
+  heads: string[];
   /** Anchor for the (always upright) name tag, placed clear of the arrow. */
   tag: { x: number; y: number; anchor: "start" | "middle"; baseline: "middle" | "bottom" };
 }
 
-/** Unit arrow direction per 90° rotation step: 0 = up, 90 = right, 180 = down, 270 = left. */
-const DIRS: Record<number, [number, number]> = {
-  0: [0, -1],
-  90: [1, 0],
-  180: [0, 1],
-  270: [-1, 0],
-};
+/**
+ * The arrow axis: straight up, out of the node centre.
+ *
+ * Fixed, not rotatable. LTSpice stores a flag as `FLAG x y name` (plus an
+ * `IOPIN` for a connector) and records no orientation at all, so a turned symbol
+ * could not survive a round-trip through `.asc` — the direction a connector
+ * carries is its *port type*, not its angle.
+ */
+const DX = 0, DY = -1;
+
+const R = 5, LEN = 24, HEAD_LEN = 8, HEAD_HALF = 4.5;
 
 /**
- * Geometry for a net-label / port connector: a hollow terminal circle, a
- * direction arrow that follows the node rotation, and a horizontally-readable
- * name tag. Shared by the editor node and the SVG export so the two look
- * identical. The terminal always stays at the node centre, so wiring (and
- * {@link getLocalPins}) is unaffected by rotation.
+ * Triangle with its tip at (tx,ty) pointing along (dx,dy), as polygon points.
  */
-export function netLabelShape(rotation = 0): NetLabelShape {
-  const r = 5;
-  const norm = (((Math.round(rotation / 90) * 90) % 360) + 360) % 360;
-  const [dx, dy] = DIRS[norm] ?? DIRS[0];
-  const len = 24, headLen = 8, headHalf = 4.5, gap = r + 1;
-  const x2 = C + dx * len, y2 = C + dy * len;
-  const bx = C + dx * (len - headLen), by = C + dy * (len - headLen);
-  const perpX = -dy, perpY = dx;
-  const head = [
-    `${x2},${y2}`,
-    `${bx + perpX * headHalf},${by + perpY * headHalf}`,
-    `${bx - perpX * headHalf},${by - perpY * headHalf}`,
+function arrowHead(tx: number, ty: number, dx: number, dy: number): string {
+  const bx = tx - dx * HEAD_LEN, by = ty - dy * HEAD_LEN;
+  const px = -dy, py = dx;
+  return [
+    `${tx},${ty}`,
+    `${bx + px * HEAD_HALF},${by + py * HEAD_HALF}`,
+    `${bx - px * HEAD_HALF},${by - py * HEAD_HALF}`,
   ].join(" ");
-  // Tag to the right of the circle for up / down / left arrows; only the
-  // right-pointing arrow would collide there, so its tag goes above instead.
-  // Always drawn upright for readability.
-  const tag = dx > 0
-    ? { x: C, y: C - r - 7, anchor: "middle" as const, baseline: "bottom" as const }
-    : { x: C + r + 7, y: C, anchor: "start" as const, baseline: "middle" as const };
+}
+
+/**
+ * Geometry for a net-label / net-connector: a hollow terminal circle, an
+ * optional direction arrow, and a horizontally-readable name tag. Shared by the
+ * editor node and the SVG export so the two look identical.
+ *
+ * The terminal sits at the node centre and the symbol has one fixed
+ * orientation (see {@link DX}), so wiring — and `getLocalPins` — never has to
+ * follow the drawing.
+ *
+ * The four port types map to the four shapes the schematic needs: `None` is a
+ * bare docking circle (a plain label), `Out` points away from the circle, `In`
+ * points back into it, and `BiDir` carries a head at each end.
+ */
+export function netLabelShape(portType: PortType = "None"): NetLabelShape {
+  const dx = DX, dy = DY;
+
+  const gap = R + 1;
+  // Inner end (just clear of the circle) and outer end of the arrow axis.
+  const ix = C + dx * gap, iy = C + dy * gap;
+  const ox = C + dx * LEN, oy = C + dy * LEN;
+
+  const heads: string[] = [];
+  if (portType === "Out" || portType === "BiDir") heads.push(arrowHead(ox, oy, dx, dy));
+  if (portType === "In" || portType === "BiDir") heads.push(arrowHead(ix, iy, -dx, -dy));
+
+  // The tag sits to the right of the circle, clear of the upward arrow, and is
+  // always drawn upright for readability.
+  const tag = { x: C + R + 7, y: C, anchor: "start" as const, baseline: "middle" as const };
+
   return {
-    circle: { cx: C, cy: C, r },
-    stem: { x1: C + dx * gap, y1: C + dy * gap, x2, y2 },
-    head,
+    circle: { cx: C, cy: C, r: R },
+    stem: portType === "None" ? null : { x1: ix, y1: iy, x2: ox, y2: oy },
+    heads,
     tag,
   };
 }

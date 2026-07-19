@@ -26,6 +26,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },
   { type: "ground", label: "Ground", category: "Special", defaultLabel: "GND", description: "Ground reference (node 0)" },
   { type: "netlabel", label: "Net Label", category: "Special", defaultLabel: "NET1", description: "Named terminal – nets with the same name are connected (LTSpice FLAG)" },
+  { type: "netconnector", label: "Net Connector", category: "Special", defaultLabel: "PORT1", description: "Named terminal that is also an interface pin – In / Out / BiDir (LTSpice FLAG + IOPIN)" },
 ];
 
 export const CATEGORIES = ["Passives", "Semiconductors", "Active", "Sources", "Special"];

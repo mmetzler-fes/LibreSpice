@@ -65,7 +65,7 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, rotateComponent, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit, addDataFlag, renameNet, viewFitNonce, updateNodeData,
+    circuit, addDataFlag, renameNet, viewFitNonce,
   } = useCircuitStore();
 
   // After a full load (import / snapshot) the content may sit off-screen (e.g.
@@ -194,15 +194,21 @@ function CanvasInner() {
     (type: ComponentType, cx: number, cy: number) => {
       // Center the node on the (snapped) cursor: node.position is its top-left.
       let terminal = { x: snapToGrid(cx), y: snapToGrid(cy) };
-      // A net label dropped on a component pin steps one grid square clear of the
-      // part and is joined by a short lead, instead of covering the terminal with
-      // a zero-length wire between the two coincident pins (see netLabelLead).
+      // A net label / net connector dropped on a component pin steps one grid
+      // square clear of the part and is joined by a short lead, instead of
+      // covering the terminal with a zero-length wire between the two coincident
+      // pins (see netLabelLead). The lead is a real wire, so the terminal stays
+      // draggable afterwards and the wire follows it.
+      const isNetTerminal = type === "netlabel" || type === "netconnector";
       let leadPin: LeadPin | null = null;
-      if (type === "netlabel") {
+      if (isNetTerminal) {
         const symbolNorm = useUIStore.getState().symbolNorm;
         const pins: LeadPin[] = useCircuitStore.getState().nodes
-          // Another net label's terminal is not a part to lead away from.
-          .filter((n) => (n.data as ComponentNodeData).componentType !== "netlabel")
+          // Another net terminal is not a part to lead away from.
+          .filter((n) => {
+            const t = (n.data as ComponentNodeData).componentType;
+            return t !== "netlabel" && t !== "netconnector";
+          })
           .flatMap((n) => getNodePins(n, symbolNorm).map((p) => ({
             nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y,
             ownerCx: n.position.x + NODE_SIZE / 2, ownerCy: n.position.y + NODE_SIZE / 2,
@@ -224,7 +230,12 @@ function CanvasInner() {
         id,
         type: "component",
         position: { x, y },
-        data: { componentType: type, label, valueLabel, rotation: placementRotation },
+        data: {
+          componentType: type, label, valueLabel, rotation: placementRotation,
+          // A fresh connector defaults to a bi-directional port, the type that
+          // says the least about the signal and reads as the plain double arrow.
+          ...(type === "netconnector" ? { portType: "BiDir" as const } : {}),
+        },
       };
       addComponent(component, node);
       if (leadPin) {
@@ -399,7 +410,7 @@ function CanvasInner() {
       // to plot the potential of the node they name and the current through it —
       // the same probes a wire on that net offers, so a named net is reachable
       // however you right-click it.
-      if (data?.componentType === "netlabel") {
+      if (data?.componentType === "netlabel" || data?.componentType === "netconnector") {
         const netId = circuit.components.get(node.id)?.ports[0]?.netId ?? null;
         setNodeMenu({
           id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y,
@@ -559,12 +570,6 @@ function CanvasInner() {
     setWireMenu(null);
   };
 
-  // Switch a net label between a plain wire-name tag and a directional connector.
-  const setNetlabelConnector = (connector: boolean) => {
-    if (nodeMenu) updateNodeData(nodeMenu.id, { connector });
-    setNodeMenu(null);
-  };
-
   // Plot the potential of the net a label names, as a scope trace.
   const probeNetlabelVoltageInScope = () => {
     if (nodeMenu?.vExpr) { addExpression(nodeMenu.vExpr); setDockTab("waveform"); }
@@ -666,7 +671,7 @@ function CanvasInner() {
       const modifiedChanges = changes.map(change => {
         if (change.type === 'position' && change.position && change.id) {
           const node = nodes.find(n => n.id === change.id);
-          if (node && node.data.componentType === "netlabel") {
+          if (node && (node.data.componentType === "netlabel" || node.data.componentType === "netconnector")) {
             const tapEdge = edges.find(e => e.source === node.id && e.data?.targetTap);
             if (tapEdge && tapEdge.data?.hostEdgeId) {
               const hostWire = edges.find(e => e.id === tapEdge.data?.hostEdgeId);
@@ -857,13 +862,9 @@ function CanvasInner() {
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
             {nodeMenu.isNetlabel ? (
               <>
-                <button style={nodeMenuItem} onClick={() => setNetlabelConnector(false)}>
-                  {nodeMenu.connector ? " " : "✓ "}Net label (Leitung benennen)
-                </button>
-                <button style={nodeMenuItem} onClick={() => setNetlabelConnector(true)}>
-                  {nodeMenu.connector ? "✓ " : " "}Connector (Pfeil, verbindet entfernte Netze)
-                </button>
-                <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
+                {/* Label ↔ connector is no longer a toggle here: the two are
+                    separate parts (LTSpice stores them differently), and the
+                    connector's direction lives in its own properties panel. */}
                 {nodeMenu.vExpr ? (
                   <>
                     <button style={nodeMenuItem} onClick={probeNetlabelVoltageInScope}>{nodeMenu.vExpr} im Oszi anzeigen</button>

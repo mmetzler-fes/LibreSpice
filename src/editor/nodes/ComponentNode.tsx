@@ -21,7 +21,8 @@ import {
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
+import { NODE_SIZE, GRID, PX_PER_CM, rotatePoint, handleForOrder, getLocalPins } from "../pinGeometry.js";
+import type { PortType } from "@core/components/special/Special.js";
 import { netLabelShape } from "../netLabelShape.js";
 import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
@@ -46,6 +47,7 @@ export type ComponentType =
   | "pulsesource"
   | "ground"
   | "netlabel"
+  | "netconnector"
   | "subcircuit";
 
 export interface ComponentNodeData {
@@ -62,9 +64,8 @@ export interface ComponentNodeData {
   mirrored?: boolean;
   /** For the generalized voltage source: "DC" | "Sine" | "Pulse". */
   sourceType?: string;
-  /** Net-label variant: `true` draws a direction arrow (connector to a distant
-   *  same-named net); default/`false` is a plain wire name tag. */
-  connector?: boolean;
+  /** Net-connector direction (LTSpice `IOPIN`): "None" | "In" | "Out" | "BiDir". */
+  portType?: PortType;
   hasProbe?: boolean;
   /** External pin names for `subcircuit` nodes (drives generated handles). */
   pins?: string[];
@@ -85,7 +86,8 @@ export interface ComponentNodeData {
  * doesn't move the node instead, and divides by zoom to stay 1:1 with the mouse.
  */
 function MovableLabel({
-  nodeId, kind, base, offset, color, fontSize, fontWeight = 500, transform = "translate(-100%, -50%)", children,
+  nodeId, kind, base, offset, color, fontSize, fontWeight = 500, transform = "translate(-100%, -50%)",
+  maxOffset, style, children,
 }: {
   nodeId: string;
   kind: "label" | "value";
@@ -95,6 +97,10 @@ function MovableLabel({
   fontSize: number;
   fontWeight?: number;
   transform?: string;
+  /** Cap on how far the caption may be dragged from its default spot (flow px). */
+  maxOffset?: number;
+  /** Extra styling merged in (the net tags draw themselves as a boxed chip). */
+  style?: React.CSSProperties;
   children: React.ReactNode;
 }) {
   const rf = useReactFlow();
@@ -111,7 +117,17 @@ function MovableLabel({
     const sx = e.clientX, sy = e.clientY;
     const b = offset ?? { x: 0, y: 0 };
     const zoom = rf.getViewport().zoom || 1;
-    const at = (ev: PointerEvent) => ({ x: b.x + (ev.clientX - sx) / zoom, y: b.y + (ev.clientY - sy) / zoom });
+    const at = (ev: PointerEvent) => {
+      let x = b.x + (ev.clientX - sx) / zoom;
+      let y = b.y + (ev.clientY - sy) / zoom;
+      // Keep the caption tethered: past the cap it slides along the circle of
+      // that radius rather than stopping dead, so the drag still tracks.
+      if (maxOffset !== undefined) {
+        const mag = Math.hypot(x, y);
+        if (mag > maxOffset) { x = (x / mag) * maxOffset; y = (y / mag) * maxOffset; }
+      }
+      return { x, y };
+    };
     trackPointerDrag(
       e,
       (ev) => setLive(at(ev)),
@@ -136,6 +152,7 @@ function MovableLabel({
         lineHeight: CAPTION_LINE_HEIGHT,
         whiteSpace: "nowrap", userSelect: "none", fontFamily: "monospace",
         cursor: "move", zIndex: 12,
+        ...style,
       }}
     >
       {children}
@@ -163,6 +180,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   pulsesource: PulseSourceSymbol,
   ground: GroundSymbol,
   netlabel: GroundSymbol, // unused: net-label nodes render their own tag
+  netconnector: GroundSymbol, // unused: net-connector nodes render their own symbol
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
 };
 
@@ -540,22 +558,27 @@ function AsyComponentNode({
 }
 
 /**
- * Net-label terminal (LTSpice `FLAG name`): a single connection point with the
- * net name in a tag. Placing two with the same name connects those nets.
+ * Net-label terminal (LTSpice `FLAG name`) and net connector (`FLAG` + `IOPIN`):
+ * a single connection point with the net name in a tag. Placing two with the
+ * same name connects those nets.
+ *
+ * The two share this renderer because they *are* the same picture — a docking
+ * circle plus a name tag — differing only in the connector's direction arrow and
+ * the tag tint that tells them apart at a glance. The port type drives the
+ * arrow: `None` draws none, so a connector set to `None` looks like a label.
  */
-function NetLabelNode({ nodeId, data, selected }: { nodeId: string; data: ComponentNodeData; selected?: boolean }) {
+function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: ComponentNodeData; selected?: boolean }) {
   const c = NODE_SIZE / 2;
-  const name = data.label || "NET";
+  const isConnector = data.componentType === "netconnector";
+  const name = data.label || (isConnector ? "PORT" : "NET");
   const pal = useTheme();
-  const tap = useRotateTapProps(nodeId);
   const color = selected ? "#2563eb" : pal.netLabelStroke;
-  // "connector" = draw the direction arrow (joins distant parts on one net
-  // without a wire); default = a plain net label that just names a wire.
-  const isConnector = !!data.connector;
-  const shape = netLabelShape(data.rotation ?? 0);
+  // A plain net label has no direction, so it always renders the `None` shape.
+  const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
+  const shape = netLabelShape(portType);
   // Tag position mirrors netLabelShape's anchor/baseline (the Handle itself is
   // the hollow terminal circle, so we only draw the arrow + tag here).
-  const tagStyle: React.CSSProperties = shape.tag.baseline === "middle"
+  const tagBase = shape.tag.baseline === "middle"
     ? { left: shape.tag.x, top: shape.tag.y, transform: "translate(0, -50%)" }
     : { left: shape.tag.x, top: shape.tag.y, transform: "translate(-50%, -100%)" };
   return (
@@ -563,27 +586,35 @@ function NetLabelNode({ nodeId, data, selected }: { nodeId: string; data: Compon
       draggable={false}
       style={{ ...NO_NATIVE_DRAG, position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}
     >
-      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} {...tap} />
+      {/* No tap-to-rotate here, unlike a component: the symbol has one fixed
+          orientation, so the gesture would be a silent no-op. */}
+      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
-        {isConnector && (
-          <>
-            <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-            <polygon points={shape.head} fill={color} />
-          </>
+        {shape.stem && (
+          <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
         )}
+        {shape.heads.map((points, i) => <polygon key={i} points={points} fill={color} />)}
       </svg>
-      <div
-        draggable={false}
+      {/* The name drags free of the docking circle (up to ~1 cm) without moving
+          the dock itself — the label is annotation, the circle is the connection. */}
+      <MovableLabel
+        nodeId={nodeId} kind="label"
+        base={{ left: tagBase.left, top: tagBase.top }}
+        transform={tagBase.transform}
+        offset={data.labelOffset}
+        maxOffset={PX_PER_CM}
+        color={pal.netTagText}
+        fontSize={11}
         style={{
-          ...NO_NATIVE_DRAG,
-          position: "absolute", ...tagStyle,
-          padding: "1px 6px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
-          background: selected ? pal.netTagBgSel : pal.netTagBg, color: pal.netTagText,
+          padding: "1px 6px", borderRadius: 4,
+          background: isConnector
+            ? (selected ? pal.portTagBgSel : pal.portTagBg)
+            : (selected ? pal.netTagBgSel : pal.netTagBg),
           border: `1px solid ${selected ? "#2563eb" : pal.netTagBorder}`,
         }}
       >
         {name}
-      </div>
+      </MovableLabel>
     </div>
   );
 }
@@ -593,8 +624,8 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const pal = useTheme();
   const tap = useRotateTapProps(id);
   const nodeData = data as ComponentNodeData;
-  if (nodeData.componentType === "netlabel") {
-    return <NetLabelNode nodeId={id} data={nodeData} selected={selected} />;
+  if (nodeData.componentType === "netlabel" || nodeData.componentType === "netconnector") {
+    return <NetTerminalNode nodeId={id} data={nodeData} selected={selected} />;
   }
   if (nodeData.componentType === "subcircuit") {
     const libSym = nodeData.symbolName ? symbolByName(nodeData.symbolName, symbolNorm) : undefined;

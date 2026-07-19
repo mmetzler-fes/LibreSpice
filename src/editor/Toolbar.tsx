@@ -439,6 +439,17 @@ export function Toolbar() {
           <path d="M11.5 12 h7" strokeWidth="1.4" />
         </svg>
       </TBtn>
+      <TBtn title="Place Net Connector (Port)" active={isPlacing("netconnector")} onClick={() => handlePlace("netconnector")}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="3.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+          <path d="M3.5 12 h5" />
+          {/* Double arrowhead: the bi-directional port a fresh connector is. */}
+          <polygon points="8.5,12 5.8,10.4 5.8,13.6" fill="currentColor" stroke="none" />
+          <polygon points="3.5,12 6.2,10.4 6.2,13.6" fill="currentColor" stroke="none" />
+          <path d="M8.5 7.5 h11 a1.5 1.5 0 0 1 1.5 1.5 v6 a1.5 1.5 0 0 1 -1.5 1.5 h-11 z" />
+          <path d="M11.5 12 h7" strokeWidth="1.4" />
+        </svg>
+      </TBtn>
 
       <Divider />
 

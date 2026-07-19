@@ -88,6 +88,9 @@ export interface Theme {
   // Component net-label tag
   netTagBg: string;
   netTagBgSel: string;
+  /** Net-connector name tag: same shape as a net label's, tinted apart from it. */
+  portTagBg: string;
+  portTagBgSel: string;
   netTagText: string;
   netTagBorder: string;
   // Pin net-id badge
@@ -149,6 +152,8 @@ export const lightTheme: FullTheme = {
   netLabelStroke: "#334155",
   netTagBg: "#e2e8f0",
   netTagBgSel: "#dbeafe",
+  portTagBg: "#fde9c8",
+  portTagBgSel: "#fcd9a4",
   netTagText: "#0f172a",
   netTagBorder: "#94a3b8",
   badgeText: "#1d4ed8",
@@ -202,6 +207,8 @@ export const darkTheme: FullTheme = {
   netLabelStroke: "#cbd5e1",
   netTagBg: "#334155",
   netTagBgSel: "#1e3a5f",
+  portTagBg: "#4a3a24",
+  portTagBgSel: "#5f4a2a",
   netTagText: "#e2e8f0",
   netTagBorder: "#475569",
   badgeText: "#93c5fd",

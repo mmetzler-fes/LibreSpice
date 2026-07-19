@@ -1,6 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
+import type { PortType } from "@core/components/special/Special.js";
 import {
   CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
@@ -160,8 +161,8 @@ export class LTSpiceExporter {
         /** Horizontally flipped about the symbol origin → LTSpice's `M` prefix. */
         mirrored?: boolean;
         labelOffset?: { x: number; y: number }; valueOffset?: { x: number; y: number };
-        /** Net-label acting as a port/connector → LTSpice FLAG + IOPIN. */
-        connector?: boolean;
+        /** Net-connector direction → the LTSpice IOPIN that follows its FLAG. */
+        portType?: PortType;
         /** Library part / `.subckt`: its own `.asy` symbol, subcircuit name and pin order. */
         symbolName?: string; subName?: string; pins?: string[];
         /** The SYMBOL name this component was imported under (see LTSpiceParser). */
@@ -176,14 +177,18 @@ export class LTSpiceExporter {
         continue;
       }
 
-      // Net-label terminal → LTSpice `FLAG x y name` at its single pin. A
-      // connector (port) additionally gets an `IOPIN`, exactly as LTSpice writes
-      // a net label whose Port Type is In/Out/Bi-Direct.
-      if (data.componentType === "netlabel") {
+      // Net label → LTSpice `FLAG x y name` at its single pin. A net connector
+      // writes the same FLAG plus the `IOPIN x y In|Out|BiDir` line LTSpice pairs
+      // with it, exactly as it stores a flag whose Port Type is set. Port type
+      // `None` is a bare FLAG — LTSpice writes no IOPIN for it either, so such a
+      // connector round-trips back as a plain net label.
+      if (data.componentType === "netlabel" || data.componentType === "netconnector") {
         const fx = Math.round(node.position.x + CENTER);
         const fy = Math.round(node.position.y + CENTER);
-        flagLines.push(`FLAG ${fx} ${fy} ${String(data.label ?? "NET").trim() || "NET"}`);
-        if (data.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
+        const fallback = data.componentType === "netconnector" ? "PORT" : "NET";
+        flagLines.push(`FLAG ${fx} ${fy} ${String(data.label ?? fallback).trim() || fallback}`);
+        const portType = data.componentType === "netconnector" ? data.portType ?? "BiDir" : "None";
+        if (portType !== "None") flagLines.push(`IOPIN ${fx} ${fy} ${portType}`);
         pinCoord.set(`${node.id}-t`, { x: fx, y: fy });
         continue;
       }
@@ -253,26 +258,26 @@ export class LTSpiceExporter {
       }
     }
 
-    // Wire-carried net labels / connectors (the editor's `visible` / `Net
-    // connector` on a wire) → a `FLAG` at the label's dock point, plus an
-    // `IOPIN` when it is a connector. LTSpice has no notion of a label owned by a
-    // wire, so this is its faithful representation: a flag (and port) sitting on
-    // the wire. Records the net so the named-net fallback below doesn't add a
-    // second flag for it.
+    // Wire-carried net *names* (the editor's `visible` label on a wire) → a
+    // `FLAG` at the label's dock point. LTSpice has no notion of a label owned by
+    // a wire, so this is its faithful representation: a flag sitting on the wire.
+    // Ports are not wire attributes here — a net connector is its own node and
+    // wrote its FLAG/IOPIN above. Records the net so the named-net fallback below
+    // doesn't add a second flag for it.
     const labelledNets = new Set<string>();
     for (const node of nodes) {
-      if ((node.data as { componentType?: ComponentType }).componentType !== "netlabel") continue;
+      const t = (node.data as { componentType?: ComponentType }).componentType;
+      if (t !== "netlabel" && t !== "netconnector") continue;
       const netId = circuit?.components?.get(node.id)?.ports?.[0]?.netId;
       if (netId) labelledNets.add(netId);
     }
     if (circuit?.nets) {
       for (const edge of edges) {
-        const d = edge.data as { showLabel?: boolean; connector?: boolean; connectorLabel?: string; labelT?: number; waypoints?: Pt[] } | undefined;
-        if (!d?.showLabel && !d?.connector) continue;
+        const d = edge.data as { showLabel?: boolean; labelT?: number; waypoints?: Pt[] } | undefined;
+        if (!d?.showLabel) continue;
         const netId = circuit.components.get(edge.source)?.ports?.find((p: { id: string; netId?: string }) => p.id === `${edge.source}-${edge.sourceHandle}`)?.netId;
         if (!netId || netId === "0" || labelledNets.has(netId)) continue;
         const rawName = circuit.nets.get(netId)?.nodeLabel;
-        const isNamed = !!rawName && rawName !== netId;
         const name = (rawName ?? netId).trim();
         if (!name) continue;
         const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
@@ -280,20 +285,7 @@ export class LTSpiceExporter {
         if (!a || !b) continue;
         const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
         const dock = dockPoint(orthoVertices([a, ...wps, b]), typeof d.labelT === "number" ? d.labelT : 0.5);
-        const fx = Math.round(dock.x), fy = Math.round(dock.y);
-        // A connector carries its own name (LTSpice port label may differ from the
-        // net name); its FLAG uses that, otherwise the net name.
-        const connName = (d.connector && d.connectorLabel?.trim()) || name;
-        flagLines.push(`FLAG ${fx} ${fy} ${connName}`);
-        if (d.connector) flagLines.push(`IOPIN ${fx} ${fy} BiDir`);
-        // When the connector's name differs from the wire's own (named) net, emit
-        // a *second* FLAG for the net name at a distinct point — exactly how
-        // LTSpice aliases two labels (e.g. a port Q1_C and a wire label Q1_B) onto
-        // one net.
-        if (d.connector && isNamed && connName !== name) {
-          const cx = Math.round(a.x), cy = Math.round(a.y);
-          if (cx !== fx || cy !== fy) flagLines.push(`FLAG ${cx} ${cy} ${name}`);
-        }
+        flagLines.push(`FLAG ${Math.round(dock.x)} ${Math.round(dock.y)} ${name}`);
         labelledNets.add(netId);
       }
     }

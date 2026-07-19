@@ -35,13 +35,20 @@ interface SymbolPreviewProps {
  */
 export function SymbolPreview({ type, size, margin = 4, strokeWidth = 1.2, color = "#334155", nativeScale = false }: SymbolPreviewProps) {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  // Net labels have no `.asy` symbol — draw a terminal + name-tag glyph so the
-  // toolbar button and placement ghost show something recognisable.
-  if (type === "netlabel") {
+  // Net terminals have no `.asy` symbol — draw a terminal + name-tag glyph so the
+  // toolbar button and placement ghost show something recognisable. The connector
+  // adds the double arrowhead of its default (bi-directional) port type.
+  if (type === "netlabel" || type === "netconnector") {
     return (
       <svg width={size} height={size} viewBox="0 0 80 80" style={{ flexShrink: 0, color, overflow: "visible" }}>
         <circle cx="40" cy="40" r="3" fill="currentColor" />
         <path d="M40 40 h12" stroke="currentColor" strokeWidth="2" fill="none" />
+        {type === "netconnector" && (
+          <>
+            <polygon points="52,40 45,36 45,44" fill="currentColor" />
+            <polygon points="40,40 47,36 47,44" fill="currentColor" />
+          </>
+        )}
         <rect x="52" y="29" width="38" height="22" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
         <path d="M59 40 h24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
       </svg>

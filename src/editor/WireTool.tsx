@@ -7,20 +7,17 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { getNodePins, GRID, type NodePin } from "./pinGeometry.js";
+import { getNodePins, GRID, PX_PER_CM, type NodePin } from "./pinGeometry.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { DRAG_TOUCH_ACTION, isDragPointer } from "./pointerDrag.js";
-import { wireConnectorShape, wireNameTag } from "./wireLabelShape.js";
+import { wireNameTag } from "./wireLabelShape.js";
 
 export interface FlowPoint {
   x: number;
   y: number;
 }
-
-/** Arrow direction for a wire acting as a net connector. */
-export type ArrowDir = "up" | "down" | "left" | "right";
 
 /** Payload stored on a wire edge. */
 export interface WireData {
@@ -31,13 +28,6 @@ export interface WireData {
   targetTap?: FlowPoint;
   /** Show the net-name label permanently (not only while the wire is selected). */
   showLabel?: boolean;
-  /** Draw a net-connector symbol (docking circle + direction arrow). */
-  connector?: boolean;
-  /** The connector's own name. Defaults to the wire's net name; may differ, so an
-   *  LTSpice port whose label isn't the net name round-trips (see LTSpiceExporter). */
-  connectorLabel?: string;
-  /** Arrowhead direction of the connector symbol. */
-  arrowDir?: ArrowDir;
   /** Position of the label / dock point along the wire, 0..1 of its length. */
   labelT?: number;
   /** Label offset from the dock point (flow px), clamped to ~1 cm. */
@@ -46,9 +36,6 @@ export interface WireData {
   [key: string]: unknown;
 }
 
-
-/** Ctrl+R rotation order for a connector arrow (90° clockwise each step). */
-export const ARROW_ORDER: ArrowDir[] = ["up", "right", "down", "left"];
 
 /** Total length of a polyline. */
 function polylineLength(verts: FlowPoint[]): number {
@@ -105,7 +92,6 @@ const WIRE_SNAP = 10;
  *  position rather than the grid-snapped one. Screen-space so zoom doesn't
  *  change the feel; raw so a single grid cell can't jump the threshold and trip
  *  a turn on the slightest drift (which made straight lines nearly impossible). */
-const PX_PER_CM = 96 / 2.54; // CSS px per centimetre (96 px = 1 inch)
 const TURN_DEVIATION_PX = 0.5 * PX_PER_CM;
 
 function snap(v: number): number {
@@ -177,27 +163,15 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
   const showLabel = !!data?.showLabel;
-  const connector = !!data?.connector;
-  const arrowDir = (data?.arrowDir as ArrowDir | undefined) ?? "right";
-  const connectorLabel = (data?.connectorLabel as string | undefined)?.trim() || undefined;
 
   // Net id/name of this wire (from its source port). Needed whenever the label
-  // is shown permanently (`showLabel` / a connector) or transiently (while selected).
+  // is shown permanently (`showLabel`) or transiently (while selected).
   let netLabel: string | null = null;
-  if (selected || showLabel || connector) {
+  if (selected || showLabel) {
     const port = circuit.components.get(source)?.ports.find((p) => p.id === `${source}-${sourceHandleId}`);
     const netId = port?.netId ?? null;
     netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
   }
-  // The connector carries its own name, defaulting to the net name but allowed to
-  // differ (LTSpice lets a port's label differ from other labels on the net).
-  // Renaming the connector never touches the wire's net name.
-  const connName = connector ? (connectorLabel ?? netLabel) : null;
-  // The connector's name differs from the wire's — then the wire keeps showing
-  // its own name alongside the connector, so a rename of one is never mistaken
-  // for the other.
-  const connDiffers = !!(connector && connectorLabel && connectorLabel !== netLabel);
-
   // The dock point rides along the wire at `labelT`; the label floats from it by
   // `labelOffset` (up to ~1 cm). Both default to the wire's midpoint.
   const labelT = typeof data?.labelT === "number" ? (data.labelT as number) : 0.5;
@@ -231,12 +205,10 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
     window.addEventListener("pointerup", up);
   };
 
-  // The wire's own name tag (always the net name): shown when `visible`, while
-  // selected, or whenever a connector carries a *different* name (so both stay
-  // readable). A plain connector (name == net name) is represented by the
-  // connector's own tag below, so the box would only duplicate it.
-  const showBox = !!netLabel && (showLabel || selected || connDiffers);
-  const dirColor = selected ? theme.accent : theme.wireStroke;
+  // The wire's own name tag (always the net name): shown when `visible` or while
+  // selected. Ports are not wire attributes — a net connector is its own node
+  // (see NetTerminalNode), so a wire only ever carries its net's name.
+  const showBox = !!netLabel && (showLabel || selected);
 
   return (
     <>
@@ -246,25 +218,6 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         markerEnd={markerEnd}
         style={{ stroke: selected ? theme.accent : theme.wireStroke, strokeWidth: 2 }}
       />
-      {/* Net-connector symbol: a dock circle on the wire, a direction arrow, and
-          the connector's own name at the arrow tip. Shown whenever the wire is a
-          connector, independent of the wire's own (net-name) label. */}
-      {connector && (() => {
-        const s = wireConnectorShape(dock, arrowDir, connName ?? "");
-        return (
-          <g style={{ pointerEvents: "none" }}>
-            <circle cx={s.circle.cx} cy={s.circle.cy} r={s.circle.r} fill="none" stroke={dirColor} strokeWidth={1.4} opacity={0.7} />
-            <line x1={s.stem.x1} y1={s.stem.y1} x2={s.stem.x2} y2={s.stem.y2} stroke={dirColor} strokeWidth={1.6} strokeLinecap="round" />
-            <polygon points={s.head} fill={dirColor} />
-            {connName && (
-              <>
-                <rect x={s.tag.x} y={s.tag.y} width={s.tag.width} height={s.tag.height} rx={3} fill={selected ? "#1d4ed8" : "#475569"} />
-                <text x={s.tag.textX} y={s.tag.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{connName}</text>
-              </>
-            )}
-          </g>
-        );
-      })()}
       {showBox && netLabel && (() => {
         // The tag is drawn relative to the anchor so the whole group can carry
         // the drag handler; the shared shape is anchor-absolute, hence the shift.

@@ -7,8 +7,7 @@ import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import { useUIStore } from "./uiStore.js";
-import type { FlowPoint, ArrowDir } from "@editor/WireTool.js";
-import { ARROW_ORDER } from "@editor/WireTool.js";
+import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
@@ -54,9 +53,9 @@ interface CircuitActions {
   removeComponent: (id: string) => void;
   updateComponentProperty: (id: string, key: string, value: string | number) => void;
   setLabelOffset: (id: string, kind: "label" | "value", offset: { x: number; y: number }) => void;
-  /** Patch a node's `data` (visual-only fields, e.g. the net-label connector flag). Undoable. */
+  /** Patch a node's `data` (visual-only fields, e.g. a net connector's port type). Undoable. */
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
-  /** Patch a wire edge's `data` (visible label, connector, arrow direction, …). Undoable. */
+  /** Patch a wire edge's `data` (visible label, waypoints, …). Undoable. */
   updateEdgeData: (id: string, patch: Record<string, unknown>) => void;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
@@ -130,13 +129,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const node = get().nodes.find((n) => n.id === id);
     const doomed = get().edges.filter((e) => e.source === id || e.target === id);
 
-    // Deleting a net-connector (a net-label terminal) must *keep* the net's name:
-    // the name belongs to the wire, not to the connector symbol. So we remember it
-    // and re-show it on the wire that bridges the gap the connector left (below),
-    // instead of dropping it as the old behaviour did.
+    // Deleting a net terminal (a net label or a net connector) must *keep* the
+    // net's name: the name belongs to the wire, not to the symbol. So we remember
+    // it and re-show it on the wire that bridges the gap the terminal left
+    // (below), instead of dropping it as the old behaviour did.
     const removed = get().circuit.components.get(id);
     const namedNetId = removed?.getNetLabel() !== null ? removed?.ports[0]?.netId : undefined;
-    // The name a deleted connector carried moves onto the bridging wire below.
+    // The name a deleted terminal carried moves onto the bridging wire below.
     const keptName = namedNetId && namedNetId !== "0" ? removed!.getNetLabel() : null;
 
     get().circuit.removeComponent(id);
@@ -184,7 +183,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           type: "wire",
           // Route the replacement through the two original paths and the point the
           // removed pin sat on, so the wire keeps the shape it was drawn with. A
-          // deleted net-connector leaves its name on this bridging wire (visible).
+          // deleted net terminal leaves its name on this bridging wire (visible).
           data: { waypoints: [...[...first.path].reverse(), ...(via ? [via] : []), ...other.path], ...(keptName ? { netName: keptName, showLabel: true } : {}) },
         });
       }
@@ -210,10 +209,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const valueLabel = type ? getValueLabel(component, type) : undefined;
     // Keep the node's sourceType in sync so the generalized source's symbol updates.
     const sourceType = (component as { sourceType?: string }).sourceType;
+    // Likewise the net connector's port type: it is what picks the arrow the node
+    // draws, so without this the symbol would keep the old direction.
+    const portType = (component as { portType?: string }).portType;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }) } }
+          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }) } }
           : n,
       ),
       propertyVersion: state.propertyVersion + 1,
@@ -308,9 +310,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (oldLabel === newLabel) return;
     net.nodeLabel = newLabel;
 
-    // Legacy net-label terminals (imported LTSpice FLAGs) *are* the net's name:
-    // regenerateNetlist re-imposes their label, so renaming the net has to rename
-    // the terminal too or the new name is overwritten on the next rebuild.
+    // Net terminals — net labels and net connectors alike (imported LTSpice
+    // FLAGs) — *are* the net's name: regenerateNetlist re-imposes their label, so
+    // renaming the net has to rename the terminal too or the new name is
+    // overwritten on the next rebuild.
     const labelIds = new Set<string>();
     for (const comp of circuit.components.values()) {
       if (comp.getNetLabel() !== null && comp.ports[0]?.netId === netId) {
@@ -322,7 +325,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // No terminal node: the name lives on the *wire*. The chosen wire (the selected
     // one, else any on the net) carries `netName` — the persistent source of truth
     // that survives every rebuild — and is shown by default. Naming a net never
-    // spawns a net-label node / connector; a connector is added only via its button.
+    // spawns a net-terminal node; a label or connector is placed only from the palette.
     // An empty name clears the label back to the auto net id.
     let shownEdgeId: string | null = null;
     const clearing = newLabel === netId;
@@ -488,15 +491,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   canRedo: () => get()._future.length > 0,
 
   rotateSelected: () => {
-    const { selectedComponentId, rotateComponent, edges, updateEdgeData } = get();
-    // A selected connector wire rotates its arrow instead of a component.
-    const selEdge = edges.find((e) => e.selected && (e.data as { connector?: boolean } | undefined)?.connector);
-    if (selEdge) {
-      const cur = (selEdge.data as { arrowDir?: ArrowDir }).arrowDir ?? "right";
-      const next = ARROW_ORDER[(ARROW_ORDER.indexOf(cur) + 1) % ARROW_ORDER.length];
-      updateEdgeData(selEdge.id, { arrowDir: next });
-      return;
-    }
+    const { selectedComponentId, rotateComponent } = get();
     if (selectedComponentId) rotateComponent(selectedComponentId);
   },
 

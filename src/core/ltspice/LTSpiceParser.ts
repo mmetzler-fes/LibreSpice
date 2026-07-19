@@ -1,11 +1,12 @@
 import type { Node, Edge } from "@xyflow/react";
-import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "@editor/componentFactory.js";
+import { createSpiceComponent, createSubcircuitComponent, getValueLabel, isNetTerminalId } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
+import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
 
 
 /** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
@@ -61,8 +62,8 @@ export class LTSpiceParser {
     const namedFlags: { name: string; x: number; y: number }[] = [];
     /** Flags already imported, keyed x,y,name — see the FLAG handler. */
     const seenFlags = new Set<string>();
-    /** IOPIN coordinates ("x,y"): a FLAG at one of these is a port/connector. */
-    const iopinCoords = new Set<string>();
+    /** IOPIN coordinates ("x,y") → port type: a FLAG at one of these is a connector. */
+    const iopinCoords = new Map<string, PortType>();
     let directives = "";
     
     let currentSymbol: any = null;
@@ -133,11 +134,12 @@ export class LTSpiceParser {
           namedFlags.push({ name: flagName, x, y });
         }
       } else if (cmd === "IOPIN") {
-        // `IOPIN x y {In|Out|BiDir}` — pairs with a FLAG at the same point to
-        // mark it as a port/connector. The direction is semantic (not geometric);
-        // we treat any of them as "connector" and keep the arrow visual in-app.
+        // `IOPIN x y {In|Out|BiDir}` — pairs with the FLAG at the same point and
+        // turns it into a net connector, the direction naming the port type. A
+        // FLAG with no IOPIN is a plain net label (LTSpice's "Port Type: None").
         const x = parseInt(parts[1], 10), y = parseInt(parts[2], 10);
-        if (!isNaN(x) && !isNaN(y)) iopinCoords.add(`${x},${y}`);
+        const dir = PORT_TYPES.find((t) => t.toLowerCase() === (parts[3] ?? "").toLowerCase());
+        if (!isNaN(x) && !isNaN(y)) iopinCoords.set(`${x},${y}`, dir && dir !== "None" ? dir : "BiDir");
       } else if (cmd === "WIRE") {
         wires.push({
           x1: parseInt(parts[1], 10), y1: parseInt(parts[2], 10),
@@ -163,13 +165,25 @@ export class LTSpiceParser {
       LTSpiceParser.finalizeSymbol(currentSymbol, nodes, components, pins);
     }
 
-    // A named FLAG that coincides with an IOPIN is a connector (LTSpice port).
-    // IOPIN may follow its FLAG, so this is resolved once the whole file is read.
+    // A named FLAG that coincides with an IOPIN is a net connector, not a plain
+    // label. IOPIN may follow its FLAG, so this is resolved once the whole file
+    // is read — the node was imported as a label above and is promoted here,
+    // component instance included, so it carries the connector's port type.
     if (iopinCoords.size > 0) {
       for (const node of nodes) {
-        if ((node.data as { componentType?: string }).componentType !== "netlabel") continue;
+        const d = node.data as { componentType?: string; label?: string; portType?: PortType };
+        if (d.componentType !== "netlabel") continue;
         const fx = Math.round(node.position.x + CENTER), fy = Math.round(node.position.y + CENTER);
-        if (iopinCoords.has(`${fx},${fy}`)) (node.data as { connector?: boolean }).connector = true;
+        const portType = iopinCoords.get(`${fx},${fy}`);
+        if (!portType) continue;
+        d.componentType = "netconnector";
+        d.portType = portType;
+        const i = components.findIndex((c) => c.id === node.id);
+        if (i >= 0) {
+          const swapped = createSpiceComponent("netconnector", node.id, d.label ?? "PORT", node.position.x, node.position.y);
+          (swapped as NetConnector).portType = portType;
+          components[i] = swapped;
+        }
       }
     }
 
@@ -259,7 +273,7 @@ export class LTSpiceParser {
         if (d <= best) { best = d; wireNet = w.netId; }
       }
       const rep = pins.find(
-        (p) => p.netId !== undefined && p.netId === wireNet && !p.compId.startsWith("netlabel_") && !p.compId.startsWith("ground_"),
+        (p) => p.netId !== undefined && p.netId === wireNet && !isNetTerminalId(p.compId) && !p.compId.startsWith("ground_"),
       );
       if (rep) netNames.push({ compId: rep.compId, handle: rep.handle, name: nf.name });
     }

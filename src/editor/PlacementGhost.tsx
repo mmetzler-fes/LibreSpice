@@ -3,6 +3,7 @@ import { useReactFlow, useViewport } from "@xyflow/react";
 import { SymbolPreview } from "./SymbolPreview.js";
 import { NODE_SIZE, snapToGrid } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
+import type { PortType } from "@core/components/special/Special.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
@@ -51,10 +52,10 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
   const left = screen.x - (rect?.left ?? 0);
   const top = screen.y - (rect?.top ?? 0);
 
-  // A net label's terminal stays at the node centre at any rotation (only its
-  // arrow turns, see netLabelShape), so the ghost must not be spun as a whole —
-  // that would swing the docking point away from the cursor.
-  const isNetLabel = type === "netlabel";
+  // A net terminal's docking point stays at the node centre and its symbol has a
+  // fixed orientation (see netLabelShape), so the ghost must not be spun — that
+  // would swing the docking point away from the cursor.
+  const isNetLabel = type === "netlabel" || type === "netconnector";
   const spin = isNetLabel ? "" : ` rotate(${placementRotation}deg)`;
 
   return (
@@ -81,7 +82,11 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
       }}
     >
       {isNetLabel ? (
-        <NetLabelGhost rotation={placementRotation} />
+        // A connector is placed as BiDir, the type it defaults to; a plain label
+        // has no direction, so it previews as the bare docking circle.
+        type === "netconnector"
+          ? <NetLabelGhost portType="BiDir" name="PORT" />
+          : <NetLabelGhost />
       ) : (
         /* nativeScale: render at the node's 1:1 size (not fit-to-box) so the
            ghost matches the placed component exactly, at any zoom. */
@@ -93,13 +98,15 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
 
 /**
  * The net-label/connector preview, drawn from the very geometry the placed node
- * uses ({@link netLabelShape}) — terminal circle at the node centre, the arrow in
- * the placement rotation, and the upright name tag. The generic glyph used before
- * put its terminal elsewhere, so the ghost pointed at a different docking spot
- * than the connector that appeared.
+ * uses ({@link netLabelShape}) — terminal circle at the node centre, the arrow for
+ * the port type, and the upright name tag. The generic glyph used before put its
+ * terminal elsewhere, so the ghost pointed at a different docking spot than the
+ * terminal that appeared.
  */
-function NetLabelGhost({ rotation }: { rotation: number }) {
-  const shape = netLabelShape(rotation);
+function NetLabelGhost({ portType = "None", name = "NET" }: {
+  portType?: PortType; name?: string;
+}) {
+  const shape = netLabelShape(portType);
   const c = NODE_SIZE / 2;
   const color = "#2563eb";
   // The name tag is laid out exactly as NetLabelNode does it — same anchor, same
@@ -111,11 +118,13 @@ function NetLabelGhost({ rotation }: { rotation: number }) {
   return (
     <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE }}>
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color, display: "block" }}>
-        <line
-          x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2}
-          stroke={color} strokeWidth={1.6} strokeLinecap="round"
-        />
-        <polygon points={shape.head} fill={color} />
+        {shape.stem && (
+          <line
+            x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2}
+            stroke={color} strokeWidth={1.6} strokeLinecap="round"
+          />
+        )}
+        {shape.heads.map((points, i) => <polygon key={i} points={points} fill={color} />)}
         <circle cx={c} cy={c} r={shape.circle.r} fill="none" stroke={color} strokeWidth={1.6} />
       </svg>
       <div
@@ -125,7 +134,7 @@ function NetLabelGhost({ rotation }: { rotation: number }) {
           lineHeight: 1.3, border: `1px solid ${color}`, color,
         }}
       >
-        NET
+        {name}
       </div>
     </div>
   );

@@ -140,11 +140,11 @@ const CASES: Case[] = [
   },
 
   // ── Wire-carried labels ────────────────────────────────────────────────────
-  // A wire stores only *whether* to show a label (`showLabel` / `connector`),
-  // never the text: the name is resolved through the circuit model (source port
-  // → net → nodeLabel). The export had no access to it, so wire labels and
-  // connectors were silently missing from an exported SVG while node-based net
-  // labels were drawn. It now takes the lookup as its last argument.
+  // A wire stores only *whether* to show a label (`showLabel`), never the text:
+  // the name is resolved through the circuit model (source port → net →
+  // nodeLabel). The export had no access to it, so wire labels were silently
+  // missing from an exported SVG while node-based net labels were drawn. It now
+  // takes the lookup as its last argument.
   {
     name: "wire net-name label is exported",
     run: (fail) => {
@@ -175,43 +175,18 @@ const CASES: Case[] = [
     },
   },
   {
-    // The connector draws its arrow and its own name box; the plain net-name box
-    // is then redundant (it would duplicate the same text) and stays off.
-    name: "wire connector exports arrow and name, without a duplicate box",
-    run: (fail) => {
-      const svg = labelledWireSvg({ connector: true, arrowDir: "right" });
-      if (!svg.includes("<polygon")) fail("no arrowhead in the export");
-      if (!svg.includes("<circle")) fail("no dock circle in the export");
-      const names = svg.match(/>VCC</g) ?? [];
-      if (names.length !== 1) fail(`expected the name once, got ${names.length}`);
-    },
-  },
-  {
-    // A connector whose name differs from the net's: both must stay readable, so
-    // the wire keeps its own box alongside the connector's (WireEdge's rule).
-    name: "connector with its own name keeps the wire's net name too",
-    run: (fail) => {
-      const svg = labelledWireSvg({ connector: true, connectorLabel: "OUT" });
-      if (!svg.includes(">OUT<")) fail("connector name missing");
-      if (!svg.includes(">VCC<")) fail("net name missing next to a differently-named connector");
-    },
-  },
-  {
-    // The arrow and name box reach ~50px past the wire, and a dragged label
-    // further still — so the bounding box has to account for them or the label
-    // is cropped at the sheet edge. Assert the property that matters (the tag
-    // lies inside the viewBox) rather than that the box grew: for a short name
-    // in the middle of the sheet it legitimately need not grow at all.
+    // A dragged name tag sits clear of the wire, so the bounding box has to
+    // account for it or the label is cropped at the sheet edge. Assert the
+    // property that matters (the tag lies inside the viewBox) rather than that
+    // the box grew: for a short name in the middle of the sheet it legitimately
+    // need not grow at all.
     name: "wire labels are never clipped by the viewBox",
     run: (fail) => {
       const cases: Record<string, unknown>[] = [
-        // Pushed well outside the parts in each direction, plus a long name.
-        { connector: true, arrowDir: "left", connectorLabel: "A_VERY_LONG_PORT_NAME" },
-        { connector: true, arrowDir: "right", connectorLabel: "A_VERY_LONG_PORT_NAME" },
-        { connector: true, arrowDir: "up", connectorLabel: "SUPPLY_RAIL" },
-        { connector: true, arrowDir: "down", connectorLabel: "SUPPLY_RAIL" },
-        // A net-name label dragged to the far corner of its allowed offset.
+        // Dragged to each far corner of its allowed offset, plus a long name.
         { showLabel: true, labelT: 0, labelOffset: { x: -40, y: -40 } },
+        { showLabel: true, labelT: 1, labelOffset: { x: 40, y: 40 } },
+        { showLabel: true, labelT: 0.5, labelOffset: { x: 0, y: -40 } },
       ];
       for (const data of cases) {
         const svg = labelledWireSvg(data);

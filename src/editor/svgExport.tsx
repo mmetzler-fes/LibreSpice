@@ -4,8 +4,9 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
 import { netLabelShape } from "./netLabelShape.js";
-import { orthoVertices, pointAtT, type ArrowDir, type FlowPoint, type WireData } from "./WireTool.js";
-import { wireConnectorShape, wireNameTag } from "./wireLabelShape.js";
+import type { PortType } from "@core/components/special/Special.js";
+import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
+import { wireNameTag } from "./wireLabelShape.js";
 import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
@@ -60,27 +61,29 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
     );
   }
 
-  if (type === "netlabel") {
-    // Port connector: hollow terminal circle + direction arrow + name tag,
-    // matching the editor's NetLabelNode (see netLabelShape).
-    const name = data.label || "NET";
-    const shape = netLabelShape(rotation);
+  if (type === "netlabel" || type === "netconnector") {
+    // Net label / net connector: hollow terminal circle, the direction arrow for
+    // the port type, and the name tag — matching the editor's NetTerminalNode
+    // (see netLabelShape), including the tag's user-dragged offset and the tint
+    // that tells a connector apart from a plain label.
+    const isConnector = type === "netconnector";
+    const name = data.label || (isConnector ? "PORT" : "NET");
+    const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
+    const shape = netLabelShape(portType);
     const th = 16;
     const tagW = Math.max(20, name.length * 6.8 + 12);
-    const rectX = shape.tag.anchor === "start" ? shape.tag.x : shape.tag.x - tagW / 2;
-    const rectY = shape.tag.baseline === "middle" ? shape.tag.y - th / 2 : shape.tag.y - th;
-    const textX = shape.tag.anchor === "start" ? rectX + 6 : shape.tag.x;
-    const isConnector = !!data.connector;
+    const off = data.labelOffset ?? { x: 0, y: 0 };
+    const rectX = (shape.tag.anchor === "start" ? shape.tag.x : shape.tag.x - tagW / 2) + off.x;
+    const rectY = (shape.tag.baseline === "middle" ? shape.tag.y - th / 2 : shape.tag.y - th) + off.y;
+    const textX = shape.tag.anchor === "start" ? rectX + 6 : shape.tag.x + off.x;
     return (
       <g transform={`translate(${x} ${y})`}>
-        {isConnector && (
-          <>
-            <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
-            <polygon points={shape.head} fill="#334155" />
-          </>
+        {shape.stem && (
+          <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
         )}
+        {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
         <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
-        <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={1} />
+        <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill={isConnector ? "#fde9c8" : "#e2e8f0"} stroke="#94a3b8" strokeWidth={1} />
         <text x={textX} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor={shape.tag.anchor}>{name}</text>
       </g>
     );
@@ -176,45 +179,30 @@ export interface NetNameLookup {
   nets: Map<string, { nodeLabel?: string }>;
 }
 
-/** A wire's on-screen labels, resolved and positioned (see wireLabelShape). */
+/** A wire's on-screen net-name tag, resolved and positioned (see wireLabelShape). */
 interface WireLabels {
-  netLabel: string | null;
-  connName: string | null;
-  connector: boolean;
-  arrowDir: ArrowDir;
-  dock: FlowPoint;
+  netLabel: string;
   anchor: FlowPoint;
-  showBox: boolean;
 }
 
 /**
- * Resolve what a wire displays, mirroring WireEdge's rules — minus `selected`,
- * which has no meaning in an export: the net-name box shows when `showLabel` is
- * on, or when a connector carries a *different* name (so both stay readable).
+ * Resolve the name a wire displays, mirroring WireEdge's rules — minus
+ * `selected`, which has no meaning in an export, so the tag shows exactly when
+ * `showLabel` is on.
  */
 function wireLabelsFor(edge: Edge, verts: FlowPoint[], circuit?: NetNameLookup): WireLabels | null {
   const data = edge.data as WireData | undefined;
-  const showLabel = !!data?.showLabel;
-  const connector = !!data?.connector;
-  if (!circuit || verts.length === 0 || (!showLabel && !connector)) return null;
+  if (!circuit || verts.length === 0 || !data?.showLabel) return null;
 
   const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
   const netId = port?.netId ?? null;
   const netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
-  const connectorLabel = (data?.connectorLabel as string | undefined)?.trim() || undefined;
-  const connName = connector ? (connectorLabel ?? netLabel) : null;
-  const connDiffers = !!(connector && connectorLabel && connectorLabel !== netLabel);
+  if (!netLabel) return null;
 
-  const labelT = typeof data?.labelT === "number" ? data.labelT : 0.5;
-  const off = (data?.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
+  const labelT = typeof data.labelT === "number" ? data.labelT : 0.5;
+  const off = (data.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
   const dock = pointAtT(verts, labelT);
-  return {
-    netLabel, connName, connector,
-    arrowDir: (data?.arrowDir as ArrowDir | undefined) ?? "right",
-    dock,
-    anchor: { x: dock.x + off.x, y: dock.y + off.y },
-    showBox: !!netLabel && (showLabel || connDiffers),
-  };
+  return { netLabel, anchor: { x: dock.x + off.x, y: dock.y + off.y } };
 }
 
 export function buildSchematicSvg(
@@ -247,8 +235,8 @@ export function buildSchematicSvg(
     wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint]));
   }
 
-  // Labels the wires carry (net name / connector). Resolved before the bounding
-  // box, since a connector's arrow and name box stick well clear of the wire.
+  // The net names the wires carry. Resolved before the bounding box, since a
+  // dragged name tag sits clear of the wire itself.
   const wireLabels = edges.map((e, i) => wireLabelsFor(e, wireVerts[i], circuit));
 
   // Bounding box over symbols, pins and every wire vertex (so a hand-routed
@@ -258,20 +246,13 @@ export function buildSchematicSvg(
   for (const n of nodes) { grow(n.position.x, n.position.y); grow(n.position.x + NODE_SIZE, n.position.y + NODE_SIZE); }
   for (const { x, y } of pinMap.values()) grow(x, y);
   for (const verts of wireVerts) for (const p of verts) grow(p.x, p.y);
-  // A connector's arrow + name box reach ~50px past the wire, and a dragged net
-  // name sits above its anchor: without these the labels get clipped at the edge.
+  // A dragged net name sits above its anchor: without this it gets clipped at
+  // the edge of the sheet.
   for (const l of wireLabels) {
     if (!l) continue;
-    if (l.connector) {
-      const s = wireConnectorShape(l.dock, l.arrowDir, l.connName ?? "");
-      grow(s.tag.x, s.tag.y);
-      grow(s.tag.x + s.tag.width, s.tag.y + s.tag.height);
-    }
-    if (l.showBox && l.netLabel) {
-      const t = wireNameTag(l.anchor, l.netLabel);
-      grow(t.x, t.y);
-      grow(t.x + t.width, t.y + t.height);
-    }
+    const t = wireNameTag(l.anchor, l.netLabel);
+    grow(t.x, t.y);
+    grow(t.x + t.width, t.y + t.height);
   }
   // The directive box is usually dragged clear of the parts, so it drives the
   // bounds as much as they do.
@@ -295,29 +276,11 @@ export function buildSchematicSvg(
   // editor stacks them (edges render below nodes in React Flow).
   const labels = wireLabels.map((l, i) => {
     if (!l) return null;
-    const s = l.connector ? wireConnectorShape(l.dock, l.arrowDir, l.connName ?? "") : null;
-    const t = l.showBox && l.netLabel ? wireNameTag(l.anchor, l.netLabel) : null;
+    const t = wireNameTag(l.anchor, l.netLabel);
     return (
       <g key={`wl${i}`}>
-        {s && (
-          <>
-            <circle cx={s.circle.cx} cy={s.circle.cy} r={s.circle.r} fill="none" stroke="#334155" strokeWidth={1.4} opacity={0.7} />
-            <line x1={s.stem.x1} y1={s.stem.y1} x2={s.stem.x2} y2={s.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
-            <polygon points={s.head} fill="#334155" />
-            {l.connName && (
-              <>
-                <rect x={s.tag.x} y={s.tag.y} width={s.tag.width} height={s.tag.height} rx={3} fill="#475569" />
-                <text x={s.tag.textX} y={s.tag.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.connName}</text>
-              </>
-            )}
-          </>
-        )}
-        {t && (
-          <>
-            <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
-            <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.netLabel}</text>
-          </>
-        )}
+        <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
+        <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.netLabel}</text>
       </g>
     );
   });
