@@ -35,6 +35,30 @@ function nodePhasor(result: SimulationResult, node: string, length: number) {
   return match ? result.complex[match] ?? null : null;
 }
 
+/**
+ * Complex series behind a reference — a raw variable, or a `V(a,b)` differential
+ * subtracted as phasors. Null for a transient result, which carries no phase.
+ */
+export function resolvePhasor(
+  result: SimulationResult, ref: string,
+): { re: Float64Array; im: Float64Array } | null {
+  if (!result.complex) return null;
+  if (result.complex[ref]) return result.complex[ref];
+  const diff = ref.match(DIFF_RE);
+  if (diff) {
+    const len = result.time?.length ?? 0;
+    const a = nodePhasor(result, diff[1], len);
+    const b = nodePhasor(result, diff[2], len);
+    if (!a || !b) return null;
+    const n = Math.min(a.re.length, b.re.length);
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) { re[i] = a.re[i] - b.re[i]; im[i] = a.im[i] - b.im[i]; }
+    return { re, im };
+  }
+  const match = matchResultVariable(result, [ref]);
+  return match ? result.complex[match] ?? null : null;
+}
+
 /** Resolve a single reference token (e.g. `V(out)`) to a data series. */
 export function resolveSeries(result: SimulationResult, ref: string): Float64Array | null {
   if (result.data[ref]) return result.data[ref];
@@ -65,6 +89,9 @@ export function resolveSeries(result: SimulationResult, ref: string): Float64Arr
   const match = matchResultVariable(result, [ref]);
   return match ? result.data[match] ?? null : null;
 }
+
+/** Names that mean "the phase of", in degrees (LTSpice writes `ph()`). */
+const PHASE_FNS = new Set(["ph", "phase"]);
 
 /** A value node compiled to `(sampleIndex) => number`. */
 type Eval = (i: number) => number;
@@ -101,6 +128,7 @@ function compile(src: string, result: SimulationResult, params: Record<string, n
   let pos = 0;
 
   const peek = () => toks[pos];
+  const peekAt = (n: number) => toks[pos + n];
   const eat = (op?: string): Tok => {
     const t = toks[pos];
     if (!t) throw new Error("Unexpected end of expression");
@@ -161,6 +189,27 @@ function compile(src: string, result: SimulationResult, params: Record<string, n
       return () => val;
     }
     if (t.t === "ref") {
+      // `ph(V(out))` — the phase of a signal, for a Bode plot. Tokenised as the
+      // bare name `ph` followed by `(`, since the reference pattern rejects
+      // nested parentheses. Only a *single* signal has a phase, so the argument
+      // is one reference rather than a general expression: phase arithmetic
+      // would need the whole evaluator to carry complex values, and `ph(a)+ph(b)`
+      // is not the phase of anything in particular.
+      if (PHASE_FNS.has(t.v.toLowerCase()) && peekAt(1)?.t === "op" && peekAt(1)?.v === "(") {
+        eat(); eat("(");
+        const arg = peek();
+        if (!arg || arg.t !== "ref") throw new Error(`${t.v}() takes one signal, e.g. ${t.v}(V(out))`);
+        eat(); eat(")");
+        const ph = resolvePhasor(result, arg.v);
+        if (!ph) {
+          throw new Error(
+            resolveSeries(result, arg.v)
+              ? `"${arg.v}" has no phase — only an .ac run carries one`
+              : `Unknown variable "${arg.v}"`,
+          );
+        }
+        return (i) => (Math.atan2(ph.im[i], ph.re[i]) * 180) / Math.PI;
+      }
       eat();
       const series = resolveSeries(result, t.v);
       if (!series) throw new Error(`Unknown variable "${t.v}"`);
