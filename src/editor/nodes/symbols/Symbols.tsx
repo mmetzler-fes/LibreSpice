@@ -117,6 +117,41 @@ export const PulseSourceSymbol = () => (
 );
 
 /**
+ * Logic gate, drawn in the IEC rectangular style (`&`, `≥1`, `=1`) rather than
+ * the ANSI distinctive shapes.
+ *
+ * The rectangle is one shape for every gate, so a variable input count needs no
+ * separate artwork per pin count — and the schematics this serves are German
+ * teaching sheets, where IEC is the notation in use.
+ */
+export const LogicGateSymbol = ({ gate = "and", inputs = 2 }: { gate?: string; inputs?: number }) => {
+  const marks: Record<string, string> = {
+    and: "&", nand: "&", or: "≥1", nor: "≥1",
+    xor: "=1", xnor: "=1", not: "1", buffer: "1",
+  };
+  const negated = ["nand", "nor", "xnor", "not"].includes(gate);
+  const n = ["not", "buffer"].includes(gate) ? 1 : inputs;
+  const span = 48;
+  return (
+    <g>
+      <rect x="-20" y="-28" width="40" height="56" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <text x="0" y="0" textAnchor="middle" dominantBaseline="central"
+        fontSize="13" fontFamily="sans-serif" fill="currentColor" stroke="none">
+        {marks[gate] ?? "&"}
+      </text>
+      {/* Input leads, spread to match the component's port positions. */}
+      {Array.from({ length: n }, (_, i) => {
+        const y = n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1));
+        return <line key={i} x1="-32" y1={y} x2="-20" y2={y} stroke="currentColor" strokeWidth="1.5" />;
+      })}
+      {/* Inversion bubble sits on the output edge, shortening the output lead. */}
+      {negated && <circle cx="24" cy="0" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      <line x1={negated ? 28 : 20} y1="0" x2="32" y2="0" stroke="currentColor" strokeWidth="1.5" />
+    </g>
+  );
+};
+
+/**
  * Piecewise-linear source. Drawn as a ramp-hold-ramp trace so it reads as
  * sloped segments at a glance, rather than the square edges of the pulse
  * source it sits next to in the type selector.

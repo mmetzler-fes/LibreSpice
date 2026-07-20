@@ -88,6 +88,18 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
     };
   }
 
+  // A logic gate: LTSpice has no notion of a variable-input behavioural gate,
+  // so the gate kind picks the closest Digital symbol and everything that
+  // defines its behaviour goes into our own attribute.
+  if (comp.gateType !== undefined) {
+    const pins = comp.ports.map((p: any) => p.name).join(",");
+    const extra = [
+      `gate=${comp.gateType}`, `inputs=${comp.inputs}`,
+      `vth=${comp.threshold}`, `vhigh=${comp.vHigh}`, `pins=${pins}`,
+    ].join(";");
+    return { value: String(comp.gateType).toUpperCase(), extra };
+  }
+
   if (comp.sourceType !== undefined) {
     const a: SymAttrs = { value: sourceSpec(comp) };
     if (comp.acAmplitude) a.value2 = `AC ${comp.acAmplitude}`;
@@ -210,7 +222,12 @@ export class LTSpiceExporter {
       // Keep the symbol the file was imported with (the IEC/European set, a
       // localized variant, …); only a freshly placed part falls back to the
       // default symbol for its type.
-      const symName = isSub ? subSymbol : (data.ascSymbol || TYPE_TO_SYMBOL[data.componentType] || "res");
+      // Pick the Digital symbol matching the gate so the file also *looks*
+      // right in LTSpice; the behaviour is restored from our own attribute.
+      const gateSym = data.componentType === "logicgate"
+        ? `Digital\\${({ not: "inv", buffer: "buf" } as Record<string, string>)[String((data as { gateType?: string }).gateType)] ?? String((data as { gateType?: string }).gateType ?? "and")}`
+        : null;
+      const symName = isSub ? subSymbol : (gateSym || data.ascSymbol || TYPE_TO_SYMBOL[data.componentType] || "res");
       symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg, mirrored)}`);
 
       // Persist caption positions so LTSpice (and our own re-import) keep them.

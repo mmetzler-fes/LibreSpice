@@ -3,27 +3,16 @@ Konvertierung Multisim Live (.msjs) -> LTSpice (.asc)
 
 Erzeugt am:            2026-07-20
 Schaltungen gesamt:    108
-Vollstaendig:          72
-Mit fehlenden Teilen:  36
+Vollstaendig:          84
+Mit fehlenden Teilen:  24
 
 1. FEHLENDE BAUTEILE (nach betroffenen Schaltungen)
 ------------------------------------------------------------
 
-   16x  Digital Constant
-   14x  Inverter
-   14x  Digital Clock
    11x  D Flip-Flop
-   10x  2-Input AND
     8x  Arbitrary Voltage Source
-    6x  2-Input OR
-    4x  4-Input AND
-    4x  2-Input NAND
     4x  Digital Hexadecimal 7-Segment Display
-    3x  INA333
-    3x  4-Input OR
     2x  Arbitrary Current Source
-    2x  3-Input AND
-    2x  5-Input OR
     2x  T Flip-flop
     1x  MCR08B
     1x  MCR8SN
@@ -31,7 +20,6 @@ Mit fehlenden Teilen:  36
     1x  LM317
     1x  BZB84-B6V2
     1x  D Latch
-    1x  Buffer
     1x  74LS139D
     1x  Ideal Comparator
     1x  74LS93N
@@ -50,68 +38,44 @@ Mit fehlenden Teilen:  36
         Arbitrary Current Source
   1_2_2_L_Zeitkonstante_mit_U
         Arbitrary Current Source
-  1_4_2_PT100-Sensor_Bruecke_mit_INA333
-        INA333
-  1_5_1_PT100_Sensor_in_4-Leiter-Schaltung _mit_INA333
-        INA333
-  1_5_2_PT100_Sensor_in_4-Leiter-Schaltung_mit_2_INA333
-        INA333
   1_5_3_Konstantstromquelle_mit_LM317
         LM317
-  2_0_Disjunktive_Normalform
-        3-Input AND, 4-Input OR, Inverter, Digital Constant
-  2_0_Disjunktive_Normalform_Lsg
-        3-Input AND, 4-Input OR, Inverter, Digital Constant
-  2_1_Tiefgaragensteuerung
-        4-Input AND, Inverter, 5-Input OR, Digital Constant
-  2_1_Tiefgaragensteuerung_Lsg
-        4-Input AND, Inverter, 5-Input OR, 2-Input AND, Digital Constant
   5_7_2_Spannungsstabilisierung_mit_Z-Diode
         BZB84-B6V2
-  6_1_1_Einfaches_RS_Flipflop
-        2-Input OR, 2-Input AND, Inverter, Digital Constant, 2-Input NAND
-  6_1_2_Taktzustandsgesteuertes_RS_Flipflop
-        Digital Constant, 2-Input NAND, Digital Clock
-  6_1_3_Taktzustandsgesteuertes_D_Flipflop
-        Digital Constant, 2-Input NAND, Digital Clock, Inverter
   6_1_4_Taktflankengesteuertes_D_Flipflop
-        Digital Constant, Digital Clock, Inverter, D Latch, 2-Input AND, D Flip-Flop
+        D Latch, D Flip-Flop
   6_1_5_Toggle_Flipflop
-        Digital Constant, Digital Clock, D Flip-Flop, T Flip-flop
+        D Flip-Flop, T Flip-flop
   6_2_1_Asynchroner_Frequenzteiler
-        D Flip-Flop, Digital Clock, Digital Hexadecimal 7-Segment Display
+        D Flip-Flop, Digital Hexadecimal 7-Segment Display
   6_2_1_Asynchroner_Frequenzteiler_Lsg
-        D Flip-Flop, Digital Clock, Digital Hexadecimal 7-Segment Display
+        D Flip-Flop, Digital Hexadecimal 7-Segment Display
   6_2_2_Asynchroner_Dezimalzähler
-        Digital Clock, T Flip-flop, Digital Constant, 2-Input AND
+        T Flip-flop
   6_3_1_Schieberegister_Prinzip (1)
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source
+        D Flip-Flop, Arbitrary Voltage Source
   6_3_1_Schieberegister_Prinzip
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source
+        D Flip-Flop, Arbitrary Voltage Source
   6_3_2_Rechts_Links_Schieberegister
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+        D Flip-Flop, Arbitrary Voltage Source
   6_3_2_Rechts_Links_Schieberegister_Lsg
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+        D Flip-Flop, Arbitrary Voltage Source
   6_3_3_Universal_Schieberegister
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+        D Flip-Flop, Arbitrary Voltage Source
   6_3_3_Universal_Schieberegister_Lsg
-        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
-  8_1_1_2_DAC_4_Bit_mit_Kettenleiter
-        Digital Constant, 4-Input AND, Buffer, Inverter
+        D Flip-Flop, Arbitrary Voltage Source
   8_1_1_DAC_mit_Kettenleiter
-        74LS139D, Inverter, Digital Constant
+        74LS139D
   8_2_2_Parallel_Wandler_Flash
-        Inverter, 4-Input OR, 2-Input AND, 2-Input OR, Digital Hexadecimal 7-Segment Display
+        Digital Hexadecimal 7-Segment Display
   8_2_3_Dual_Slope_ADC
-        Ideal Comparator, 74LS93N, 2-Input AND, Digital Clock, 4-Input AND, D Flip-Flop, Digital Hexadecimal 7-Segment Display
+        Ideal Comparator, 74LS93N, D Flip-Flop, Digital Hexadecimal 7-Segment Display
   9_4_1_Wien_Oszillator_1
         Arbitrary Voltage Source
   9_4_2_Wien_Oszillator_2
         Arbitrary Voltage Source
   9_4_3_Wien_Oszillator_Amp_Controled (1)
         Thermal Noise
-  Trigger
-        2-Input NAND
 
 3. ERSETZTE BAUTEILE (konvertiert, aber als Ersatzmodell)
 ------------------------------------------------------------
@@ -135,32 +99,64 @@ Mit fehlenden Teilen:  36
         SPST
   1_1_1_C_Ladekurve
         SPDT
+  2_0_Disjunktive_Normalform
+        3-Input AND (ideales Gatter, ohne Laufzeit), 4-Input OR (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle)
+  2_0_Disjunktive_Normalform_Lsg
+        3-Input AND (ideales Gatter, ohne Laufzeit), 4-Input OR (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle)
   2_1_1_Buck_Konverter
         Transistor Switch (Steuereingang control entfällt)
   2_1_2_Boost_Konverter
         Transistor Switch (Steuereingang control entfällt)
   2_1_3_Spannungsinverter
         Transistor Switch (Steuereingang control entfällt)
+  2_1_Tiefgaragensteuerung
+        4-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), 5-Input OR (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle)
+  2_1_Tiefgaragensteuerung_Lsg
+        4-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), 5-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle)
   5_9_1_Schalten_mit_Transistor
         SPST
+  6_1_1_Einfaches_RS_Flipflop
+        2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), 2-Input NAND (ideales Gatter, ohne Laufzeit)
+  6_1_2_Taktzustandsgesteuertes_RS_Flipflop
+        Digital Constant (als Spannungsquelle), 2-Input NAND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle)
+  6_1_3_Taktzustandsgesteuertes_D_Flipflop
+        Digital Constant (als Spannungsquelle), 2-Input NAND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle), Inverter (ideales Gatter, ohne Laufzeit)
+  6_1_4_Taktflankengesteuertes_D_Flipflop
+        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle), Inverter (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit)
+  6_1_5_Toggle_Flipflop
+        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle)
+  6_2_1_Asynchroner_Frequenzteiler
+        Digital Clock (als Spannungsquelle)
+  6_2_1_Asynchroner_Frequenzteiler_Lsg
+        Digital Clock (als Spannungsquelle)
+  6_2_2_Asynchroner_Dezimalzähler
+        Digital Clock (als Spannungsquelle), Digital Constant (als Spannungsquelle), 2-Input AND (ideales Gatter, ohne Laufzeit)
+  6_3_1_Schieberegister_Prinzip (1)
+        Digital Clock (als Spannungsquelle)
+  6_3_1_Schieberegister_Prinzip
+        Digital Clock (als Spannungsquelle)
   6_3_2_Rechts_Links_Schieberegister
-        SPDT
+        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_2_Rechts_Links_Schieberegister_Lsg
-        SPDT
+        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_3_Universal_Schieberegister
-        SPDT
+        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_3_Universal_Schieberegister_Lsg
-        SPDT
+        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   8_1_1_2_DAC_4_Bit_mit_Kettenleiter
-        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt)
+        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt), Digital Constant (als Spannungsquelle), 4-Input AND (ideales Gatter, ohne Laufzeit), Buffer (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit)
   8_1_1_DAC_mit_Kettenleiter
-        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt)
+        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle)
   8_1_2_DAC_mit_Summierverstärker
         SPST
   8_1_3_DAC_mit_R2R_Netzwerk (1)
         SPDT
+  8_2_2_Parallel_Wandler_Flash
+        Inverter (ideales Gatter, ohne Laufzeit), 4-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), 2-Input OR (ideales Gatter, ohne Laufzeit)
   8_2_3_Dual_Slope_ADC
-        Voltage Controlled SPDT (Steuereingang ctrlp/ctrln entfällt)
+        2-Input AND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle), Voltage Controlled SPDT (Steuereingang ctrlp/ctrln entfällt), 4-Input AND (ideales Gatter, ohne Laufzeit)
+  Trigger
+        2-Input NAND (ideales Gatter, ohne Laufzeit)
 
 4. KURZGESCHLOSSENE NETZE
 ------------------------------------------------------------
@@ -171,8 +167,18 @@ Mit fehlenden Teilen:  36
   1_3_2_PT100-Sensor_mit_Brueckenschaltung
         0 = 3
   1_4_2_PT100-Sensor_Bruecke_mit_INA333
-        0 = 3
+        0 = Ut, 0 = 3
   1_4_3_PT100-Sensor_Bruecke_Instrumentenverstärker
         0 = 3, 6 = 7
+  1_5_1_PT100_Sensor_in_4-Leiter-Schaltung _mit_INA333
+        1 = 3
+  1_5_2_PT100_Sensor_in_4-Leiter-Schaltung_mit_2_INA333
+        1 = 3, 5 = Uth
+  6_3_3_Universal_Schieberegister
+        0 = 23
+  6_3_3_Universal_Schieberegister_Lsg
+        0 = 23
+  8_1_1_DAC_mit_Kettenleiter
+        16 = 7
   Trigger
         0 = 1, 0 = 3

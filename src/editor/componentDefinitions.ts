@@ -24,9 +24,10 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "vsource", label: "Voltage Source", category: "Sources", defaultLabel: "V1", description: "Voltage Source (DC / Sine / Pulse — selectable)" },
   { type: "isource", label: "I Source", category: "Sources", defaultLabel: "I1", description: "Current Source" },
   { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },
+  { type: "logicgate", label: "Logic Gate", category: "Digital", defaultLabel: "U1", description: "AND / OR / NAND / NOR / XOR / NOT / Buffer — behavioural, 1–5 inputs" },
   { type: "ground", label: "Ground", category: "Special", defaultLabel: "GND", description: "Ground reference (node 0)" },
   { type: "netlabel", label: "Net Label", category: "Special", defaultLabel: "NET1", description: "Named terminal – nets with the same name are connected (LTSpice FLAG)" },
   { type: "netconnector", label: "Net Connector", category: "Special", defaultLabel: "PORT1", description: "Named terminal that is also an interface pin – In / Out / BiDir (LTSpice FLAG + IOPIN)" },
 ];
 
-export const CATEGORIES = ["Passives", "Semiconductors", "Active", "Sources", "Special"];
+export const CATEGORIES = ["Passives", "Semiconductors", "Active", "Digital", "Sources", "Special"];

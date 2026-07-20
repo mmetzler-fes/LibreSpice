@@ -464,6 +464,17 @@ export class LTSpiceParser {
 
     // Parse values
     const c = comp as any;
+
+    // A logic gate carries its behaviour in our own attribute; the Digital
+    // symbol name alone cannot say how many inputs it has or where its
+    // threshold sits.
+    if (cType === "logicgate") {
+      if (lsAttrs.gate) c.gateType = lsAttrs.gate;
+      if (lsAttrs.inputs) c.inputs = Number(lsAttrs.inputs);
+      if (lsAttrs.vth) c.threshold = Number(lsAttrs.vth);
+      if (lsAttrs.vhigh) c.vHigh = Number(lsAttrs.vhigh);
+      c.rebuildPorts?.();
+    }
     if (cType === "vsource" || cType === "isource") {
       // Generalized source: waveform kind + every field of its spec, so a phase,
       // delay or damping factor set in LTSpice (or by us on the last save) is

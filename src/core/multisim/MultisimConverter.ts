@@ -62,6 +62,7 @@ interface SwitchSpec {
 
 interface Ctx {
   symbolLines: string[];
+  flags: string[];
   directives: string[];
   pinPos: PinPos;
   used: Set<string>;
@@ -147,6 +148,13 @@ const TYPES: Record<string, PartType> = {
   // Both map onto UniversalOpAmp2, whose pin order is In+ In- V+ V- OUT.
   "3 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", null, null, "OUT"], value: () => "UniversalOpAmp2" },
   "5 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "V+", "V-", "OUT"], value: () => "UniversalOpAmp2" },
+  // The INA333 is an instrumentation amplifier, not an op-amp: its gain is set
+  // by an external resistor across RG1/RG2 and its output is referred to REF.
+  // Mapped onto the generic op-amp those three pins have no counterpart, so the
+  // converted stage has open-loop gain instead of the gain the circuit set, and
+  // REF is lost. It converts so the schematic is complete — the amplification
+  // has to be rebuilt by hand.
+  INA333: { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "VS+", "VS-", "OUT"], value: () => "UniversalOpAmp2" },
 };
 
 /**
@@ -348,6 +356,141 @@ function rotate([x, y]: Pt, deg: number, mirrored: boolean): Pt {
     case 270: return [y, -x];
     default: return [x, y];
   }
+}
+
+/**
+ * Multisim's logic gates, as gate kind plus input connection names.
+ *
+ * They convert to LibreSpice's behavioural gate, which is ideal: no propagation
+ * delay and no fan-out limit. That is the right abstraction for the logic
+ * exercises these come from, but it means a circuit relying on gate delay (a
+ * ring oscillator, a race) will not behave as it did in Multisim.
+ */
+const GATES: Record<string, { gate: string; ins: string[] }> = {
+  Inverter: { gate: "not", ins: ["A"] },
+  Buffer: { gate: "buffer", ins: ["A"] },
+  "2-Input AND": { gate: "and", ins: ["A", "B"] },
+  "3-Input AND": { gate: "and", ins: ["A", "B", "C"] },
+  "4-Input AND": { gate: "and", ins: ["A", "B", "C", "D"] },
+  "2-Input OR": { gate: "or", ins: ["A", "B"] },
+  "3-Input OR": { gate: "or", ins: ["A", "B", "C"] },
+  "4-Input OR": { gate: "or", ins: ["A", "B", "C", "D"] },
+  "5-Input OR": { gate: "or", ins: ["A", "B", "C", "D", "E"] },
+  "2-Input NAND": { gate: "nand", ins: ["A", "B"] },
+  "2-Input NOR": { gate: "nor", ins: ["A", "B"] },
+  "2-Input XOR": { gate: "xor", ins: ["A", "B"] },
+};
+
+/** LTSpice's Digital library spells NOT and Buffer differently. */
+const GATE_SYMBOL: Record<string, string> = { not: "inv", buffer: "buf" };
+
+/** Logic levels the converted gates and digital sources use. */
+const LOGIC_HIGH = 5;
+const LOGIC_THRESHOLD = 2.5;
+
+/**
+ * Pin offsets of a converted gate, mirroring ltspiceGeometry.logicGatePinOffsets
+ * so the emitted `.asc` and the editor agree on where the pins sit.
+ */
+function gatePinOffsets(n: number): Pt[] {
+  const span = 48;
+  const offs: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    offs.push([0, 40 + (n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1)))]);
+  }
+  offs.push([72, 40]);
+  return offs;
+}
+
+/**
+ * Emit a logic gate.
+ *
+ * Anchored on its output, because that pin exists on every gate and is the one
+ * the following stage is wired to; the inputs then fall out of the symbol's own
+ * geometry and the net-list reconciliation labels whatever does not line up.
+ */
+function emitGate(part: any, inst: any, doc: any, spec: { gate: string; ins: string[] }, ctx: Ctx): void {
+  const { symbolLines, pinPos, used } = ctx;
+  const name = uniqueName(inst?.refdes?.prefix || "U", inst?.refdes?.number, used);
+
+  const symId = inst?.activesymbol;
+  const map: Record<string, string> = {};
+  const bp = doc.blueprints?.components?.[part.component]?.component;
+  for (const sc of bp?.symbolConfigurations ?? []) {
+    for (const sec of sc.sections ?? []) {
+      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
+    }
+  }
+  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
+  const at = (conn: string, p: Pt) => { const id = map[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
+
+  const offs = gatePinOffsets(spec.ins.length);
+  const outLocal = svgPins[map["Y"]];
+  const outAbs: Pt = outLocal ? scaled(applyMatrix(part.matrix, outLocal), ctx.to) : [0, 0];
+  const origin: Pt = [outAbs[0] - offs[offs.length - 1][0], outAbs[1] - offs[offs.length - 1][1]];
+
+  const symName = `Digital\\${GATE_SYMBOL[spec.gate] ?? spec.gate}`;
+  const pinNames = [...spec.ins.map((_, i) => `In${i + 1}`), "Out"];
+  symbolLines.push(`SYMBOL ${symName} ${origin[0]} ${origin[1]} R0`);
+  symbolLines.push(`SYMATTR InstName ${name}`);
+  symbolLines.push(`SYMATTR Value ${spec.gate.toUpperCase()}`);
+  symbolLines.push(
+    `SYMATTR LibreSpice gate=${spec.gate};inputs=${spec.ins.length};` +
+    `vth=${LOGIC_THRESHOLD};vhigh=${LOGIC_HIGH};pins=${pinNames.join(",")}`,
+  );
+
+  spec.ins.forEach((conn, i) => at(conn, [origin[0] + offs[i][0], origin[1] + offs[i][1]]));
+  at("Y", outAbs);
+}
+
+/**
+ * Emit a digital constant or clock as an ordinary voltage source.
+ *
+ * Both have a single pin in Multisim and are implicitly referenced to ground, so
+ * the source's negative terminal gets its own ground flag rather than being left
+ * floating — which ngspice would reject as an open circuit.
+ */
+function emitDigitalSource(part: any, inst: any, doc: any, kind: "constant" | "clock", ctx: Ctx): void {
+  const { symbolLines, pinPos, flags, used } = ctx;
+  const name = uniqueName(`V${inst?.refdes?.prefix || "DG"}`, inst?.refdes?.number, used);
+  const p = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
+
+  let value: string;
+  if (kind === "clock") {
+    const freq = parseFloat(si(p.Frequency)) || 1000;
+    const duty = (parseFloat(si(p.Duty)) || 50) / 100;
+    const delay = si(p.Delay) || "0";
+    const period = 1 / freq;
+    value = `PULSE(0 ${LOGIC_HIGH} ${delay} 1n 1n ${(period * duty).toPrecision(6)} ${period.toPrecision(6)})`;
+  } else {
+    // A digital constant is a fixed level; anything non-zero is logic high.
+    const lvl = si(p.Value ?? p.State ?? p.Level);
+    value = String(lvl === "" || parseFloat(lvl) !== 0 ? LOGIC_HIGH : 0);
+  }
+
+  const symId = inst?.activesymbol;
+  const map: Record<string, string> = {};
+  const bp = doc.blueprints?.components?.[part.component]?.component;
+  for (const sc of bp?.symbolConfigurations ?? []) {
+    for (const sec of sc.sections ?? []) {
+      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
+    }
+  }
+  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
+  const conn = bp?.connections?.[0]?.connName ?? "1";
+  const local = svgPins[map[conn]];
+  const outAbs: Pt = local ? scaled(applyMatrix(part.matrix, local), ctx.to) : [0, 0];
+
+  const VS = PIN_OFFSETS.voltage;
+  const origin: Pt = [outAbs[0] - VS[0][0], outAbs[1] - VS[0][1]];
+  symbolLines.push(`SYMBOL voltage ${origin[0]} ${origin[1]} R0`);
+  symbolLines.push(`SYMATTR InstName ${name}`);
+  symbolLines.push(`SYMATTR Value ${value}`);
+
+  const minus: Pt = [origin[0] + VS[1][0], origin[1] + VS[1][1]];
+  flags.push(`FLAG ${minus[0]} ${minus[1]} 0`);
+  const id = map[conn];
+  if (id !== undefined) pinPos[`${part.guid}/${id}`] = outAbs;
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +850,7 @@ export function convert(doc: any): ConversionResult {
     if (!bp || num === null || num === undefined) continue;
     const prefix = TYPES[bp.name]?.forcePrefix
       || (SWITCHES[bp.name] || bp.name === "Potentiometer" ? "R" : null)
+      || (bp.name === "Digital Constant" || bp.name === "Digital Clock" ? `V${cs?.refdes?.prefix ?? "DG"}` : null)
       || cs?.refdes?.prefix || TYPES[bp.name]?.prefix;
     if (prefix) used.add(`${prefix}${num}`);
   }
@@ -716,10 +860,23 @@ export function convert(doc: any): ConversionResult {
     const bp = blueprints[part.component]?.component;
     if (!bp) continue;
 
-    const ctx = { symbolLines, directives, pinPos, used, wires, to };
+    const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, to };
 
     if (bp.name === "Potentiometer") {
       emitPotentiometer(part, instances[part.guid], doc, ctx);
+      continue;
+    }
+
+    if (GATES[bp.name]) {
+      emitGate(part, instances[part.guid], doc, GATES[bp.name], ctx);
+      substituted.push(`${bp.name} (ideales Gatter, ohne Laufzeit)`);
+      continue;
+    }
+
+    if (bp.name === "Digital Constant" || bp.name === "Digital Clock") {
+      emitDigitalSource(part, instances[part.guid], doc,
+        bp.name === "Digital Clock" ? "clock" : "constant", ctx);
+      substituted.push(`${bp.name} (als Spannungsquelle)`);
       continue;
     }
 

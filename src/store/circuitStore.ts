@@ -212,10 +212,14 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // Likewise the net connector's port type: it is what picks the arrow the node
     // draws, so without this the symbol would keep the old direction.
     const portType = (component as { portType?: string }).portType;
+    // A logic gate's symbol is drawn from these, so the node needs them too —
+    // otherwise changing the gate or its input count redraws nothing.
+    const gateType = (component as { gateType?: string }).gateType;
+    const inputs = (component as { inputs?: number }).inputs;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }) } }
+          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }), ...(gateType !== undefined && { gateType }), ...(inputs !== undefined && { inputs }) } }
           : n,
       ),
       propertyVersion: state.propertyVersion + 1,

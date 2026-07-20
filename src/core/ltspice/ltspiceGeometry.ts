@@ -24,6 +24,9 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   nmos: "mosfet_n", pmos: "mosfet_p",
   voltage: "vsource", current: "isource",
   opamp: "opamp", opamp2: "opamp", universalopamp: "opamp", universalopamp2: "opamp",
+  // LTSpice's Digital library; the exact gate comes from our own attribute.
+  and: "logicgate", or: "logicgate", nand: "logicgate", nor: "logicgate",
+  xor: "logicgate", xnor: "logicgate", inv: "logicgate", buf: "logicgate",
 };
 
 const SYMBOL_TO_TYPE_LC: Record<string, ComponentType> = Object.fromEntries(
@@ -62,6 +65,8 @@ export const TYPE_TO_SYMBOL: Record<string, string> = {
   vsource: "voltage", isource: "current",
   sinesource: "voltage", pulsesource: "voltage",
   opamp: "UniversalOpAmp2",
+  // Overridden per gate by the exporter (Digital\\and, \\or, …); this is the fallback.
+  logicgate: "Digital\\and",
 };
 
 export interface PinOffset { handle: string; dx: number; dy: number }
@@ -162,13 +167,35 @@ export function subcircuitPinOffsets(pinNames: string[], symbolName?: string): P
   );
 }
 
+/**
+ * Pin offsets for a logic gate: inputs down the left edge, output on the right.
+ *
+ * The gate is the only device whose pin count is a property, so it cannot use a
+ * fixed table — the offsets are derived from the number of inputs, mirroring
+ * LogicGate.createPorts so schematic and `.asc` agree.
+ */
+function logicGatePinOffsets(pinNames: string[]): PinOffset[] {
+  const ins = pinNames.slice(0, -1);
+  const out = pinNames[pinNames.length - 1] ?? "Out";
+  const span = 48;
+  const offsets = ins.map((name, i) => ({
+    handle: name,
+    dx: 0,
+    dy: CENTER + (ins.length === 1 ? 0 : Math.round(-span / 2 + (span * i) / (ins.length - 1))),
+  }));
+  offsets.push({ handle: out, dx: CENTER + 32, dy: CENTER });
+  return offsets;
+}
+
 /** Pin offsets for any node, including library parts (which have no fixed table). */
 export function offsetsForNode(
   type: string, deg: number, pinNames?: string[], symbolName?: string, mirrored = false,
 ): PinOffset[] {
   const base = type === "subcircuit"
     ? subcircuitPinOffsets(pinNames ?? [], symbolName)
-    : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
+    : type === "logicgate"
+      ? logicGatePinOffsets(pinNames ?? ["In1", "In2", "Out"])
+      : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
   return rotateOffsets(mirrorOffsets(base, mirrored), deg);
 }
 

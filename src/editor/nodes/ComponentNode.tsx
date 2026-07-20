@@ -18,6 +18,7 @@ import {
   SineSourceSymbol,
   PulseSourceSymbol,
   PWLSourceSymbol,
+  LogicGateSymbol,
   GroundSymbol,
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
@@ -40,6 +41,7 @@ export type ComponentType =
   | "zener"
   | "schottky"
   | "opamp"
+  | "logicgate"
   | "bjt_npn"
   | "bjt_pnp"
   | "mosfet_n"
@@ -67,6 +69,10 @@ export interface ComponentNodeData {
   mirrored?: boolean;
   /** For the generalized voltage source: "DC" | "Sine" | "Pulse". */
   sourceType?: string;
+  /** For a logic gate: "and" | "or" | "nand" | … — picks the IEC mark drawn. */
+  gateType?: string;
+  /** Logic-gate input count; the symbol draws one lead per input. */
+  inputs?: number;
   /** Net-connector direction (LTSpice `IOPIN`): "None" | "In" | "Out" | "BiDir". */
   portType?: PortType;
   hasProbe?: boolean;
@@ -198,6 +204,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   sinesource: SineSourceSymbol,
   pulsesource: PulseSourceSymbol,
   ground: GroundSymbol,
+  logicgate: GroundSymbol, // unused: bound with its gate props at the call site
   netlabel: GroundSymbol, // unused: net-label nodes render their own tag
   netconnector: GroundSymbol, // unused: net-connector nodes render their own symbol
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
@@ -700,10 +707,14 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   if (asySym) {
     return <AsyComponentNode sym={asySym} data={nodeData} nodeId={id} selected={selected} />;
   }
+  // The logic gate is the one symbol whose drawing depends on its properties
+  // (mark and lead count), so it is bound here rather than looked up bare.
   const SymbolComponent =
-    nodeData.componentType === "vsource"
-      ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol
-      : SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
+    nodeData.componentType === "logicgate"
+      ? () => <LogicGateSymbol gate={nodeData.gateType} inputs={nodeData.inputs} />
+      : nodeData.componentType === "vsource"
+        ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol
+        : SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
   const rotation = nodeData.rotation ?? 0;
   const mirrored = !!nodeData.mirrored;
   const isGround = nodeData.componentType === "ground";

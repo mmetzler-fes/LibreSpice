@@ -4,6 +4,7 @@ import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, LED, Zener, Schottky, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
 import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector } from "@core/components/special/Special.js";
+import { LogicGate, GATE_LABELS } from "@core/components/digital/LogicGate.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
@@ -25,6 +26,7 @@ export function createSpiceComponent(
     case "zener":       return new Zener(id, label, pos);
     case "schottky":    return new Schottky(id, label, pos);
     case "opamp":       return new OpAmp(id, label, pos);
+    case "logicgate":   return new LogicGate(id, label, pos);
     case "bjt_npn":     return new BJT(id, label, pos, "NPN");
     case "bjt_pnp":     return new BJT(id, label, pos, "PNP");
     case "mosfet_n":    return new MOSFET(id, label, pos, "NMOS");
@@ -177,6 +179,10 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
     case "pulsesource": {
       const p = component as unknown as { pulsedValue: number; period: number };
       return `${fmtSI(p.pulsedValue, "V")} ${fmtSI(p.period, "s")}`;
+    }
+    case "logicgate": {
+      const g = component as unknown as { gateType: keyof typeof GATE_LABELS; inputs: number };
+      return GATE_LABELS[g.gateType] ?? "";
     }
     default: return "";
   }

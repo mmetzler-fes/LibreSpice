@@ -17,6 +17,7 @@ import { runToolbarTests } from "./toolbar.test.js";
 import { runWireConnectorTests } from "./wireConnector.test.js";
 import { runAscExamplesTests } from "./ascExamples.test.js";
 import { runPwlSourceTests } from "./pwlSource.test.js";
+import { runLogicGateTests } from "./logicGate.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -59,6 +60,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Reads every examples/*.asc, saves it to a temp file and re-reads it.
     { name: "ASC examples round-trip", ...(await runAscExamplesTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
+    { name: "Logic gates", ...runLogicGateTests() },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];
