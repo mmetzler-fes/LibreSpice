@@ -376,10 +376,14 @@ export function Toolbar() {
       <TBtn title="Open (Ctrl+O)" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
       </TBtn>
+      {/* Deliberately not a folder glyph: this sits between two folder buttons,
+          and a third folder was indistinguishable from them. An arrow dropping
+          into a tray is the conventional "import" mark. */}
       <TBtn title="Multisim Live (.msjs) importieren" onClick={handleImportMultisim}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          <path d="M12 10v7 M9 14l3 3 3-3" />
+          <path d="M12 3v10" />
+          <path d="M8 9l4 4 4-4" />
+          <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4" />
         </svg>
       </TBtn>
       <TBtn title="Open folder — loads the .asc and its matching .plt plot settings" onClick={handleOpenFolder}>
