@@ -1,0 +1,178 @@
+Konvertierung Multisim Live (.msjs) -> LTSpice (.asc)
+============================================================
+
+Erzeugt am:            2026-07-20
+Schaltungen gesamt:    108
+Vollstaendig:          72
+Mit fehlenden Teilen:  36
+
+1. FEHLENDE BAUTEILE (nach betroffenen Schaltungen)
+------------------------------------------------------------
+
+   16x  Digital Constant
+   14x  Inverter
+   14x  Digital Clock
+   11x  D Flip-Flop
+   10x  2-Input AND
+    8x  Arbitrary Voltage Source
+    6x  2-Input OR
+    4x  4-Input AND
+    4x  2-Input NAND
+    4x  Digital Hexadecimal 7-Segment Display
+    3x  INA333
+    3x  4-Input OR
+    2x  Arbitrary Current Source
+    2x  3-Input AND
+    2x  5-Input OR
+    2x  T Flip-flop
+    1x  MCR08B
+    1x  MCR8SN
+    1x  MCR716
+    1x  LM317
+    1x  BZB84-B6V2
+    1x  D Latch
+    1x  Buffer
+    1x  74LS139D
+    1x  Ideal Comparator
+    1x  74LS93N
+    1x  Thermal Noise
+
+2. BETROFFENE SCHALTUNGEN
+------------------------------------------------------------
+
+  11_1_1_Thyristor_als_Gleichstromschalter_1
+        MCR08B
+  11_1_2_Thyristor_als_Gleichstromschalter_2
+        MCR8SN
+  11_2_3_Nullspannungsschalter_mit_Thyristor (1)
+        MCR716
+  1_2_1_Induktion_Energie_der_Spule
+        Arbitrary Current Source
+  1_2_2_L_Zeitkonstante_mit_U
+        Arbitrary Current Source
+  1_4_2_PT100-Sensor_Bruecke_mit_INA333
+        INA333
+  1_5_1_PT100_Sensor_in_4-Leiter-Schaltung _mit_INA333
+        INA333
+  1_5_2_PT100_Sensor_in_4-Leiter-Schaltung_mit_2_INA333
+        INA333
+  1_5_3_Konstantstromquelle_mit_LM317
+        LM317
+  2_0_Disjunktive_Normalform
+        3-Input AND, 4-Input OR, Inverter, Digital Constant
+  2_0_Disjunktive_Normalform_Lsg
+        3-Input AND, 4-Input OR, Inverter, Digital Constant
+  2_1_Tiefgaragensteuerung
+        4-Input AND, Inverter, 5-Input OR, Digital Constant
+  2_1_Tiefgaragensteuerung_Lsg
+        4-Input AND, Inverter, 5-Input OR, 2-Input AND, Digital Constant
+  5_7_2_Spannungsstabilisierung_mit_Z-Diode
+        BZB84-B6V2
+  6_1_1_Einfaches_RS_Flipflop
+        2-Input OR, 2-Input AND, Inverter, Digital Constant, 2-Input NAND
+  6_1_2_Taktzustandsgesteuertes_RS_Flipflop
+        Digital Constant, 2-Input NAND, Digital Clock
+  6_1_3_Taktzustandsgesteuertes_D_Flipflop
+        Digital Constant, 2-Input NAND, Digital Clock, Inverter
+  6_1_4_Taktflankengesteuertes_D_Flipflop
+        Digital Constant, Digital Clock, Inverter, D Latch, 2-Input AND, D Flip-Flop
+  6_1_5_Toggle_Flipflop
+        Digital Constant, Digital Clock, D Flip-Flop, T Flip-flop
+  6_2_1_Asynchroner_Frequenzteiler
+        D Flip-Flop, Digital Clock, Digital Hexadecimal 7-Segment Display
+  6_2_1_Asynchroner_Frequenzteiler_Lsg
+        D Flip-Flop, Digital Clock, Digital Hexadecimal 7-Segment Display
+  6_2_2_Asynchroner_Dezimalzähler
+        Digital Clock, T Flip-flop, Digital Constant, 2-Input AND
+  6_3_1_Schieberegister_Prinzip (1)
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source
+  6_3_1_Schieberegister_Prinzip
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source
+  6_3_2_Rechts_Links_Schieberegister
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+  6_3_2_Rechts_Links_Schieberegister_Lsg
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+  6_3_3_Universal_Schieberegister
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+  6_3_3_Universal_Schieberegister_Lsg
+        D Flip-Flop, Digital Clock, Arbitrary Voltage Source, 2-Input OR, 2-Input AND, Inverter, Digital Constant
+  8_1_1_2_DAC_4_Bit_mit_Kettenleiter
+        Digital Constant, 4-Input AND, Buffer, Inverter
+  8_1_1_DAC_mit_Kettenleiter
+        74LS139D, Inverter, Digital Constant
+  8_2_2_Parallel_Wandler_Flash
+        Inverter, 4-Input OR, 2-Input AND, 2-Input OR, Digital Hexadecimal 7-Segment Display
+  8_2_3_Dual_Slope_ADC
+        Ideal Comparator, 74LS93N, 2-Input AND, Digital Clock, 4-Input AND, D Flip-Flop, Digital Hexadecimal 7-Segment Display
+  9_4_1_Wien_Oszillator_1
+        Arbitrary Voltage Source
+  9_4_2_Wien_Oszillator_2
+        Arbitrary Voltage Source
+  9_4_3_Wien_Oszillator_Amp_Controled (1)
+        Thermal Noise
+  Trigger
+        2-Input NAND
+
+3. ERSETZTE BAUTEILE (konvertiert, aber als Ersatzmodell)
+------------------------------------------------------------
+
+  Schalter werden als Parameterwiderstand abgebildet:
+    geschlossen = 1n   offen = 1G
+  Der Wert steht als .param in der Schaltung und laesst sich dort
+  umschalten. Die gespeicherte Schalterstellung ist voreingestellt.
+
+  Potentiometer werden als zwei Widerstaende mit gemeinsamem
+  Stellungsparameter T_<name> abgebildet.
+
+  ACHTUNG: Spannungsgesteuerte Schalter verlieren ihren Steuer-
+  eingang - ein Widerstand kann keinem Steuersignal folgen. Diese
+  Kontakte sind danach statisch, die Schaltung simuliert also nicht
+  mehr dasselbe Verhalten wie im Original.
+
+  11_1_1_Thyristor_als_Gleichstromschalter_1
+        SPST
+  11_1_2_Thyristor_als_Gleichstromschalter_2
+        SPST
+  1_1_1_C_Ladekurve
+        SPDT
+  2_1_1_Buck_Konverter
+        Transistor Switch (Steuereingang control entfällt)
+  2_1_2_Boost_Konverter
+        Transistor Switch (Steuereingang control entfällt)
+  2_1_3_Spannungsinverter
+        Transistor Switch (Steuereingang control entfällt)
+  5_9_1_Schalten_mit_Transistor
+        SPST
+  6_3_2_Rechts_Links_Schieberegister
+        SPDT
+  6_3_2_Rechts_Links_Schieberegister_Lsg
+        SPDT
+  6_3_3_Universal_Schieberegister
+        SPDT
+  6_3_3_Universal_Schieberegister_Lsg
+        SPDT
+  8_1_1_2_DAC_4_Bit_mit_Kettenleiter
+        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt)
+  8_1_1_DAC_mit_Kettenleiter
+        Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt)
+  8_1_2_DAC_mit_Summierverstärker
+        SPST
+  8_1_3_DAC_mit_R2R_Netzwerk (1)
+        SPDT
+  8_2_3_Dual_Slope_ADC
+        Voltage Controlled SPDT (Steuereingang ctrlp/ctrln entfällt)
+
+4. KURZGESCHLOSSENE NETZE
+------------------------------------------------------------
+
+  Hier verbindet die uebernommene Verdrahtung zwei Netze, die in
+  Multisim getrennt waren. Diese Schaltungen vor Gebrauch pruefen.
+
+  1_3_2_PT100-Sensor_mit_Brueckenschaltung
+        0 = 3
+  1_4_2_PT100-Sensor_Bruecke_mit_INA333
+        0 = 3
+  1_4_3_PT100-Sensor_Bruecke_Instrumentenverstärker
+        0 = 3, 6 = 7
+  Trigger
+        0 = 1, 0 = 3
