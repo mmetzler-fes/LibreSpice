@@ -160,11 +160,14 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
       };
       if (v.sourceType === "Sine") return `${fmtSI(v.sAmpl, "V")} ${fmtSI(v.sFreq, "Hz")}`;
       if (v.sourceType === "Pulse") return `${fmtSI(v.pV2, "V")} ${fmtSI(v.pPer, "s")}`;
+      // A breakpoint list is too long for the caption, so name the waveform.
+      if (v.sourceType === "PWL") return "PWL";
       return `${fmtSI(v.dcValue, "V")} DC`;
     }
     case "isource":   {
       const i = component as unknown as { sourceType?: string; dcValue: number; sAmpl: number; sFreq: number };
       if (i.sourceType === "Sine") return `${fmtSI(i.sAmpl, "A")} ${fmtSI(i.sFreq, "Hz")}`;
+      if (i.sourceType === "PWL") return "PWL";
       return `${fmtSI(i.dcValue, "A")} DC`;
     }
     case "sinesource": {

@@ -19,7 +19,28 @@ export abstract class Source extends SpiceComponent {
   }
 }
 
-export type VSourceType = "DC" | "Sine" | "Pulse";
+export type VSourceType = "DC" | "Sine" | "Pulse" | "PWL";
+
+/**
+ * Both Unicode micro signs — U+00B5 MICRO SIGN and U+03BC GREEK SMALL LETTER MU
+ * — normalised to plain `u`.
+ *
+ * ngspice only understands `u`. The two characters are visually identical, so a
+ * value pasted from a datasheet or carried in from another tool (Multisim
+ * writes U+03BC) looks correct on screen but makes the simulator read the
+ * number without its suffix — a 10 µs segment silently becomes 10 s.
+ */
+export function normalizeMicro(spec: string): string {
+  return spec.replace(/[µμ]/g, "u");
+}
+
+/**
+ * Default PWL points, as the `time value` pairs SPICE expects. Kept as text
+ * rather than parsed numbers so SI suffixes and `{param}` expressions survive
+ * editing untouched.
+ */
+const DEFAULT_PWL_V = "0 0 10m 5 20m 5 25m 0";
+const DEFAULT_PWL_I = "0 0 5m 10m 15m 10m 20m 0";
 
 /**
  * Generalized voltage source. A single component whose waveform is selected via
@@ -33,6 +54,8 @@ export class VoltageSource extends Source {
   pV1 = 0; pV2 = 5; pTd = 0; pTr = 1e-9; pTf = 1e-9; pPw = 0.5e-3; pPer = 1e-3; pNp = 0;
   // Sine parameters
   sOffset = 0; sAmpl = 1; sFreq = 1000; sTd = 0; sTheta = 0; sPhi = 0; sNcycles = 0;
+  /** PWL breakpoints as `time value` pairs, e.g. `0 0 10m 5 20m 5 25m 0`. */
+  pwlPoints = DEFAULT_PWL_V;
   // Parasitics (shared by all source types)
   seriesR = 0; parallelC = 0; showParasitics: "yes" | "no" = "no";
   /**
@@ -58,12 +81,14 @@ export class VoltageSource extends Source {
 
   /** The SPICE source specification (after the node names). */
   protected spec(): string {
-    if (this.rawSpec) return this.rawSpec;
+    if (this.rawSpec) return normalizeMicro(this.rawSpec);
     switch (this.sourceType) {
       case "Sine":
         return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
       case "Pulse":
         return `PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
+      case "PWL":
+        return `PWL(${normalizeMicro(this.pwlPoints.trim())})`;
       default:
         return `DC ${this.dcValue}${this.acAmplitude ? ` AC ${this.acAmplitude}` : ""}`;
     }
@@ -88,7 +113,7 @@ export class VoltageSource extends Source {
   getProperties(): Property[] {
     const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse"] },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse", "PWL"] },
     ];
     if (this.sourceType === "Sine") {
       props.push(
@@ -110,6 +135,10 @@ export class VoltageSource extends Source {
         { key: "pPw", label: "Ton (width)", value: this.pPw, unit: "s", type: "number" },
         { key: "pPer", label: "Tperiod", value: this.pPer, unit: "s", type: "number" },
         { key: "pNp", label: "Ncycles", value: this.pNp, type: "number" },
+      );
+    } else if (this.sourceType === "PWL") {
+      props.push(
+        { key: "pwlPoints", label: "Points (t v t v …)", value: this.pwlPoints, type: "string" },
       );
     } else {
       props.push(
@@ -152,6 +181,7 @@ export class VoltageSource extends Source {
       case "sTheta": this.sTheta = num; break;
       case "sPhi": this.sPhi = num; break;
       case "sNcycles": this.sNcycles = num; break;
+      case "pwlPoints": this.pwlPoints = String(value); break;
       case "seriesR": this.seriesR = num; break;
       case "parallelC": this.parallelC = num; break;
       case "showParasitics": this.showParasitics = value === "yes" ? "yes" : "no"; break;
@@ -165,6 +195,7 @@ export class VoltageSource extends Source {
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
+      pwlPoints: this.pwlPoints,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
@@ -177,6 +208,7 @@ export class VoltageSource extends Source {
       sourceType: this.sourceType, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
+      pwlPoints: this.pwlPoints,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });
@@ -185,9 +217,11 @@ export class VoltageSource extends Source {
 }
 
 export class CurrentSource extends Source {
-  sourceType: "DC" | "Sine" = "DC";
+  sourceType: "DC" | "Sine" | "PWL" = "DC";
   // Sine parameters (offset/amplitude/frequency mirror the voltage source).
   sOffset = 0; sAmpl = 1e-3; sFreq = 50; sTd = 0; sTheta = 0; sPhi = 0;
+  /** PWL breakpoints as `time value` pairs, e.g. `0 0 5m 10m 15m 10m 20m 0`. */
+  pwlPoints = DEFAULT_PWL_I;
   /** Verbatim SPICE spec (e.g. an imported `SIN(0 1.414 50)`), see VoltageSource.rawSpec. */
   rawSpec = "";
 
@@ -197,9 +231,12 @@ export class CurrentSource extends Source {
 
   /** The SPICE source specification (after the node names). */
   protected spec(): string {
-    if (this.rawSpec) return this.rawSpec;
+    if (this.rawSpec) return normalizeMicro(this.rawSpec);
     if (this.sourceType === "Sine") {
       return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
+    }
+    if (this.sourceType === "PWL") {
+      return `PWL(${normalizeMicro(this.pwlPoints.trim())})`;
     }
     return `DC ${this.dcValue} AC ${this.acAmplitude}`;
   }
@@ -215,7 +252,7 @@ export class CurrentSource extends Source {
   getProperties(): Property[] {
     const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine"] },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "PWL"] },
     ];
     if (this.sourceType === "Sine") {
       props.push(
@@ -225,6 +262,10 @@ export class CurrentSource extends Source {
         { key: "sTd", label: "Tdelay", value: this.sTd, unit: "s", type: "number" },
         { key: "sTheta", label: "Theta", value: this.sTheta, unit: "1/s", type: "number" },
         { key: "sPhi", label: "Phi", value: this.sPhi, unit: "°", type: "number" },
+      );
+    } else if (this.sourceType === "PWL") {
+      props.push(
+        { key: "pwlPoints", label: "Points (t i t i …)", value: this.pwlPoints, type: "string" },
       );
     } else {
       props.push(
@@ -241,7 +282,9 @@ export class CurrentSource extends Source {
     if (key !== "label") this.rawSpec = "";
     switch (key) {
       case "label": this.label = String(value); break;
-      case "sourceType": this.sourceType = value === "Sine" ? "Sine" : "DC"; break;
+      case "sourceType":
+        this.sourceType = value === "Sine" || value === "PWL" ? value : "DC";
+        break;
       case "dcValue": this.dcValue = num; break;
       case "acAmplitude": this.acAmplitude = num; break;
       case "sOffset": this.sOffset = num; break;
@@ -250,6 +293,7 @@ export class CurrentSource extends Source {
       case "sTd": this.sTd = num; break;
       case "sTheta": this.sTheta = num; break;
       case "sPhi": this.sPhi = num; break;
+      case "pwlPoints": this.pwlPoints = String(value); break;
     }
   }
 
@@ -260,6 +304,7 @@ export class CurrentSource extends Source {
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
+      pwlPoints: this.pwlPoints,
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
     };
@@ -271,6 +316,7 @@ export class CurrentSource extends Source {
       acAmplitude: this.acAmplitude, sourceType: this.sourceType,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
+      pwlPoints: this.pwlPoints,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });
     return i;

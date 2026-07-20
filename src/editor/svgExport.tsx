@@ -17,7 +17,7 @@ import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js"
 import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
   BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol,
-  VoltageSourceSymbol, CurrentSourceSymbol, SineSourceSymbol, PulseSourceSymbol,
+  VoltageSourceSymbol, CurrentSourceSymbol, SineSourceSymbol, PulseSourceSymbol, PWLSourceSymbol,
   GroundSymbol,
 } from "./nodes/symbols/Symbols.js";
 
@@ -31,6 +31,7 @@ const FALLBACK: Partial<Record<ComponentType, React.FC>> = {
 };
 const SOURCE_FALLBACK: Record<string, React.FC> = {
   DC: VoltageSourceSymbol, Sine: SineSourceSymbol, Pulse: PulseSourceSymbol,
+  PWL: PWLSourceSymbol,
 };
 
 /**

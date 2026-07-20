@@ -116,6 +116,20 @@ export const PulseSourceSymbol = () => (
   </g>
 );
 
+/**
+ * Piecewise-linear source. Drawn as a ramp-hold-ramp trace so it reads as
+ * sloped segments at a glance, rather than the square edges of the pulse
+ * source it sits next to in the type selector.
+ */
+export const PWLSourceSymbol = () => (
+  <g>
+    <circle cx="0" cy="0" r="20" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="-30" x2="0" y2="-20" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="20" x2="0" y2="30" stroke="currentColor" strokeWidth="1.5" />
+    <polyline points="-13,8 -5,-8 4,-8 12,8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+  </g>
+);
+
 export const GroundSymbol = () => (
   <g>
     {/* Connection point is the top of the vertical line, at y = -24 — a multiple

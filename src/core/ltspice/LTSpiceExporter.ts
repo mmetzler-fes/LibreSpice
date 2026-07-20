@@ -41,6 +41,9 @@ function sourceSpec(c: any): string {
     const ncyc = c.pNp > 0 ? ` ${c.pNp}` : "";
     return `PULSE(${c.pV1} ${c.pV2} ${c.pTd} ${c.pTr} ${c.pTf} ${c.pPw} ${c.pPer}${ncyc})`;
   }
+  if (c.sourceType === "PWL") {
+    return `PWL(${String(c.pwlPoints ?? "").trim()})`;
+  }
   return `DC ${c.dcValue ?? 0}`;
 }
 

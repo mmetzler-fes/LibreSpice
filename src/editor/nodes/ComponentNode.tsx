@@ -17,6 +17,7 @@ import {
   CurrentSourceSymbol,
   SineSourceSymbol,
   PulseSourceSymbol,
+  PWLSourceSymbol,
   GroundSymbol,
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
@@ -243,6 +244,7 @@ const SOURCE_SYMBOLS: Record<string, React.FC> = {
   DC: VoltageSourceSymbol,
   Sine: SineSourceSymbol,
   Pulse: PulseSourceSymbol,
+  PWL: PWLSourceSymbol,
 };
 
 function getHandles(type: ComponentType, mirrored = false, tap: TapProps = {}) {

@@ -455,7 +455,10 @@ export class LTSpiceParser {
     // `{param}` expressions and unit suffixes survive to the netlist. ngspice
     // uses SIN, not LTSpice's SINE. This takes precedence over the best-effort
     // numeric parsing below (which still fills the UI fields where it can).
-    if (/^\s*(sine|sin|pulse|pwl|exp|sffm)\b/i.test(valueStr)) {
+    // PWL is excluded: it now has a real source type whose breakpoint list is
+    // itself stored verbatim, so it round-trips without `rawSpec` — and unlike
+    // `rawSpec`, editing the source in the UI no longer discards the waveform.
+    if (/^\s*(sine|sin|pulse|exp|sffm)\b/i.test(valueStr)) {
       (comp as any).rawSpec = valueStr.replace(/^(\s*)sine(?=\s*\()/i, "$1SIN");
     }
 
@@ -465,6 +468,15 @@ export class LTSpiceParser {
       // Generalized source: waveform kind + every field of its spec, so a phase,
       // delay or damping factor set in LTSpice (or by us on the last save) is
       // still there after the load — and the UI shows the right waveform.
+      // PWL carries an arbitrary number of breakpoints, so it is kept as the
+      // text between the parentheses rather than parsed into fixed fields —
+      // that preserves SI suffixes and `{param}` expressions exactly.
+      const pwl = valueStr.match(/^\s*pwl\s*\(([^)]*)\)/i);
+      if (pwl) {
+        c.sourceType = "PWL";
+        c.pwlPoints = pwl[1].trim();
+      }
+
       const wave = valueStr.match(/^\s*(sine?|pulse)\s*\(([^)]*)\)/i);
       const f = wave ? wave[2].split(/[\s,]+/).filter(Boolean).map(parseSI) : [];
       if (wave && /^sin/i.test(wave[1])) {
