@@ -5,6 +5,7 @@ import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { getProbeCandidates, netLabel } from "@core/circuit/probeUtils.js";
 import { isParametricValue, parseValueInput, valueFieldText } from "@core/components/base/componentValue.js";
+import { parsePwlFile } from "@core/components/sources/pwlFile.js";
 
 /**
  * Text input for a component value: an SI-prefixed number (`4.7k`) or a
@@ -59,6 +60,62 @@ function ValueField({ value, onChange }: { value: string | number; onChange: (v:
       }}
       style={dynFieldStyle}
     />
+  );
+}
+
+/**
+ * Load PWL breakpoints from a measurement file.
+ *
+ * ngspice's `PWL file=…` is out of reach here — the simulator is WebAssembly
+ * with no filesystem of its own — so the file is read in the browser and its
+ * points are written into the source. The data then lives in the circuit, which
+ * also means a shared or saved schematic still carries its waveform.
+ */
+function PwlFileButton({ onLoad }: { onLoad: (points: string) => void }) {
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const theme = useTheme();
+
+  const pick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".txt,.csv,.dat,.tsv,text/plain";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const { points, count } = parsePwlFile(await file.text());
+        onLoad(points);
+        setStatus({ ok: true, text: `${count} Stützstellen aus ${file.name}` });
+      } catch (e) {
+        setStatus({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      }
+    };
+    input.click();
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={pick}
+        style={{
+          padding: "4px 6px",
+          border: `1px solid ${theme.border}`,
+          borderRadius: 4,
+          background: theme.inputBg,
+          color: theme.text,
+          cursor: "pointer",
+          fontSize: 11,
+        }}
+      >
+        Aus Datei laden…
+      </button>
+      {status && (
+        <span style={{ fontSize: 10, color: status.ok ? theme.textMuted : "#dc2626" }}>
+          {status.text}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -185,6 +242,11 @@ export function PropertiesPanel() {
                 value={String(prop.value)}
                 onChange={(e) => updateComponentProperty(component.id, prop.key, e.target.value)}
                 style={dynFieldStyle}
+              />
+            )}
+            {prop.key === "pwlPoints" && (
+              <PwlFileButton
+                onLoad={(points) => updateComponentProperty(component.id, "pwlPoints", points)}
               />
             )}
           </label>

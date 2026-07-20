@@ -1,6 +1,7 @@
 import { VoltageSource, CurrentSource } from "@core/components/sources/Sources.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
+import { parsePwlFile } from "@core/components/sources/pwlFile.js";
 import { getValueLabel } from "../componentFactory.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -99,6 +100,72 @@ const CASES: Case[] = [
       v.setProperty("sourceType", "PWL");
       const label = getValueLabel(v, "vsource");
       if (label !== "PWL") fail(`label = ${label}`);
+    },
+  },
+  {
+    name: "reads pairs from a plain measurement file",
+    run: (fail) => {
+      const r = parsePwlFile("0 0\n10m 5\n20m 5\n25m 0\n");
+      if (r.points !== "0 0 10m 5 20m 5 25m 0") fail(`points = ${r.points}`);
+      if (r.count !== 4) fail(`count = ${r.count}`);
+    },
+  },
+  {
+    name: "skips comments and blank lines",
+    run: (fail) => {
+      const r = parsePwlFile("* Messung\n\n0 0\n; Kommentar\n1m 2  # Ende\n");
+      if (r.points !== "0 0 1m 2") fail(`points = ${r.points}`);
+    },
+  },
+  {
+    name: "accepts a German CSV export with decimal commas",
+    run: (fail) => {
+      // Semicolon-separated with "0,001" as a decimal — reading the comma as a
+      // separator here would split one column into two and desync every pair.
+      const r = parsePwlFile("0;0\n0,001;5\n0,002;0\n");
+      if (r.points !== "0 0 0.001 5 0.002 0") fail(`points = ${r.points}`);
+    },
+  },
+  {
+    name: "treats commas as separators when they are not decimals",
+    run: (fail) => {
+      const r = parsePwlFile("0,0\n10m,5\n");
+      if (r.points !== "0 0 10m 5") fail(`points = ${r.points}`);
+    },
+  },
+  {
+    name: "rejects an odd number of values",
+    run: (fail) => {
+      try {
+        parsePwlFile("0 0\n10m 5\n20m\n");
+        fail("accepted an incomplete pair");
+      } catch { /* expected */ }
+    },
+  },
+  {
+    name: "rejects times that run backwards",
+    run: (fail) => {
+      // ngspice would simulate this without complaint and give a wrong answer.
+      try {
+        parsePwlFile("0 0\n20m 5\n10m 3\n");
+        fail("accepted non-monotonic time");
+      } catch { /* expected */ }
+    },
+  },
+  {
+    name: "rejects a non-numeric token",
+    run: (fail) => {
+      try {
+        parsePwlFile("0 0\nzeit wert\n");
+        fail("accepted a text token");
+      } catch { /* expected */ }
+    },
+  },
+  {
+    name: "normalises micro signs read from a file",
+    run: (fail) => {
+      const r = parsePwlFile("0 0\n10\u03bc 5\n20\u00b5 0\n");
+      if (r.points !== "0 0 10u 5 20u 0") fail(`points = ${r.points}`);
     },
   },
 ];
