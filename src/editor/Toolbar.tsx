@@ -10,6 +10,7 @@ import { InsertComponentModal } from "./InsertComponentModal.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
+import { readMsjs, convert } from "@core/multisim/MultisimConverter.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildShareQrSvg } from "./qrExport.js";
@@ -239,6 +240,49 @@ export function Toolbar() {
     setCircuitName(loadedName.replace(/\.asc$/i, ""));
   };
 
+  /**
+   * Import a Multisim Live export.
+   *
+   * Multisim Live was retired, so its `.msjs` files are converted to an LTSpice
+   * schematic and handed to the normal loader — the schematic then renders and
+   * behaves exactly like an opened `.asc`, with no second drawing path to keep
+   * in step.
+   *
+   * What could not be carried over is reported rather than passed over in
+   * silence: a schematic missing a part still opens, and looks plausible, so
+   * the gaps have to be stated.
+   */
+  const handleImportMultisim = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".msjs";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const { asc, skipped, substituted, shorts } = convert(readMsjs(await file.arrayBuffer()));
+        loadFromAsc(asc);
+        setFileHandle(null, file.name);
+        setCircuitName(file.name.replace(/\.msjs$/i, ""));
+
+        const notes: string[] = [];
+        if (skipped.length) {
+          notes.push(`Nicht abbildbare Bauteile (fehlen in der Schaltung):\n  ${skipped.join(", ")}`);
+        }
+        if (substituted.length) {
+          notes.push(`Als Ersatzmodell konvertiert:\n  ${substituted.join(", ")}`);
+        }
+        if (shorts.length) {
+          notes.push(`Achtung — kurzgeschlossene Netze: ${shorts.join(", ")}\nDiese Schaltung vor Gebrauch prüfen.`);
+        }
+        if (notes.length) alert(`${file.name}\n\n${notes.join("\n\n")}`);
+      } catch (err) {
+        alert(`Import fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    input.click();
+  };
+
   // Load one .asc from an opened folder, plus its sibling <name>.plt if present.
   const openAscFromFolder = async (dir: any, name: string, handle: any) => {
     const text = new TextDecoder("windows-1252").decode(await (await handle.getFile()).arrayBuffer());
@@ -331,6 +375,12 @@ export function Toolbar() {
       </TBtn>
       <TBtn title="Open (Ctrl+O)" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </TBtn>
+      <TBtn title="Multisim Live (.msjs) importieren" onClick={handleImportMultisim}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          <path d="M12 10v7 M9 14l3 3 3-3" />
+        </svg>
       </TBtn>
       <TBtn title="Open folder — loads the .asc and its matching .plt plot settings" onClick={handleOpenFolder}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
