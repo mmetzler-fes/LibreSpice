@@ -5,8 +5,8 @@ import { Net } from "@core/circuit/Net.js";
 import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, type TextBox } from "@core/circuit/textBox.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
-import { getNodePins } from "@editor/pinGeometry.js";
+import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
+import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
 import { useUIStore } from "./uiStore.js";
 import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
@@ -99,6 +99,29 @@ const DEFAULT_CONFIG: SimulationConfig = {
   stepTime: 1e-6,
   stopTime: 1e-3,
 };
+
+/**
+ * Where a net label placed by naming a wire should sit: the midpoint of that
+ * wire, which is clear of both its ends and so of the parts it runs between.
+ * Null when the wire's endpoints cannot be resolved.
+ */
+function labelAnchor(host: Edge, nodes: Node[]): FlowPoint | null {
+  // Pin first; failing that the node's centre. The fallback matters: without it
+  // a part whose symbol has not (yet) loaded yields no anchor, no label is
+  // placed, and the name silently reverts to living nowhere — the very trap this
+  // is meant to close.
+  const at = (id?: string | null, handle?: string | null) => {
+    const n = id ? nodes.find((x) => x.id === id) : undefined;
+    if (!n) return null;
+    const p = handle ? getNodePins(n).find((q) => q.handleId === handle) : undefined;
+    return p ? { x: p.x, y: p.y } : { x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 };
+  };
+  const a = (host.data as { sourceTap?: FlowPoint } | undefined)?.sourceTap ?? at(host.source, host.sourceHandle);
+  const b = (host.data as { targetTap?: FlowPoint } | undefined)?.targetTap ?? at(host.target, host.targetHandle);
+  if (!a || !b) return null;
+  const snap = (v: number) => Math.round(v / 4) * 4;
+  return { x: snap((a.x + b.x) / 2), y: snap((a.y + b.y) / 2) };
+}
 
 export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) => ({
   circuit: new Circuit(),
@@ -338,50 +361,81 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
     }
 
-    // No terminal node: the name lives on the *wire*. The chosen wire (the selected
-    // one, else any on the net) carries `netName` — the persistent source of truth
-    // that survives every rebuild — and is shown by default. Naming a net never
-    // spawns a net-terminal node; a label or connector is placed only from the palette.
-    // An empty name clears the label back to the auto net id.
-    let shownEdgeId: string | null = null;
+    // No terminal yet: naming the net places a net label on it.
+    //
+    // A name that lives only on a wire is not saved — the `.asc` has no slot for
+    // it, so it survived only in the session and in a share link, and vanished on
+    // the first save. A label *is* the file's way of naming a net (`FLAG x y
+    // NAME`), so naming and labelling are one and the same act. A plain label,
+    // not a connector: a connector additionally declares a direction (`IOPIN`),
+    // which is a claim the user has not made by typing a name.
+    //
+    // Clearing the name back to the auto id removes the label again, so a net
+    // never keeps a tag that says nothing.
     const clearing = newLabel === netId;
-    if (labelIds.size === 0) {
-      const netOfEdge = (e: Edge) =>
-        circuit.components.get(e.source!)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId === netId ||
-        circuit.components.get(e.target!)?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId === netId;
-      // Update every already-named wire of the net so a rename follows them all,
-      // but only *turn on* the label for the one representative wire.
-      const primary = edges.find((e) => e.selected && netOfEdge(e)) ?? edges.find(netOfEdge);
-      shownEdgeId = primary?.id ?? null;
-    }
     const onNetEdge = (e: Edge) =>
       circuit.components.get(e.source!)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId === netId ||
       circuit.components.get(e.target!)?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId === netId;
 
+    /** A label to place, when the net has none and is being given a real name. */
+    let spawn: { node: Node; comp: SpiceComponent; edge: Edge } | null = null;
+    if (labelIds.size === 0 && !clearing) {
+      // On the wire the user is looking at — the selected one, else any of the
+      // net — at its midpoint, which is where a name reads best.
+      const host = edges.find((e) => e.selected && onNetEdge(e)) ?? edges.find(onNetEdge);
+      const at = host ? labelAnchor(host, get().nodes) : null;
+      if (at) {
+        const id = nextComponentId("netlabel", get().nodes.map((n) => n.id));
+        const comp = createSpiceComponent("netlabel", id, newLabel, at.x - NODE_SIZE / 2, at.y - NODE_SIZE / 2);
+        spawn = {
+          comp,
+          node: {
+            id, type: "component",
+            position: { x: at.x - NODE_SIZE / 2, y: at.y - NODE_SIZE / 2 },
+            data: { componentType: "netlabel", label: newLabel },
+          },
+          edge: {
+            id: `wire_label_${id}`,
+            source: host!.source, sourceHandle: host!.sourceHandle,
+            target: id, targetHandle: "t",
+            type: "wire",
+            data: { waypoints: [], targetTap: at, hostEdgeId: host!.id },
+          },
+        };
+      }
+    }
+    /** Labels to drop, when the name is cleared back to the auto id. */
+    const doomed = clearing ? [...labelIds] : [];
+
+    if (spawn) {
+      circuit.addComponent(spawn.comp);
+      // Join it to the net at once. Waiting for the next rebuild would leave the
+      // label unattached in between — invisible to the netlist, and invisible to
+      // this very function on a second call, so clearing the name again would
+      // find nothing to remove.
+      try {
+        circuit.connectPorts(`${spawn.edge.source}-${spawn.edge.sourceHandle}`, `${spawn.node.id}-t`);
+      } catch { /* visual-only */ }
+    }
+    for (const id of doomed) circuit.removeComponent(id);
+
+    const snap = { nodes: get().nodes, edges: get().edges };
     set((state) => ({
       netVersion: state.netVersion + 1,
-      nodes: labelIds.size
-        ? state.nodes.map((n) => (labelIds.has(n.id) ? { ...n, data: { ...n.data, label: newLabel } } : n))
-        : state.nodes,
-      // Every wire of the net follows the new name — also when the net has a
-      // terminal. The wire-carried name outranks a terminal on the next rebuild
-      // (that is what lets a connector adopt a labelled wire), so leaving it at
-      // the old name would quietly undo this rename.
-      edges: state.edges.map((e) => {
-        if (!onNetEdge(e)) return e;
-        // Clearing removes the name and hides the label.
-        if (clearing) {
-          const { netName, showLabel, ...rest } = (e.data ?? {}) as Record<string, unknown>;
-          void netName; void showLabel;
-          return { ...e, data: rest };
-        }
-        // Only a net *without* a terminal shows the name on the wire; with one,
-        // the terminal is where it reads (see rebuildConnections).
-        return {
-          ...e,
-          data: { ...e.data, netName: newLabel, ...(labelIds.size === 0 && e.id === shownEdgeId ? { showLabel: true } : {}) },
-        };
-      }),
+      // Placing or dropping a label is a structural edit, so it belongs in the
+      // undo history like any other.
+      _history: [...state._history, snap],
+      _future: [],
+      nodes: [
+        ...state.nodes
+          .filter((n) => !doomed.includes(n.id))
+          .map((n) => (labelIds.has(n.id) ? { ...n, data: { ...n.data, label: newLabel } } : n)),
+        ...(spawn ? [spawn.node] : []),
+      ],
+      edges: [
+        ...state.edges.filter((e) => !doomed.includes(e.source) && !doomed.includes(e.target)),
+        ...(spawn ? [spawn.edge] : []),
+      ],
       // Keep data-point expressions pointing at the renamed net.
       dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
     }));
@@ -684,14 +738,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // for a labelled wire — they live on the edge and so survive every rebuild,
     // even after the net is renumbered or merged. Apply them onto the freshly
     // built nets (overriding the port-keyed restore above).
-    /** Net id → the name its wires carry, for the invariant further down. */
-    const wireNames = new Map<string, string>();
     for (const edge of edges) {
       const nm = (edge.data as { netName?: string } | undefined)?.netName;
       if (!nm) continue;
       const port = circuit.components.get(edge.source ?? "")?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
       const nid = port?.netId;
-      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; wireNames.set(nid, nm); }
+      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; }
     }
 
     // A net whose *name* is ground — typed into the net-name field on a wire, with
@@ -733,13 +785,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     /** New label for each terminal node whose name has to give way. */
     const renamed = new Map<string, string>();
     for (const [nid, terms] of byNet) {
-      // A name the net already carried on its wire outranks every terminal: a
-      // connector dropped on a labelled wire is meant to *read* that name, not
-      // to replace it with the next free NET1/PORT1. Without this the wire lost
-      // its name the moment you put a connector on it — the wrong way round.
-      const carried = wireNames.get(nid);
-      const oldest = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
-      const winner = carried ? { id: oldest.id, name: carried } : oldest;
+      // A name the net already carried outranks a terminal placed later: a
+      // terminal dropped on a named net is meant to *read* that name, not to
+      // replace it with the next free NET1. The carried name comes from the
+      // labels themselves now that naming a wire places one (see renameNet);
+      // the oldest label is the one that was there first.
+      const winner = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
       for (const t of terms) {
         if (t.name === winner.name) continue;
         circuit.components.get(t.id)?.setProperty("label", winner.name);

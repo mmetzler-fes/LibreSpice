@@ -280,3 +280,32 @@ export function nodeToSymbol(nodeX: number, nodeY: number, offsets: PinOffset[],
   const { mx, my } = centre(offsets, mode);
   return { x: Math.round(nodeX + CENTER - mx), y: Math.round(nodeY + CENTER - my) };
 }
+
+/**
+ * Default anchors of a component's two captions, in node-local px — the spot a
+ * caption sits at when the user has not dragged it. LTSpice stores the dragged
+ * position as `WINDOW 0` (reference) and `WINDOW 3` (value), relative to the
+ * symbol origin, so the offset is the difference between the two.
+ *
+ * Both directions live here rather than in the exporter: the file is only worth
+ * writing if it can be read back the same way, and while the pair sat apart the
+ * exporter wrote the position and nothing ever restored it.
+ */
+export const CAPTION_DEFAULT = {
+  label: { left: 8, top: 30 },
+  value: { left: 8, top: 48 },
+} as const;
+
+export interface CaptionOffset { x: number; y: number }
+
+/** Node-local caption offset → the `WINDOW` coordinates LTSpice stores. */
+export function windowCoord(kind: "label" | "value", off?: CaptionOffset): CaptionOffset {
+  const def = CAPTION_DEFAULT[kind];
+  return { x: Math.round(def.left - CENTER + (off?.x ?? 0)), y: Math.round(def.top - CENTER + (off?.y ?? 0)) };
+}
+
+/** The inverse: `WINDOW` coordinates → the offset from the default spot. */
+export function offsetFromWindow(kind: "label" | "value", win: CaptionOffset): CaptionOffset {
+  const def = CAPTION_DEFAULT[kind];
+  return { x: win.x - (def.left - CENTER), y: win.y - (def.top - CENTER) };
+}

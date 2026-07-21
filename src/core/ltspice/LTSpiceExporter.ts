@@ -3,7 +3,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { PortType } from "@core/components/special/Special.js";
 import {
-  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
+  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor, windowCoord,
 } from "./ltspiceGeometry.js";
 import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
@@ -11,13 +11,7 @@ import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
 // WINDOW round-trip is exact.
-const LABEL_DEFAULT = { left: 8, top: 30 };
-const VALUE_DEFAULT = { left: 8, top: 48 };
-type Offset = { x: number; y: number } | undefined;
-const winCoord = (def: { left: number; top: number }, off: Offset) => ({
-  x: Math.round(def.left - CENTER + (off?.x ?? 0)),
-  y: Math.round(def.top - CENTER + (off?.y ?? 0)),
-});
+
 
 interface Pt { x: number; y: number }
 
@@ -237,10 +231,10 @@ export class LTSpiceExporter {
       symbolLines.push(`SYMBOL ${symName} ${symX} ${symY} ${rotStr(deg, mirrored)}`);
 
       // Persist caption positions so LTSpice (and our own re-import) keep them.
-      const lw = winCoord(LABEL_DEFAULT, data.labelOffset);
+      const lw = windowCoord("label", data.labelOffset);
       symbolLines.push(`WINDOW 0 ${lw.x} ${lw.y} Right 2`);
       if (data.valueLabel) {
-        const vw = winCoord(VALUE_DEFAULT, data.valueOffset);
+        const vw = windowCoord("value", data.valueOffset);
         symbolLines.push(`WINDOW 3 ${vw.x} ${vw.y} Right 2`);
       }
 

@@ -136,11 +136,13 @@ const CASES: Case[] = [
     st().rebuildConnections();
     if (r1()?.ports[0]?.netId !== "0") { fail("the net did not become ground"); return; }
 
-    // The wire's name is what grounds it (no node any more), so clearing the
-    // wire's netName must let the net float again.
-    const gndWire = st().edges.find((e) => (e.data as { netName?: string }).netName === "GND");
-    if (!gndWire) { fail("no wire carries the GND name"); return; }
-    st().updateEdgeData(gndWire.id, { netName: undefined, showLabel: false });
+    // The label placed by the rename is what grounds it, so clearing the name
+    // must drop that label and let the net float again.
+    const gnd = st().nodes.find((n) => (n.data as { label?: string }).label === "GND");
+    if (!gnd) { fail("no label carries the GND name"); return; }
+    st().renameNet("0", "0");           // clearing ground's own name is a no-op…
+    const netNow = r1()?.ports[0]?.netId;
+    st().renameNet(netNow!, netNow!);   // …so clear it back to the auto id
     st().rebuildConnections();
 
     const a = r1()?.ports[0]?.netId, b = r1()?.ports[1]?.netId;
@@ -199,9 +201,10 @@ const CASES: Case[] = [
     if (netOf("R1")?.nodeLabel !== "OUT") fail(`the net is called "${netOf("R1")?.nodeLabel}", not OUT`);
   } },
 
-  { name: "naming a net makes its wire visible, without a net-label node", run: async (fail) => {
-    // Naming a net puts the name on the *wire* (visible by default) — it must not
-    // spawn a net-label node / connector; that is what the user did not want.
+  { name: "naming a net places a net label on it", run: async (fail) => {
+    // A name that lived only on a wire was never written to the `.asc` and so
+    // vanished on the first save. Naming a net therefore places a label — the
+    // file's own way of naming a net — and the two acts become one.
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
@@ -214,10 +217,13 @@ const CASES: Case[] = [
     st().renameNet(netId, "MID");
 
     const after = st().nodes.filter((n) => (n.data as { componentType?: string }).componentType === "netlabel").length;
-    if (after !== before) fail(`naming the net spawned a net-label node (${before} → ${after})`);
-    const wire = st().edges.find((e) => (e.data as { netName?: string }).netName === "MID");
-    if (!wire) { fail("no wire carries the name MID"); return; }
-    if (!(wire.data as { showLabel?: boolean }).showLabel) fail("the named wire is not visible by default");
+    if (after !== before + 1) fail(`naming the net did not place a label (${before} → ${after})`);
+    const placed = st().nodes.find((n) => (n.data as { label?: string; componentType?: string }).componentType === "netlabel"
+      && (n.data as { label?: string }).label === "MID");
+    if (!placed) { fail("no label carries the name MID"); return; }
+    // A plain label, not a connector: typing a name is not a claim about
+    // direction, and a connector would write an IOPIN the user never asked for.
+    if ((placed.data as { portType?: string }).portType) fail("naming the net declared a port direction");
     st().regenerateNetlist();
     if (st().circuit.nets.get(netId)?.nodeLabel !== "MID") fail("the name did not survive a netlist rebuild");
     // …and it survives a *full* rebuild (net ids get renumbered).

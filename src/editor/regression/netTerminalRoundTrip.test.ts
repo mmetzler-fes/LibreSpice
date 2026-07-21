@@ -274,7 +274,7 @@ const CASES: Case[] = [
     // Reported: putting a connector on a named wire wiped the wire's name and
     // replaced it with the next free NET1 — exactly the wrong way round. The
     // name belongs to the net, and a terminal dropped on it is there to read it.
-    name: "a terminal dropped on a named wire adopts the wire's name",
+    name: "a terminal dropped on a named net adopts that name",
     run: async (fail) => {
       st().clearCircuit();
       await tick();
@@ -296,9 +296,14 @@ const CASES: Case[] = [
       st().rebuildConnections();
       await tick();
 
+      // Naming the net already placed a label (see renameNet), so the net now
+      // carries two terminals — and both must read the same name.
       const names = terminals();
-      if (names.join() !== "UB|netconnector|Out") {
-        fail(`the connector came back as [${names.join(", ")}], expected it to adopt "UB"`);
+      if (!names.every((n) => n.startsWith("UB|"))) {
+        fail(`terminals disagree: [${names.join(", ")}], all should read "UB"`);
+      }
+      if (!names.some((n) => n === "UB|netconnector|Out")) {
+        fail(`the connector did not adopt the name: [${names.join(", ")}]`);
       }
       const net = st().circuit.nets.get(
         st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!,
@@ -332,11 +337,62 @@ const CASES: Case[] = [
       st().rebuildConnections();
       await tick();
       const names = terminals();
-      if (names.join() !== "VCC|netlabel|-") fail(`after renaming: [${names.join(", ")}], expected VCC`);
+      if (!names.length || !names.every((n) => n.startsWith("VCC|"))) {
+        fail(`after renaming: [${names.join(", ")}], all should read VCC`);
+      }
       const net = st().circuit.nets.get(
         st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!,
       );
       if (net?.nodeLabel !== "VCC") fail(`the net fell back to "${net?.nodeLabel}"`);
+    },
+  },
+  {
+    // The whole point of placing a label on rename: a name typed on a wire used
+    // to live nowhere the file could hold it, so it was gone after a save.
+    name: "a name given in the properties panel survives a save",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const a = place("vsource", "V1", 200, 200);
+      const b = place("vsource", "V2", 400, 200);
+      connect(a, "n", b, "n");
+      st().rebuildConnections();
+      await tick();
+      const netId = st().circuit.components.get(a.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!;
+      st().renameNet(netId, "UB");
+      await tick();
+
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+      if (!/^FLAG\s+-?\d+\s+-?\d+\s+UB$/m.test(asc)) {
+        return fail(`the name never reached the file:\n${asc}`);
+      }
+      st().clearCircuit();
+      st().loadFromAsc(asc);
+      await tick();
+      await tick();
+      const back = [...st().circuit.nets.values()].some((n) => n.nodeLabel === "UB");
+      if (!back) fail("the name did not come back after a reload");
+    },
+  },
+  {
+    name: "clearing the name removes the label again",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const a = place("vsource", "V1", 200, 200);
+      const b = place("vsource", "V2", 400, 200);
+      connect(a, "n", b, "n");
+      st().rebuildConnections();
+      await tick();
+      const netId = () => st().circuit.components.get(a.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!;
+      st().renameNet(netId(), "UB");
+      await tick();
+      if (terminals().length !== 1) return fail(`naming placed ${terminals().length} labels, expected 1`);
+      // Back to the auto id: the tag says nothing now, so it goes.
+      const id = netId();
+      st().renameNet(id, id);
+      await tick();
+      if (terminals().length !== 0) fail(`clearing left ${terminals().length} label(s): [${terminals().join(", ")}]`);
     },
   },
   {
