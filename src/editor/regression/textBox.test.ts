@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
-import { encodeTextBox, decodeTextBox, TEXTBOX_DEFAULT_W, type TextBox } from "@core/circuit/textBox.js";
+import { encodeTextBox, decodeTextBox, estimateSize, type TextBox } from "@core/circuit/textBox.js";
 import { renderMarkdown, flattenForExport } from "../markdown.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -66,9 +66,28 @@ const CASES: Case[] = [
       // *not* be reflowed as Markdown, which would mangle hand-laid-out text.
       const t = decodeTextBox("Arbeitsauftrag: \\n 1. Messen Sie U.", "tb_1", 96, 736);
       if (t.markdown) fail("a foreign comment was taken as Markdown");
-      if (t.width !== TEXTBOX_DEFAULT_W) fail(`unexpected width ${t.width}`);
       if (!t.text.includes("\n")) fail(`no real line break: ${JSON.stringify(t.text)}`);
       if (t.text.includes("\\n")) fail(`the literal escape survived: ${JSON.stringify(t.text)}`);
+    },
+  },
+  {
+    name: "a comment with no size is fitted to its text",
+    run: (fail) => {
+      // The exercise texts in the converted schematics run to some 30 lines.
+      // Dropped into the default box they would sit behind a scrollbar, which
+      // reads as if the import had truncated them.
+      const long = Array.from({ length: 27 }, (_, i) => `Zeile ${i + 1} mit etwas Text darin`).join("\n");
+      const big = decodeTextBox(long, "tb_1", 0, 0);
+      const small = decodeTextBox("kurz", "tb_2", 0, 0);
+      if (!(big.height > small.height * 3)) fail(`27 lines got ${big.height}px, 1 line ${small.height}px`);
+      if (!(big.width > small.width)) fail(`wide text got ${big.width}px, short ${small.width}px`);
+
+      // Enough room for every line, and capped so one runaway line cannot
+      // produce a box the size of the sheet.
+      const est = estimateSize(long);
+      if (est.height < 27 * 15) fail(`27 lines only got ${est.height}px`);
+      const runaway = estimateSize("x".repeat(5000));
+      if (runaway.width > 460 || runaway.height > 560) fail(`uncapped: ${JSON.stringify(runaway)}`);
     },
   },
   {
