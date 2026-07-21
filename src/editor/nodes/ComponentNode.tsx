@@ -228,26 +228,6 @@ const HANDLE_STYLE = {
   zIndex: 10,
 };
 
-/** Props spread onto a connector (Handle) for the tap-to-rotate gesture. */
-type TapProps = { onClick?: (e: React.MouseEvent) => void };
-
-/**
- * Connector tap-to-rotate: in *select* mode, a plain tap/click on a component's
- * connector rotates it 90° left — a touch/pen-friendly alternative to Ctrl+R,
- * since the component body is used for dragging. A drag from a connector (to draw
- * a wire) fires no click, so wiring is unaffected. Outside select mode it returns
- * empty props, leaving the connector's normal behavior intact.
- */
-function useRotateTapProps(nodeId: string): TapProps {
-  const editorMode = useUIStore((s) => s.editorMode);
-  const canvasLocked = useUIStore((s) => s.canvasLocked);
-  const rotateComponent = useCircuitStore((s) => s.rotateComponent);
-  // A locked canvas pins the parts: rotating one by tapping its connector would
-  // be a move the lock is supposed to prevent.
-  if (editorMode !== "select" || canvasLocked) return {};
-  return { onClick: (e) => { e.stopPropagation(); rotateComponent(nodeId); } };
-}
-
 /** Hand-drawn symbol for the generalized voltage source, chosen by sourceType. */
 const SOURCE_SYMBOLS: Record<string, React.FC> = {
   DC: VoltageSourceSymbol,
@@ -271,7 +251,6 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
   const height = rows * rowGap + 24;
   const width = 96;
   const pal = useTheme();
-  const tap = useRotateTapProps(nodeId);
   const color = selected ? "#2563eb" : pal.heading;
 
   const rowTop = (index: number) => 18 + index * rowGap;
@@ -285,7 +264,6 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           position={Position.Left}
           id={name}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
-          {...tap}
         />
       ))}
       {right.map((name, i) => (
@@ -295,7 +273,6 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           position={Position.Right}
           id={name}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
-          {...tap}
         />
       ))}
       <svg width={width} height={height} style={{ overflow: "visible", color }}>
@@ -354,7 +331,6 @@ function LibrarySymbolNode({
   const mirrored = !!data.mirrored;
   const pins = data.pins ?? [];
   const pal = useTheme();
-  const tap = useRotateTapProps(nodeId);
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   const bounds = symbolBounds(sym);
@@ -374,7 +350,6 @@ function LibrarySymbolNode({
             position={Position.Top}
             id={handleId}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
-            {...tap}
           />
         );
       })}
@@ -473,7 +448,6 @@ function AsyComponentNode({
   const rotation = data.rotation ?? 0;
   const mirrored = !!data.mirrored;
   const pal = useTheme();
-  const tap = useRotateTapProps(nodeId);
   const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
   const center = NODE_SIZE / 2;
   // Drawn symbol half-extents in px, to place captions right against the shape.
@@ -493,7 +467,6 @@ function AsyComponentNode({
             position={Position.Top}
             id={handleForOrder(data.componentType, pin.order)}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
-            {...tap}
           />
         );
       })}
@@ -643,7 +616,6 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const pal = useTheme();
-  const tap = useRotateTapProps(id);
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "netlabel" || nodeData.componentType === "netconnector") {
     return <NetTerminalNode nodeId={id} data={nodeData} selected={selected} />;
@@ -705,7 +677,6 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
           position={Position.Top}
           id={pin.handleId}
           style={{ ...HANDLE_STYLE, left: pin.px, top: pin.py, transform: "translate(-50%, -50%)" }}
-          {...tap}
         />
       ))}
       <svg

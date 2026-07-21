@@ -355,22 +355,6 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", handler);
   }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, mirrorSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement, toggleInsertComponent]);
 
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      setEdges(addEdge(
-        { ...connection, type: "step", style: { stroke: wireStroke, strokeWidth: 2 }, animated: false },
-        edges,
-      ));
-      if (connection.source && connection.sourceHandle && connection.target && connection.targetHandle) {
-        try {
-          connectPorts(`${connection.source}-${connection.sourceHandle}`, `${connection.target}-${connection.targetHandle}`);
-        } catch { /* visual-only */ }
-      }
-      regenerateNetlist();
-    },
-    [edges, setEdges, connectPorts, regenerateNetlist, wireStroke],
-  );
-
   const onCreateWire = useCallback(
     (connection: Connection, data: WireData) => {
       const id = `wire_${connection.source}-${connection.sourceHandle}__${connection.target}-${connection.targetHandle}_${wireCounter++}`;
@@ -805,7 +789,6 @@ function CanvasInner() {
             edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange as never}
             onEdgesChange={onEdgesChange as never}
-            onConnect={onConnect}
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeContextMenu={onNodeContextMenu}
@@ -819,6 +802,13 @@ function CanvasInner() {
             deleteKeyCode={null}
             panOnDrag={!canvasLocked && editorMode !== "wire"}
             nodesDraggable={!canvasLocked && editorMode === "select"}
+            // A connector is a grab point for the part, not the start of a wire:
+            // in select mode a press on it drags the part like any other spot on
+            // it, and wires are drawn in wire mode, where the overlay covers the
+            // canvas anyway. React Flow's own connection gesture would otherwise
+            // fire on every press of a terminal — and it produced a plain "step"
+            // edge, a second kind of wire beside the app's own.
+            nodesConnectable={false}
             elementsSelectable={editorMode === "select"}
             connectionRadius={24}
             connectionMode={ConnectionMode.Loose}
