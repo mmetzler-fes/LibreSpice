@@ -4,7 +4,7 @@ import { pointAtT, projectToPolyline, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { netLabelShape } from "../netLabelShape.js";
-import { terminalDirection, terminalTagSide } from "../netTerminalOrientation.js";
+import { terminalDirection, terminalTagSide, sampleWire } from "../netTerminalOrientation.js";
 import { buildSchematicSvg } from "../svgExport.js";
 import type { PortType } from "@core/components/special/Special.js";
 import type { TestReport } from "./svgExport.test.js";
@@ -223,6 +223,33 @@ CASES.push(
     const down = { x: 0, y: 1 };
     if (terminalTagSide(dock, down, []) !== 1) fail("on a vertical wire the name did not take the right side");
     if (terminalTagSide(dock, down, [{ x: 140, y: 100 }]) !== -1) fail("a part to the right did not push the name left");
+  } },
+
+  { name: "the name dodges a wire, not just a part", run: (fail) => {
+    // A wire running past the terminal is as much in the way as a part, and is
+    // what the name most often landed on. A wire is known only by its ends, so
+    // the segment has to be sampled to be seen at all (see sampleWire).
+    const dock = { x: 100, y: 100 };
+    const right = { x: 1, y: 0 };   // terminal on a horizontal wire
+    const down = { x: 0, y: 1 };    // …on a vertical one
+
+    // A horizontal run 24px above: the name goes below instead.
+    const above = sampleWire([{ x: 20, y: 76 }, { x: 180, y: 76 }], dock);
+    if (!above.length) return fail("nothing sampled from a wire right next to the dock");
+    if (terminalTagSide(dock, right, above) !== 1) fail("a wire above did not push the name down");
+
+    // A vertical run 24px to the right: the name goes left.
+    const beside = sampleWire([{ x: 124, y: 20 }, { x: 124, y: 180 }], dock);
+    if (terminalTagSide(dock, down, beside) !== -1) fail("a wire to the right did not push the name left");
+
+    // The terminal's own wire lies *on* the axis and must not count for either
+    // side — otherwise every terminal would think one side was taken.
+    const ownWire = sampleWire([{ x: 20, y: 100 }, { x: 180, y: 100 }], dock);
+    if (terminalTagSide(dock, right, ownWire) !== -1) fail("the wire it sits on was counted as an obstacle");
+
+    // Far enough away it does not count.
+    const distant = sampleWire([{ x: 20, y: -300 }, { x: 180, y: -300 }], dock);
+    if (terminalTagSide(dock, right, distant) !== -1) fail("a distant wire still pushed the name");
   } },
 
   { name: "the name clears the wire whether it ends there or runs through", run: (fail) => {

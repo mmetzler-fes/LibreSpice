@@ -4,7 +4,7 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
-import { terminalDirection, terminalTagSide } from "./netTerminalOrientation.js";
+import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
 import { wireNameTag } from "./wireLabelShape.js";
@@ -393,6 +393,12 @@ export function buildSchematicSvg(
     const neighbours = nodes
       .filter((o) => o.id !== n.id)
       .map((o) => ({ x: o.position.x + NODE_SIZE / 2, y: o.position.y + NODE_SIZE / 2 }));
+    // The wires count too — same rule as the editor, so the sheet matches the
+    // screen. The routes are already laid out above.
+    edges.forEach((e, i) => {
+      if (e.source === n.id || e.target === n.id) return;
+      neighbours.push(...sampleWire(wireVerts[i], dock));
+    });
     termDirs.set(n.id, { dir, side: terminalTagSide(dock, dir, neighbours) });
   }
 

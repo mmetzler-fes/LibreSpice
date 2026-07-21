@@ -24,11 +24,11 @@ import {
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins, getNodePins } from "../pinGeometry.js";
+import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins, getNodePins, edgeRouteHints } from "../pinGeometry.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { netLabelShape, tagTransform } from "../netLabelShape.js";
-import { terminalDirection, terminalTagSide } from "../netTerminalOrientation.js";
-import type { FlowPoint } from "../WireTool.js";
+import { terminalDirection, terminalTagSide, sampleWire } from "../netTerminalOrientation.js";
+import { orthoVertices, type FlowPoint } from "../WireTool.js";
 import { captionLayout, captionSide, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
 
@@ -605,6 +605,16 @@ function useTerminalLayout(nodeId: string): { dir: FlowPoint; side: 1 | -1 } {
     const neighbours = nodes
       .filter((n) => n.id !== nodeId)
       .map((n) => ({ x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 }));
+    // The wires count too: a run passing above the terminal is as much in the
+    // way as a part, and it is what the name most often collided with.
+    for (const e of edges) {
+      if (e.source === nodeId || e.target === nodeId) continue;   // our own lead
+      const a = (e.data?.sourceTap as FlowPoint | undefined) ?? pinAt(e.source, e.sourceHandle);
+      const b = (e.data?.targetTap as FlowPoint | undefined) ?? pinAt(e.target, e.targetHandle);
+      if (!a || !b) continue;
+      const wp = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
+      neighbours.push(...sampleWire(orthoVertices([a, ...wp, b], edgeRouteHints(nodes, e, symbolNorm)), dock));
+    }
     return { dir, side: terminalTagSide(dock, dir, neighbours) };
   }, [nodes, edges, nodeId, symbolNorm]);
 }

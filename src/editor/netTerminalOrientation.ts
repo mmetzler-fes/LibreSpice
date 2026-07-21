@@ -67,7 +67,9 @@ export function terminalDirection(dock: FlowPoint, farEnds: FlowPoint[]): FlowPo
  *
  * Derived from the surroundings rather than stored, so the file stays free of
  * layout hints and the same schematic always draws the same way. `neighbours`
- * are nearby points of interest in flow coordinates — other nodes' centres.
+ * are nearby points of interest in flow coordinates: other nodes' centres, and
+ * points sampled along the wires (see {@link sampleWire}) — a wire running past
+ * the terminal is just as much in the way as a part.
  */
 export function terminalTagSide(dock: FlowPoint, dir: FlowPoint, neighbours: FlowPoint[]): 1 | -1 {
   // The axis the name may move along is the one the symbol does *not* use.
@@ -86,4 +88,30 @@ export function terminalTagSide(dock: FlowPoint, dir: FlowPoint, neighbours: Flo
   const preferred: 1 | -1 = across === "y" ? -1 : 1;
   const other: 1 | -1 = preferred === 1 ? -1 : 1;
   return crowding(preferred) > crowding(other) ? other : preferred;
+}
+
+/**
+ * Points along an orthogonal wire, close enough to a dock to matter.
+ *
+ * The tag side is decided by counting what sits on either side, and a wire is
+ * only known by its endpoints — a long run passing above the terminal has no
+ * point near it at all unless the segment is sampled. `step` is fine enough that
+ * nothing within the search box slips between two samples.
+ */
+export function sampleWire(verts: FlowPoint[], near: FlowPoint, radius = 80, step = 8): FlowPoint[] {
+  const out: FlowPoint[] = [];
+  for (let i = 0; i < verts.length - 1; i++) {
+    const a = verts[i], b = verts[i + 1];
+    // Skip a segment that cannot reach the box around `near`.
+    if (Math.min(a.x, b.x) - radius > near.x || Math.max(a.x, b.x) + radius < near.x) {
+      if (Math.min(a.y, b.y) - radius > near.y || Math.max(a.y, b.y) + radius < near.y) continue;
+    }
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / step));
+    for (let k = 0; k <= n; k++) {
+      const p = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n };
+      if (Math.abs(p.x - near.x) <= radius && Math.abs(p.y - near.y) <= radius) out.push(p);
+    }
+  }
+  return out;
 }
