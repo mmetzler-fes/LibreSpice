@@ -3,6 +3,7 @@ import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
 import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, type TextBox } from "@core/circuit/textBox.js";
+import type { SheetShape } from "@core/circuit/sheetShape.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
@@ -41,6 +42,8 @@ interface CircuitState {
   dataFlags: DataFlag[];
   /** Free text annotations on the sheet (see textBox). */
   textBoxes: TextBox[];
+  /** Frames and other shapes drawn on the sheet (see sheetShape). */
+  sheetShapes: SheetShape[];
   propertyVersion: number;
   netVersion: number;
   /** Bumped after a full load (import / snapshot) so the canvas re-fits the view. */
@@ -136,6 +139,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   circuitName: "Untitled",
   dataFlags: [],
   textBoxes: [],
+  sheetShapes: [],
   propertyVersion: 0,
   netVersion: 0,
   viewFitNonce: 0,
@@ -476,7 +480,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, netNames } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, netNames } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -508,6 +512,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: directives,
       dataFlags,
       textBoxes,
+      sheetShapes,
       selectedComponentId: null,
       viewFitNonce: state.viewFitNonce + 1,
       _history: [...state._history, snap],
@@ -546,6 +551,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuitName: "Untitled",
       dataFlags: [],
       textBoxes: [],
+      sheetShapes: [],
       // A new schematic starts blank: the previous circuit's SPICE directives
       // (and the analysis they configured) would otherwise still drive the next
       // simulation — a `.step`/`.meas` over parts that no longer exist.
@@ -824,7 +830,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   exportSnapshot: () => {
-    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags, textBoxes, showDirectivesOnCanvas, directivesPos } = get();
+    const { nodes, edges, spiceDirectives, simulationConfig, circuit, circuitName, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos } = get();
     const componentProps: Record<string, Record<string, string | number>> = {};
     // serialize(), not getProperties(): the property list only holds the fields
     // the UI currently shows, so a source in DC mode would save no sine fields
@@ -855,7 +861,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       const { labelOffset: _drop, ...rest } = n.data as Record<string, unknown>;
       return { ...n, data: rest };
     });
-    return { version: 1, nodes: cleanNodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
+    return { version: 1, nodes: cleanNodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -893,6 +899,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       simulationConfig: snapshot.simulationConfig,
       dataFlags: snapshot.dataFlags ?? [],
       textBoxes: snapshot.textBoxes ?? [],
+      sheetShapes: snapshot.sheetShapes ?? [],
       showDirectivesOnCanvas: snapshot.showDirectivesOnCanvas ?? false,
       directivesPos: snapshot.directivesPos ?? { x: 40, y: 40 },
       selectedComponentId: null,

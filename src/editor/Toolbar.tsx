@@ -91,7 +91,7 @@ export function Toolbar() {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
-    circuitName, setCircuitName, dataFlags, textBoxes,
+    circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes,
     showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
@@ -172,11 +172,11 @@ export function Toolbar() {
     const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
     // `circuit` resolves the wires' net names — a wire stores only *whether* to
     // show a label, never the text (see NetNameLookup).
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {
-    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes);
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes);
     if ("showSaveFilePicker" in window) {
       try {
         let handle = fileHandle;

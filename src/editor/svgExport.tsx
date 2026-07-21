@@ -10,6 +10,7 @@ import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTo
 import { wireNameTag } from "./wireLabelShape.js";
 import { flattenForExport } from "./markdown.js";
 import type { TextBox } from "@core/circuit/textBox.js";
+import { dashArray, type SheetShape } from "@core/circuit/sheetShape.js";
 import { captionSvgPlacement, captionSide, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
@@ -276,6 +277,7 @@ export function buildSchematicSvg(
   directives?: DirectiveOverlay,
   circuit?: NetNameLookup,
   textBoxes: TextBox[] = [],
+  sheetShapes: SheetShape[] = [],
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -331,6 +333,7 @@ export function buildSchematicSvg(
     grow(t.x, t.y);
     grow(t.x + t.width, t.y + t.height);
   }
+  for (const s of sheetShapes) { grow(s.x1, s.y1); grow(s.x2, s.y2); }
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_SIZE; maxY = NODE_SIZE; }
   const pad = 24;
   minX -= pad; minY -= pad; maxX += pad; maxY += pad;
@@ -405,6 +408,15 @@ export function buildSchematicSvg(
   const svg = (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${minX} ${minY} ${width} ${height}`}>
       <rect x={minX} y={minY} width={width} height={height} fill="#ffffff" />
+      {/* Sheet drawings sit beneath the circuit, as they do on the canvas. */}
+      {sheetShapes.map((s) => {
+        const common = { fill: "none", stroke: "#94a3b8", strokeWidth: 1.5, strokeDasharray: dashArray(s.dash) };
+        if (s.kind === "line") return <line key={s.id} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} {...common} />;
+        const x = Math.min(s.x1, s.x2), y = Math.min(s.y1, s.y2);
+        const w = Math.abs(s.x2 - s.x1), h = Math.abs(s.y2 - s.y1);
+        if (s.kind === "circle") return <ellipse key={s.id} cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...common} />;
+        return <rect key={s.id} x={x} y={y} width={w} height={h} {...common} />;
+      })}
       {wires}
       {labels}
       {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)?.dir} tagSide={termDirs.get(n.id)?.side} />)}

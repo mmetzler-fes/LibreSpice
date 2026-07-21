@@ -8,6 +8,7 @@ import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
 import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
+import { parseSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 
 
 /** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
@@ -51,7 +52,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; netNames: { compId: string; handle: string; name: string }[] } {
+  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -59,6 +60,7 @@ export class LTSpiceParser {
     const pins: Pin[] = [];
     const dataFlags: DataFlag[] = [];
     const textBoxes: TextBox[] = [];
+    const sheetShapes: SheetShape[] = [];
     // Named-flag positions, so we can also anchor the net name on a real
     // component pin (robust even if the terminal's edge is dropped at runtime).
     const namedFlags: { name: string; x: number; y: number }[] = [];
@@ -147,6 +149,11 @@ export class LTSpiceParser {
           x1: parseInt(parts[1], 10), y1: parseInt(parts[2], 10),
           x2: parseInt(parts[3], 10), y2: parseInt(parts[4], 10)
         });
+      } else if (cmd === "RECTANGLE" || cmd === "CIRCLE" || (cmd === "LINE" && !currentSymbol)) {
+        // Sheet drawings — a frame, a divider, a ring around a part. Dropped
+        // until now, so a file that carried one lost it on the next save.
+        const shape = parseSheetShape(line, `shape_${sheetShapes.length + 1}`);
+        if (shape) sheetShapes.push(shape);
       } else if (cmd === "TEXT") {
         // A comment TEXT becomes a text box. These used to be dropped on the
         // floor, which quietly discarded the exercise texts every converted
@@ -410,7 +417,7 @@ export class LTSpiceParser {
       }
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, netNames };
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {

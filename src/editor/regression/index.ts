@@ -24,7 +24,7 @@ import { runDigitalGeometryTests } from "./digitalGeometry.test.js";
 import { runSymbolSourceTests } from "./symbolSources.test.js";
 import { runImportedRouteTests } from "./importedRoutes.test.js";
 import { runNetTerminalRoundTripTests } from "./netTerminalRoundTrip.test.js";
-import { runTextBoxTests } from "./textBox.test.js";
+import { runTextBoxTests, runSheetShapeTests } from "./textBox.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -75,6 +75,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Imported wire routes", ...runImportedRouteTests() },
     { name: "Net terminal round-trip", ...(await runNetTerminalRoundTripTests()) },
     { name: "Text boxes", ...(await runTextBoxTests()) },
+    { name: "Sheet shapes", ...(await runSheetShapeTests()) },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];

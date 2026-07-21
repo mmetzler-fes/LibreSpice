@@ -7,6 +7,7 @@ import {
 } from "./ltspiceGeometry.js";
 import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
+import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -154,7 +155,7 @@ function dockPoint(verts: Pt[], t: number): Pt {
 }
 
 export class LTSpiceExporter {
-  static export(nodes: Node[], edges: Edge[], directives: string, circuit: any, dataFlags: DataFlag[] = [], textBoxes: TextBox[] = []): string {
+  static export(nodes: Node[], edges: Edge[], directives: string, circuit: any, dataFlags: DataFlag[] = [], textBoxes: TextBox[] = [], sheetShapes: SheetShape[] = []): string {
     const header = ["Version 4", "SHEET 1 880 680"];
     const symbolLines: string[] = [];
     const flagLines: string[] = [];
@@ -348,6 +349,7 @@ export class LTSpiceExporter {
       }
     }
 
-    return [...header, ...wireLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines, ...textBoxLines].join("\n");
+    return [...header, ...wireLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines, ...textBoxLines,
+      ...sheetShapes.map(formatSheetShape)].join("\n");
   }
 }

@@ -3,6 +3,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { encodeTextBox, decodeTextBox, estimateSize, type TextBox } from "@core/circuit/textBox.js";
 import { renderMarkdown, flattenForExport } from "../markdown.js";
+import { parseSheetShape, formatSheetShape, dashArray } from "@core/circuit/sheetShape.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -184,6 +185,80 @@ const CASES: Case[] = [
     },
   },
 ];
+
+const SHAPE_CASES: Case[] = [
+  {
+    name: "a sheet rectangle survives the .asc round trip",
+    run: async (fail) => {
+      // Dropped on import until now, so a file carrying a frame lost it on the
+      // next save — the same silent loss the sheet comments had.
+      const asc = `Version 4
+SHEET 1 880 680
+FLAG 0 96 0
+SYMBOL voltage 0 0 R0
+SYMATTR InstName V1
+RECTANGLE Normal 224 320 -16 32 1
+`;
+      st().clearCircuit();
+      st().loadFromAsc(asc);
+      await tick();
+      await tick();
+      const shapes = st().sheetShapes;
+      if (shapes.length !== 1) return fail(`${shapes.length} shapes read, expected 1`);
+      const s = shapes[0];
+      if (s.kind !== "rect") fail(`kind ${s.kind}`);
+      if ([s.x1, s.y1, s.x2, s.y2].join() !== "224,320,-16,32") fail(`corners ${[s.x1, s.y1, s.x2, s.y2].join()}`);
+      if (s.dash !== 1) fail(`dash ${s.dash}, expected 1`);
+
+      const out = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, st().sheetShapes);
+      if (!/^RECTANGLE Normal 224 320 -16 32 1$/m.test(out)) fail(`not written back:\n${out}`);
+    },
+  },
+  {
+    name: "the three shape kinds and their dash patterns round-trip",
+    run: (fail) => {
+      for (const line of [
+        "RECTANGLE Normal 0 0 10 20",
+        "RECTANGLE Normal 224 320 -16 32 1",
+        "LINE Normal -5 -5 40 60 2",
+        "CIRCLE Normal 0 0 64 64 3",
+      ]) {
+        const s = parseSheetShape(line, "s1");
+        if (!s) { fail(`not parsed: ${line}`); continue; }
+        if (formatSheetShape(s) !== line) fail(`${line} → ${formatSheetShape(s)}`);
+      }
+      // A solid line writes no trailing number, and asks for no dash pattern.
+      if (dashArray(0) !== undefined) fail("solid produced a dash pattern");
+      if (!dashArray(1)) fail("dashed produced none");
+    },
+  },
+  {
+    name: "a symbol's own LINE is not mistaken for a sheet drawing",
+    run: async (fail) => {
+      // Inside a SYMBOL block the same keyword belongs to the part's artwork.
+      const asc = `Version 4
+SHEET 1 880 680
+SYMBOL voltage 0 0 R0
+LINE Normal 0 0 10 10
+SYMATTR InstName V1
+`;
+      st().clearCircuit();
+      st().loadFromAsc(asc);
+      await tick();
+      await tick();
+      if (st().sheetShapes.length !== 0) fail(`a symbol's line became a sheet shape`);
+    },
+  },
+];
+
+export async function runSheetShapeTests(): Promise<TestReport> {
+  const failures: { name: string; reason: string }[] = [];
+  for (const c of SHAPE_CASES) {
+    let failed = false;
+    await c.run((reason) => { if (!failed) { failed = true; failures.push({ name: c.name, reason }); } });
+  }
+  return { total: SHAPE_CASES.length, passed: SHAPE_CASES.length - failures.length, failures };
+}
 
 export async function runTextBoxTests(): Promise<TestReport> {
   const failures: { name: string; reason: string }[] = [];

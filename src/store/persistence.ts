@@ -2,6 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { TextBox } from "@core/circuit/textBox.js";
+import type { SheetShape } from "@core/circuit/sheetShape.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { PlotSettings } from "@simulation/plotStore.js";
 
@@ -48,6 +49,8 @@ export interface CircuitSnapshot {
   dataFlags?: DataFlag[];
   /** Free text annotations (see textBox). Optional: older snapshots carry none. */
   textBoxes?: TextBox[];
+  /** Sheet drawings (see sheetShape). Optional: older snapshots carry none. */
+  sheetShapes?: SheetShape[];
   /** Show the SPICE directives as a text box on the schematic. */
   showDirectivesOnCanvas?: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */

@@ -22,6 +22,7 @@ import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, 
 import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { TextBoxLayer } from "./TextBoxLayer.js";
+import { SheetShapeLayer } from "./SheetShapeLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
 import { NODE_SIZE, GRID, GRID_DOTS, snapToGrid, getNodePins, edgeRouteHints } from "./pinGeometry.js";
@@ -857,6 +858,7 @@ function CanvasInner() {
             </button>
           </div>
 
+          <SheetShapeLayer />
           <DataFlagLayer />
           <TextBoxLayer />
           <DirectiveBox />
