@@ -9,3 +9,7 @@ library-archive
 examples/*
 # …außer der Brückenschaltung, die eine Galerie-Karte auf der Startseite füllt.
 !examples/Brueckenschaltung1.asc
+# …und der Konverter-Ausgabe: sie ist zwar erzeugt, wird aber nach jedem Lauf
+# im Diff durchgesehen, und das geht nur, solange sie getrackt ist.
+!examples/Multisim_converted/
+!examples/Multisim_converted/*

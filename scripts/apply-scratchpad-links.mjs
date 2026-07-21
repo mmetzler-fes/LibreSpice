@@ -101,16 +101,22 @@ if (existsSync(jsonPath)) {
 }
 
 /**
- * Directories a linked circuit may live in. `examples/` is the hand-built set;
- * `converted_from_multisim/` holds the converted teaching schematics, which is
- * where the digital circuits are — a link to one of those recorded no file at
- * all while only examples/ was searched.
+ * Directories a linked circuit may live in:
+ *  - `examples/` — the hand-built set;
+ *  - `examples/Multisim_converted/` — what the converter writes, replaced whole
+ *    on every run;
+ *  - `converted_from_multisim/` — schematics revised by hand in the app, which
+ *    the converter no longer touches.
+ *
+ * The last two are where the digital circuits live; a link to one of those
+ * recorded no file at all while only `examples/` was searched.
  *
  * The recorded `file` stays a bare basename: it is bookkeeping read back only by
- * this script, which searches both roots again on the next run. Should the same
- * basename ever exist in both, the earlier root wins.
+ * this script, which searches every root again on the next run. Should the same
+ * basename exist in more than one, the earlier root wins — so a hand-revised
+ * copy is found before the generated one it was made from.
  */
-const ASC_ROOTS = ["examples", "converted_from_multisim"];
+const ASC_ROOTS = ["examples", "converted_from_multisim", "examples/Multisim_converted"];
 
 /** A basename that really exists under one of the roots, trying umlaut spellings. */
 function resolveAsc(name) {

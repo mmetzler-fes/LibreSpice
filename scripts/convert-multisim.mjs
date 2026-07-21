@@ -126,7 +126,7 @@ function main() {
   const args = process.argv.slice(2);
   const inDir = args.find((a) => !a.startsWith("--"));
   const outIdx = args.indexOf("--out");
-  const outDir = outIdx !== -1 ? args[outIdx + 1] : "converted_from_multisim";
+  const outDir = outIdx !== -1 ? args[outIdx + 1] : "examples/Multisim_converted";
   if (!inDir) {
     console.error("usage: node scripts/convert-multisim.mjs <input-dir> [--out <dir>]");
     process.exit(1);
