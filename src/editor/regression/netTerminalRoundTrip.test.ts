@@ -200,6 +200,77 @@ const CASES: Case[] = [
     },
   },
   {
+    // The reported loss. A net carries one name; a second terminal on it used to
+    // claim the net for itself, and whichever claim was applied last renamed the
+    // other. After a save/reload the label you had added came back under a
+    // different name — indistinguishable from having vanished.
+    name: "a terminal added to an already-named net adopts that name",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const v = place("vsource", "V1", 200, 200);
+      const first = place("netlabel", "N9", 200 + 80, 300);
+      connect(v, "n", first, "t");
+      st().rebuildConnections();
+      await tick();
+      // Now name the same net a second time, as adding a probe point does.
+      const second = place("netlabel", "Q4", 200 - 80, 300);
+      connect(v, "n", second, "t");
+      st().rebuildConnections();
+      await tick();
+
+      const before = terminals();
+      if (before.join() !== "N9|netlabel|-,N9|netlabel|-") {
+        return fail(`the second terminal did not adopt the net's name: [${before.join(", ")}]`);
+      }
+      await roundTrip();
+      const after = terminals();
+      if (after.join() !== before.join()) fail(`before: [${before.join(", ")}] after: [${after.join(", ")}]`);
+    },
+  },
+  {
+    name: "renaming a terminal renames the net and every other terminal on it",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const v = place("vsource", "V1", 200, 200);
+      const a = place("netlabel", "N9", 280, 300);
+      const b = place("netlabel", "N9", 120, 300);
+      connect(v, "n", a, "t");
+      connect(v, "n", b, "t");
+      st().rebuildConnections();
+      await tick();
+      const netId = st().circuit.components.get(a.id)?.ports[0]?.netId;
+      if (!netId) return fail("the terminal ended up on no net");
+      st().renameNet(netId, "VOUT");
+      await tick();
+      const after = terminals();
+      if (after.join() !== "VOUT|netlabel|-,VOUT|netlabel|-") {
+        fail(`renaming did not reach both terminals: [${after.join(", ")}]`);
+      }
+      if (st().circuit.nets.get(netId)?.nodeLabel !== "VOUT") {
+        fail(`the net kept the name ${st().circuit.nets.get(netId)?.nodeLabel}`);
+      }
+    },
+  },
+  {
+    name: "a net with a terminal does not also show its name on the wire",
+    run: async (fail) => {
+      // Two ways to show a net's name exist on purpose — a net without a
+      // terminal carries it on the wire — but a net with both showed it twice.
+      st().clearCircuit();
+      await tick();
+      const v = place("vsource", "V1", 200, 200);
+      const term = place("netlabel", "N9", 280, 300);
+      connect(v, "n", term, "t");
+      st().setEdges(st().edges.map((e) => ({ ...e, data: { ...e.data, netName: "N9", showLabel: true } })));
+      st().rebuildConnections();
+      await tick();
+      const shown = st().edges.filter((e) => (e.data as { showLabel?: boolean }).showLabel);
+      if (shown.length > 0) fail(`${shown.length} wire(s) still show the name next to the terminal`);
+    },
+  },
+  {
     name: "the saved file actually carries a FLAG for every terminal",
     run: async (fail) => {
       // One level below the round trip: if the FLAG is missing from the file,

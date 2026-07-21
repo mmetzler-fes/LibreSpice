@@ -673,7 +673,60 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuit.nets.delete(nid);
     }
 
-    set((state) => ({ netVersion: state.netVersion + 1 }));
+    // ── One name per net, shown in one place ──────────────────────────────
+    // The name belongs to the net, not to the tag: a net carries at most one,
+    // and a terminal placed on an already-named net adopts that name rather than
+    // imposing its own. Without this, two terminals on one net each claimed it —
+    // whichever was applied last won and silently renamed the other, so a label
+    // added to name a probe point came back under a different name after a
+    // save/reload, looking like it had vanished.
+    //
+    // Oldest terminal wins. Ids are handed out in ascending order
+    // (`netlabel_3`, `netconnector_7`), so the smallest is the one that was
+    // already there — and on import, the first FLAG in the file.
+    const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
+    const byNet = new Map<string, { id: string; name: string }[]>();
+    for (const comp of circuit.components.values()) {
+      const nm = comp.getNetLabel();
+      const nid = comp.ports[0]?.netId;
+      if (nm === null || !nid || nid === "0") continue;
+      const list = byNet.get(nid) ?? [];
+      list.push({ id: comp.id, name: nm });
+      byNet.set(nid, list);
+    }
+    /** New label for each terminal node whose name has to give way. */
+    const renamed = new Map<string, string>();
+    for (const [nid, terms] of byNet) {
+      const winner = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
+      for (const t of terms) {
+        if (t.name === winner.name) continue;
+        circuit.components.get(t.id)?.setProperty("label", winner.name);
+        renamed.set(t.id, winner.name);
+      }
+      const net = circuit.nets.get(nid);
+      if (net) net.nodeLabel = winner.name;
+    }
+
+    // A named net shows its name at its terminal, so the wire must not repeat it.
+    // Both mechanisms exist on purpose — a net without a terminal carries its
+    // name on the wire — but a net with both said the same thing twice.
+    const labelledNets = new Set(byNet.keys());
+    const netOfEdge2 = (e: Edge) =>
+      circuit.components.get(e.source ?? "")?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId
+      ?? circuit.components.get(e.target ?? "")?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId;
+
+    set((state) => ({
+      netVersion: state.netVersion + 1,
+      nodes: renamed.size
+        ? state.nodes.map((n) => (renamed.has(n.id) ? { ...n, data: { ...n.data, label: renamed.get(n.id) } } : n))
+        : state.nodes,
+      edges: state.edges.map((e) => {
+        const nid = netOfEdge2(e);
+        if (!nid || !labelledNets.has(nid) || !(e.data as { showLabel?: boolean } | undefined)?.showLabel) return e;
+        const { showLabel: _hide, ...rest } = (e.data ?? {}) as Record<string, unknown>;
+        return { ...e, data: rest };
+      }),
+    }));
     get().regenerateNetlist();
   },
 
