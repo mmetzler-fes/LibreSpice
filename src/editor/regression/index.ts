@@ -20,6 +20,7 @@ import { runPwlSourceTests } from "./pwlSource.test.js";
 import { runLogicGateTests } from "./logicGate.test.js";
 import { runDFlipFlopTests } from "./dFlipFlop.test.js";
 import { runDigitalGeometryTests } from "./digitalGeometry.test.js";
+import { runSymbolSourceTests } from "./symbolSources.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -65,6 +66,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Logic gates", ...runLogicGateTests() },
     { name: "D flip-flop", ...runDFlipFlopTests() },
     { name: "Digital part geometry", ...runDigitalGeometryTests() },
+    { name: "Symbol sources", ...(await runSymbolSourceTests()) },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];

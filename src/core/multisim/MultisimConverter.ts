@@ -32,6 +32,8 @@
  * drift apart.
  */
 
+import { outwardDir } from "@core/geometry/ortho.js";
+
 /** A point or a symbol-local offset, in LTSpice units. */
 type Pt = [number, number];
 /** A wire segment: x1, y1, x2, y2. */
@@ -1293,6 +1295,13 @@ export function convert(doc: any): ConversionResult {
     // Where LTSpice's pin spacing differs from Multisim's, the Multisim wire
     // still ends at the original point — bridge the gap with a stub so the net
     // stays connected instead of silently breaking.
+    // Every pin of this part, so a stub can be told which way leads *out* of the
+    // symbol (see outwardAxis) rather than along its flank.
+    const pinPts: Pt[] = useOffsets
+      .map((o) => (o ? rotate(o, deg, mirrored) : null))
+      .filter((r): r is Pt => r !== null)
+      .map((r) => [origin[0] + r[0], origin[1] + r[1]]);
+
     for (let i = 0; i < want.length; i++) {
       if (!useOffsets[i]) continue;
       const r = rotate(useOffsets[i], deg, mirrored);
@@ -1309,9 +1318,34 @@ export function convert(doc: any): ConversionResult {
       if (!target) continue;
       if (ax !== target[0] || ay !== target[1]) {
         // Route the stub as an L so it stays on the orthogonal grid rather than
-        // cutting diagonally across the sheet.
-        wires.push([ax, ay, target[0], ay]);
-        wires.push([target[0], ay, target[0], target[1]]);
+        // cutting diagonally across the sheet — leading with the axis the pin
+        // faces, so it leaves the symbol squarely. Led with a fixed horizontal
+        // leg, the supply stubs of an op-amp (whose pins face up and down) ran
+        // sideways along the top and bottom edges and then down the flank,
+        // straight across both inputs.
+        const dir = outwardDir({ x: ax, y: ay }, pinPts.map(([x, y]) => ({ x, y })));
+        const alongFlank = dir && (dir.x !== 0 ? ax === target[0] : ay === target[1]);
+        if (alongFlank) {
+          // The Multisim point lies straight off the *side* of the pin, so an L
+          // has no corner to place and the whole stub would run flush against
+          // the symbol's edge. Step out perpendicular first, then come back:
+          // a small jog, but the wire visibly leaves the part.
+          const mx = ax + dir!.x * LEAD, my = ay + dir!.y * LEAD;
+          wires.push([ax, ay, mx, my]);
+          if (dir!.x !== 0) {
+            wires.push([mx, my, mx, target[1]]);
+            wires.push([mx, target[1], target[0], target[1]]);
+          } else {
+            wires.push([mx, my, target[0], my]);
+            wires.push([target[0], my, target[0], target[1]]);
+          }
+        } else if (dir?.y) {
+          wires.push([ax, ay, ax, target[1]]);
+          wires.push([ax, target[1], target[0], target[1]]);
+        } else {
+          wires.push([ax, ay, target[0], ay]);
+          wires.push([target[0], ay, target[0], target[1]]);
+        }
       }
     }
   }

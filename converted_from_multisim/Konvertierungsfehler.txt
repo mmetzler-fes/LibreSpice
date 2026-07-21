@@ -119,13 +119,9 @@ Mit fehlenden Teilen:  6
   1_3_2_PT100-Sensor_mit_Brueckenschaltung
         0 = 3
   1_4_2_PT100-Sensor_Bruecke_mit_INA333
-        0 = Ut, 0 = 3
+        0 = 3
   1_4_3_PT100-Sensor_Bruecke_Instrumentenverstärker
         0 = 3, 6 = 7
-  1_5_1_PT100_Sensor_in_4-Leiter-Schaltung _mit_INA333
-        1 = 3
-  1_5_2_PT100_Sensor_in_4-Leiter-Schaltung_mit_2_INA333
-        1 = 3, 5 = Uth
   2_1_Tiefgaragensteuerung
         3 = 6, 4 = 7, 5 = 8
   2_1_Tiefgaragensteuerung_Lsg
@@ -137,6 +133,6 @@ Mit fehlenden Teilen:  6
   8_1_1_DAC_mit_Kettenleiter
         16 = 7
   8_2_3_Dual_Slope_ADC
-        10 = 12, 15 = 16
+        15 = 16
   Trigger
         0 = 1, 0 = 3

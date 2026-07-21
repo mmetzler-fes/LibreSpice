@@ -21,12 +21,24 @@ export type Axis = "x" | "y";
  * one pin, or a pin exactly at the centre, has no direction to offer.
  */
 export function outwardAxis(pin: Pt, siblings: Pt[]): Axis | undefined {
+  const d = outwardDir(pin, siblings);
+  return d ? (d.x !== 0 ? "x" : "y") : undefined;
+}
+
+/**
+ * The same rule as {@link outwardAxis}, but as a unit step — which way, not just
+ * which axis. Needed wherever a lead has to be pushed a real distance clear of
+ * the symbol rather than merely aligned with an axis.
+ */
+export function outwardDir(pin: Pt, siblings: Pt[]): Pt | undefined {
   if (siblings.length < 2) return undefined;
   const cx = siblings.reduce((s, p) => s + p.x, 0) / siblings.length;
   const cy = siblings.reduce((s, p) => s + p.y, 0) / siblings.length;
   const dx = pin.x - cx, dy = pin.y - cy;
   if (dx === 0 && dy === 0) return undefined;
-  return Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+  return Math.abs(dx) >= Math.abs(dy)
+    ? { x: Math.sign(dx), y: 0 }
+    : { x: 0, y: Math.sign(dy) };
 }
 
 /** Preferred leaving axis at each end of a wire; either may be unknown. */
