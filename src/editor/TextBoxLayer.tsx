@@ -86,22 +86,26 @@ export function TextBoxLayer() {
               overflow: "hidden",
             }}
           >
-            {/* Title bar: grip, mode switch, delete. */}
+            {/* Title bar — the whole strip drags the box, not just the grip
+                glyph: that is the part of a window one reaches for, and an 8 px
+                target was easy to miss entirely. The buttons on it stop the
+                gesture so pressing one does not also start a drag. */}
             <div
+              onPointerDown={(e) => startMove(e, box)}
+              title="Textfeld verschieben"
               style={{
+                ...DRAG_TOUCH_ACTION,
                 display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
                 padding: "1px 2px", background: theme.headerBg,
                 borderBottom: `1px solid ${theme.borderMuted}`, fontSize: 10,
+                cursor: "move", userSelect: "none",
               }}
             >
-              <span
-                onPointerDown={(e) => startMove(e, box)}
-                title="Textfeld verschieben"
-                style={{ ...DRAG_TOUCH_ACTION, cursor: "move", color: "#94a3b8", padding: "0 3px", userSelect: "none", letterSpacing: -1 }}
-              >
+              <span style={{ color: "#94a3b8", padding: "0 3px", letterSpacing: -1 }}>
                 ⠿
               </span>
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => update(box.id, { markdown: !box.markdown })}
                 title={box.markdown ? "Markdown wird ausgewertet — auf Rohtext umschalten" : "Rohtext — Markdown auswerten"}
                 style={{
@@ -112,6 +116,7 @@ export function TextBoxLayer() {
                 MD
               </button>
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => setEditing(isEditing ? null : box.id)}
                 title={isEditing ? "Bearbeiten beenden" : "Text bearbeiten (oder Doppelklick)"}
                 style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 10, color: isEditing ? "#2563eb" : "#94a3b8", padding: "0 3px" }}
@@ -120,6 +125,7 @@ export function TextBoxLayer() {
               </button>
               <span style={{ flex: 1 }} />
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => remove(box.id)}
                 title="Textfeld entfernen"
                 style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 12, color: "#94a3b8", padding: "0 3px" }}
