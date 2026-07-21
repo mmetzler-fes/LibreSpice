@@ -22,6 +22,7 @@ import { runDFlipFlopTests } from "./dFlipFlop.test.js";
 import { runDigitalGeometryTests } from "./digitalGeometry.test.js";
 import { runSymbolSourceTests } from "./symbolSources.test.js";
 import { runImportedRouteTests } from "./importedRoutes.test.js";
+import { runNetTerminalRoundTripTests } from "./netTerminalRoundTrip.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -69,6 +70,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Digital part geometry", ...runDigitalGeometryTests() },
     { name: "Symbol sources", ...(await runSymbolSourceTests()) },
     { name: "Imported wire routes", ...runImportedRouteTests() },
+    { name: "Net terminal round-trip", ...(await runNetTerminalRoundTripTests()) },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },
   ];
