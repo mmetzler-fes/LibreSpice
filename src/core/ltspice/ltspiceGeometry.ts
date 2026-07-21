@@ -12,6 +12,12 @@ import { GROUND_PIN_Y } from "@editor/pinGeometry.js";
 export const CENTER = 40;
 
 export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
+  // A jumper is a piece of wire in LTSpice; here it is a part of its own, a
+  // resistor of 1 uOhm behind the symbol (see library/sym/jumper.asy). It needs
+  // its own type rather than being folded into "resistor": the pin geometry
+  // hangs off the type, and a resistor's pins sit elsewhere — so the part landed
+  // on no wire at all and quietly broke the branch it was meant to close.
+  jumper: "jumper",
   res: "resistor", cap: "capacitor", polcap: "capacitor_polarized", ind: "inductor",
   // The IEC/European symbol set (`Misc\EuropeanResistor`, …) draws the same
   // devices with the same pins. Without these, an IEC schematic fell back to the
@@ -57,6 +63,7 @@ export function symbolToType(symName: string): ComponentType | undefined {
 }
 
 export const TYPE_TO_SYMBOL: Record<string, string> = {
+  jumper: "jumper",
   resistor: "res", capacitor: "cap", capacitor_polarized: "polcap", inductor: "ind",
   // Zener/Schottky are diodes with their own LTSpice symbols; without an entry
   // here they fell back to "res" and came back from a saved file as resistors.
@@ -80,6 +87,13 @@ export interface PinOffset { handle: string; dx: number; dy: number }
  * the component's Port ids (see pinGeometry.PORT_HANDLES).
  */
 export const PIN_OFFSETS: Record<string, PinOffset[]> = {
+  // Two pins on one horizontal line, 64 apart — the spacing the shipped
+  // schematics were drawn to (measured from the wires that stop either side of
+  // the jumpers in 05-2-1_Leistungsanpassung1.asc, both agreeing).
+  jumper: [
+    { handle: "p", dx: -32, dy: 64 },
+    { handle: "n", dx: 32, dy: 64 },
+  ],
   resistor: [{ handle: "p", dx: 16, dy: 16 }, { handle: "n", dx: 16, dy: 96 }],
   capacitor: [{ handle: "p", dx: 16, dy: 0 }, { handle: "n", dx: 16, dy: 64 }],
   capacitor_polarized: [{ handle: "p", dx: 16, dy: 0 }, { handle: "n", dx: 16, dy: 64 }],

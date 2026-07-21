@@ -34,6 +34,7 @@ import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } fr
 
 export type ComponentType =
   | "resistor"
+  | "jumper"
   | "capacitor"
   | "capacitor_polarized"
   | "inductor"
@@ -195,6 +196,7 @@ function MovableLabel({
 
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   resistor: ResistorSymbol,
+  jumper: ResistorSymbol, // unused: the jumper always has its own .asy
   capacitor: CapacitorSymbol,
   capacitor_polarized: CapacitorSymbol, // unused: always has the polcap .asy
   inductor: InductorSymbol,

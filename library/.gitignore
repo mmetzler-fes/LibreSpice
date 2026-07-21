@@ -20,4 +20,6 @@
 # The generic thyristor, same story.
 !/sub/Thyristor.lib
 !/sym/SCR.asy
+# The jumper, referenced by name from the shipped schematics.
+!/sym/jumper.asy
 !/sym/OpAmps/

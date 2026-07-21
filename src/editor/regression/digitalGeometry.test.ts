@@ -1,5 +1,6 @@
 import { getLocalPins, NODE_SIZE } from "../pinGeometry.js";
 import { captionSide } from "../captionLayout.js";
+import { offsetsForNode } from "@core/ltspice/ltspiceGeometry.js";
 import { buildSchematicSvg } from "../svgExport.js";
 import { LogicGate } from "@core/components/digital/LogicGate.js";
 import { DFlipFlop } from "@core/components/digital/DFlipFlop.js";
@@ -124,6 +125,29 @@ const CASES: Case[] = [
       if (captionSide(opamp) !== "right") fail("the op-amp's caption stayed on its crowded flank");
       // The supplies sit on the centre line and must count for neither flank.
       if (captionSide([{ px: c }, { px: c }]) !== "left") fail("centre pins were counted as a flank");
+    },
+  },
+  {
+    name: "a jumper keeps its own pins, not a resistor's",
+    run: (fail) => {
+      // The jumper is a resistor behind the scenes (1 uOhm), but its pins sit
+      // 64 apart on one horizontal line, where a resistor's are vertical. Folded
+      // into the resistor type it landed on no wire at all — the schematic it
+      // came from lost the whole branch and nothing reported it.
+      // Checked on the *import* geometry: that is the table which decides where
+      // a loaded part's pins land, and the one that sent the jumper off the
+      // wires. (The canvas table draws from the `.asy`, which the harness does
+      // not load — see scripts/glob-shim.js.)
+      const pins = offsetsForNode("jumper", 0);
+      if (pins.length !== 2) return fail(`${pins.length} pins`);
+      const [a, b] = pins;
+      if (a.dy !== b.dy) fail(`the two pins are not on one horizontal line: ${a.dy} vs ${b.dy}`);
+      if (Math.abs(b.dx - a.dx) !== 64) fail(`the pins are ${Math.abs(b.dx - a.dx)} apart, expected 64`);
+      // And it must not fall back to the resistor's layout, which is vertical.
+      const res = offsetsForNode("resistor", 0);
+      if (res.length === pins.length && res.every((r, i) => r.dx === pins[i].dx && r.dy === pins[i].dy)) {
+        fail("the jumper fell back to the resistor's pins");
+      }
     },
   },
   {

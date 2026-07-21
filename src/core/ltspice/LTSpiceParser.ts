@@ -566,6 +566,12 @@ export class LTSpiceParser {
       // Parametric value (e.g. `{Cvar}`) — keep verbatim for the netlist so
       // .param/.step can drive it.
       comp.valueExpr = valueStr;
+    } else if (!valueStr && cType === "jumper" && comp.hasOwnProperty("resistance")) {
+      // A jumper carries no Value in the file: LTSpice fills it from the symbol
+      // when placing, and a schematic drawn there simply has none. Take the
+      // symbol's own default so it stays a link and does not become a 1 kOhm
+      // resistor in the middle of a wire.
+      (comp as any).resistance = 1e-6;
     } else if (valueStr && !valueStr.includes("(")) {
       const num = parseSI(valueStr);
       if (comp.hasOwnProperty("resistance")) (comp as any).resistance = num;

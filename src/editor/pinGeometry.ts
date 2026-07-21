@@ -63,6 +63,7 @@ export function rotatePoint(px: number, py: number, cx: number, cy: number, deg:
  */
 export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   resistor: ["p", "n"],
+  jumper: ["p", "n"],
   capacitor: ["p", "n"],
   capacitor_polarized: ["p", "n"],
   inductor: ["p", "n"],

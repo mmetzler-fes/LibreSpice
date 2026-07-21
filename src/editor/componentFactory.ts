@@ -19,6 +19,10 @@ export function createSpiceComponent(
   const pos = { x, y };
   switch (type) {
     case "resistor":    return new Resistor(id, label, pos);
+    // A jumper is a piece of wire; our model has no part that *is* a
+    // connection, so it is a resistor a decade below any real contact
+    // resistance — a link to the solver, without a zero-ohm branch.
+    case "jumper":      { const j = new Resistor(id, label, pos); j.resistance = 1e-6; return j; }
     case "capacitor":   return new Capacitor(id, label, pos);
     case "capacitor_polarized": return new Capacitor(id, label, pos);
     case "inductor":    return new Inductor(id, label, pos);
@@ -64,7 +68,7 @@ export function createSubcircuitComponent(
 
 const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
   resistor: "R", capacitor: "C", capacitor_polarized: "C", inductor: "L", diode: "D", led: "D",
-  zener: "D", schottky: "D", opamp: "U",
+  zener: "D", schottky: "D", opamp: "U", jumper: "R",
   bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
   netlabel: "NET", netconnector: "PORT", subcircuit: "X",

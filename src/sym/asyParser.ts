@@ -210,6 +210,7 @@ export type SymbolNorm = "default" | "ansi" | "en";
  */
 const TYPE_TO_SYMBOL: Partial<Record<ComponentType, string>> = {
   resistor: "res",
+  jumper: "jumper",
   capacitor: "cap",
   capacitor_polarized: "polcap",
   inductor: "ind",
