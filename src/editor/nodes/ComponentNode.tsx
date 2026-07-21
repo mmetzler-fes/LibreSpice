@@ -641,16 +641,24 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
     >
       {/* No tap-to-rotate here, unlike a component: the symbol has one fixed
           orientation, so the gesture would be a silent no-op. */}
-      {/* The dock, drawn as nothing: the name tag sits right on it and marks the
-          spot by itself, so a circle only added a second mark for one point. The
-          handle stays as the connection anchor — `opacity` hides it without
-          taking it out of the layout the wiring measures against. */}
+      {/* The handle is the connection anchor and is never drawn — `opacity`
+          hides it without taking it out of the layout the wiring measures
+          against. What is drawn sits in the svg below: a connector shows the
+          port circle, a plain label does not. A label only gives the net a
+          name, and its tag already marks the spot; a connector is an interface
+          point, and the circle is what says so. */}
       <Handle
         type="source" position={Position.Top} id="t"
         isConnectable={false} isConnectableStart={false} isConnectableEnd={false}
         style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)", opacity: 0 }}
       />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
+        {portType !== "None" && (
+          <circle
+            cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r}
+            fill={pal.panelBg} stroke={color} strokeWidth={2}
+          />
+        )}
         {shape.stem && (
           <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
         )}

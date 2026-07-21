@@ -84,6 +84,9 @@ function SymbolNode({ node, norm, dir, tagSide }: { node: Node; norm: SymbolNorm
         {shape.stem && (
           <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
         )}
+        {portType !== "None" && (
+          <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
+        )}
         {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
         <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill={isConnector ? "#fde9c8" : "#e2e8f0"} stroke="#94a3b8" strokeWidth={1} />
         <text x={rectX + tagW / 2} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor="middle">{name}</text>

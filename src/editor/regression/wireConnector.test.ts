@@ -5,6 +5,7 @@ import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { netLabelShape } from "../netLabelShape.js";
 import { terminalDirection, terminalTagSide } from "../netTerminalOrientation.js";
+import { buildSchematicSvg } from "../svgExport.js";
 import type { PortType } from "@core/components/special/Special.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -186,6 +187,21 @@ CASES.push(
     const degenerate = terminalDirection(dock, [{ ...dock }, { x: 20, y: 100 }]);
     if (degenerate.x !== 1 || degenerate.y !== 0) fail("a coincident far end must be skipped, not decide the facing");
   } },
+  { name: "only a real port carries the circle", run: (fail) => {
+    // The circle marks an interface point. A plain label just gives the net a
+    // name and its tag already marks the spot, so a circle there was a second
+    // mark for the same place; a connector's port is worth showing.
+    const svg = (portType: PortType) => {
+      const node = { id: "n1", position: { x: 0, y: 0 },
+        data: { componentType: portType === "None" ? "netlabel" : "netconnector", label: "X", portType } };
+      return buildSchematicSvg([node as never], [], "default");
+    };
+    if (/<circle/.test(svg("None"))) fail("a plain net label drew a circle");
+    for (const pt of ["In", "Out", "BiDir"] as PortType[]) {
+      if (!/<circle/.test(svg(pt))) fail(`a ${pt} connector drew no circle`);
+    }
+  } },
+
   { name: "the name takes the free side across the wire", run: (fail) => {
     // Across the wire there are two sides. The conventional one is above (or
     // right of a vertical run); the other is taken when something already sits
