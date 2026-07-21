@@ -73,18 +73,22 @@ export function netLabelShape(portType: PortType = "None", dir: FlowPoint = UP):
   if (portType === "Out" || portType === "BiDir") heads.push(arrowHead(ox, oy, dx, dy));
   if (portType === "In" || portType === "BiDir") heads.push(arrowHead(ix, iy, -dx, -dy));
 
-  // The tag sits just past the symbol along the same axis — past the bare circle
-  // for a label, past the arrow tip for a connector — so it never overlaps
-  // either, and always reads upright.
-  const reach = (portType === "None" ? R : LEN) + 7;
-  const tag = {
-    x: C + dx * reach,
-    y: C + dy * reach,
-    // The tag box hangs off the side the symbol points away from, so it grows
-    // outward rather than back across the circle.
-    anchor: (dx > 0 ? "start" : dx < 0 ? "end" : "middle") as "start" | "middle" | "end",
-    baseline: (dy > 0 ? "top" : dy < 0 ? "bottom" : "middle") as "top" | "middle" | "bottom",
-  };
+  // The name steps off the wire at a right angle — above a horizontal run, to
+  // the right of a vertical one — rather than following the symbol's axis.
+  //
+  // Along the axis is where everything else already is: the wire continues
+  // there, and so do the parts strung along it. A name set that way lands on
+  // them, which is what made a resistor and its neighbouring connector overlap.
+  // Across the wire the strip is free, and the name still reads upright and
+  // stays next to the terminal it belongs to.
+  //
+  // The arrow is unaffected: it keeps pointing along the wire, since that is
+  // what says which way the signal goes.
+  const reach = R + 9;
+  const horizontal = dx !== 0;
+  const tag = horizontal
+    ? { x: C, y: C - reach, anchor: "middle" as const, baseline: "bottom" as const }
+    : { x: C + reach, y: C, anchor: "start" as const, baseline: "middle" as const };
 
   return {
     circle: { cx: C, cy: C, r: R },

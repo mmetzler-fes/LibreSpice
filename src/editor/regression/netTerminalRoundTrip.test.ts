@@ -271,6 +271,75 @@ const CASES: Case[] = [
     },
   },
   {
+    // Reported: putting a connector on a named wire wiped the wire's name and
+    // replaced it with the next free NET1 — exactly the wrong way round. The
+    // name belongs to the net, and a terminal dropped on it is there to read it.
+    name: "a terminal dropped on a named wire adopts the wire's name",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const v = place("vsource", "V1", 200, 200);
+      const r = place("vsource", "V2", 400, 200);
+      connect(v, "n", r, "n");
+      st().rebuildConnections();
+      await tick();
+
+      // Name the wire, as the wire properties panel does.
+      const netId = st().circuit.components.get(v.id)?.ports.find((p) => p.id.endsWith("-n"))?.netId;
+      if (!netId) return fail("the two sources ended up on no net");
+      st().renameNet(netId, "UB");
+      await tick();
+
+      // Now drop a connector on that net.
+      const term = place("netconnector", "PORT1", 300, 320, { portType: "Out" });
+      connect(v, "n", term, "t");
+      st().rebuildConnections();
+      await tick();
+
+      const names = terminals();
+      if (names.join() !== "UB|netconnector|Out") {
+        fail(`the connector came back as [${names.join(", ")}], expected it to adopt "UB"`);
+      }
+      const net = st().circuit.nets.get(
+        st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!,
+      );
+      if (net?.nodeLabel !== "UB") fail(`the net lost its name, now "${net?.nodeLabel}"`);
+    },
+  },
+  {
+    name: "renaming the terminal afterwards still takes",
+    run: async (fail) => {
+      // The wire name outranks a terminal on every rebuild, so a later rename has
+      // to reach the wire too — otherwise the next rebuild quietly undoes it.
+      st().clearCircuit();
+      await tick();
+      const v = place("vsource", "V1", 200, 200);
+      const r = place("vsource", "V2", 400, 200);
+      connect(v, "n", r, "n");
+      st().rebuildConnections();
+      await tick();
+      const netId = st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!;
+      st().renameNet(netId, "UB");
+      await tick();
+      const term = place("netlabel", "NET1", 300, 320);
+      connect(v, "n", term, "t");
+      st().rebuildConnections();
+      await tick();
+
+      const nid2 = st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!;
+      st().renameNet(nid2, "VCC");
+      await tick();
+      st().rebuildConnections();
+      await tick();
+      const names = terminals();
+      if (names.join() !== "VCC|netlabel|-") fail(`after renaming: [${names.join(", ")}], expected VCC`);
+      const net = st().circuit.nets.get(
+        st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!,
+      );
+      if (net?.nodeLabel !== "VCC") fail(`the net fell back to "${net?.nodeLabel}"`);
+    },
+  },
+  {
     name: "the saved file actually carries a FLAG for every terminal",
     run: async (fail) => {
       // One level below the round trip: if the FLAG is missing from the file,

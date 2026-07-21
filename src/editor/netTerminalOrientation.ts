@@ -49,14 +49,10 @@ export function terminalDirection(dock: FlowPoint, farEnds: FlowPoint[]): FlowPo
   }
   if (axes.length === 0) return { x: 0, y: -1 };
 
+  // The symbol points away from its wire, along the wire's own axis — that is
+  // what makes the arrow say which way the signal runs. Keeping clear of the
+  // wire is the *name's* job, and it steps across the wire instead of along it
+  // (see netLabelShape); doing it here as well would only turn the arrow.
   const first = axes[0];
-  // A wire that runs *through* the dock leaves along the same axis in both
-  // directions, so neither side of it is free. Laying the symbol out along that
-  // axis would put the name on top of the wire — and on a through wire that is
-  // exactly where the next parts sit. Step off it at a right angle instead:
-  // above a horizontal wire, to the right of a vertical one.
-  const through = axes.some((a) => a.x === -first.x && a.y === -first.y);
-  if (through) return first.x !== 0 ? { x: 0, y: -1 } : { x: 1, y: 0 };
-
   return { x: -first.x, y: -first.y };
 }

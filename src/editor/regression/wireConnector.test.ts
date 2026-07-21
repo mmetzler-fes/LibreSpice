@@ -135,16 +135,20 @@ CASES.push(
     if (counts.Out !== 1) fail(`Out drew ${counts.Out} arrowheads, expected 1`);
     if (counts.In !== 1) fail(`In drew ${counts.In} arrowheads, expected 1`);
     if (counts.BiDir !== 2) fail(`BiDir drew ${counts.BiDir} arrowheads, expected 2`);
-    // The tag sits above the symbol, and for a connector above the arrow tip —
-    // drawn at the label's spot it would land on top of the arrowhead.
-    const label = netLabelShape("None"), conn = netLabelShape("BiDir");
-    if (label.tag.anchor !== "middle" || label.tag.baseline !== "bottom") {
-      fail("the tag must be centred above the symbol");
+    // The name steps *across* the wire, never along it: along the axis is where
+    // the wire continues and where the parts on it sit, which is what made a
+    // connector's name land on its neighbour.
+    for (const dir of [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
+      const s2 = netLabelShape("BiDir", dir);
+      const along = dir.x !== 0 ? s2.tag.x - s2.circle.cx : s2.tag.y - s2.circle.cy;
+      const across = dir.x !== 0 ? s2.tag.y - s2.circle.cy : s2.tag.x - s2.circle.cx;
+      if (along !== 0) fail(`dir (${dir.x},${dir.y}): the tag drifted ${along}px along the wire`);
+      if (Math.abs(across) <= s2.circle.r) fail(`dir (${dir.x},${dir.y}): the tag sits on its own circle`);
     }
-    if (!(label.tag.y < label.circle.cy - label.circle.r)) fail("the label tag overlaps its circle");
-    // The arrow runs up from the centre, so its tip is the smallest y it reaches.
-    const tipY = Math.min(conn.stem!.y1, conn.stem!.y2);
-    if (!(conn.tag.y < tipY)) fail(`the connector tag (y=${conn.tag.y}) is not clear of the arrow tip (y=${tipY})`);
+    // And it still clears the circle it belongs to.
+    const label = netLabelShape("None"), conn = netLabelShape("BiDir");
+    const d = Math.hypot(label.tag.x - label.circle.cx, label.tag.y - label.circle.cy);
+    if (d <= label.circle.r) fail(`the label tag overlaps its circle (${d}px from the centre)`);
     // Both stay within the 1 cm the label may be dragged from the dock, or the
     // default position would already sit outside its own tether.
     const reach = Math.hypot(conn.tag.x - conn.circle.cx, conn.tag.y - conn.circle.cy);
@@ -182,39 +186,40 @@ CASES.push(
     const degenerate = terminalDirection(dock, [{ ...dock }, { x: 20, y: 100 }]);
     if (degenerate.x !== 1 || degenerate.y !== 0) fail("a coincident far end must be skipped, not decide the facing");
   } },
-  { name: "a terminal on a through wire steps off it at a right angle", run: (fail) => {
-    // On a wire that continues past the dock, neither side along the wire is
-    // free — and that is where the next parts sit. Laying the name out along the
-    // wire buries it under them, so the symbol goes perpendicular instead.
+  { name: "the name clears the wire whether it ends there or runs through", run: (fail) => {
+    // The two jobs are split: the arrow keeps pointing along the wire, because
+    // that is what says which way the signal runs; keeping out of the way is the
+    // name's, and it steps across.
     const dock = { x: 100, y: 100 };
-
-    const horizontal = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 20, y: 100 }]);
-    if (horizontal.x !== 0 || horizontal.y !== -1) {
-      fail(`through a horizontal wire faced (${horizontal.x},${horizontal.y}), expected up`);
+    const cases: [string, { x: number; y: number }[]][] = [
+      ["wire ends here", [{ x: 20, y: 100 }]],
+      ["wire runs through", [{ x: 180, y: 100 }, { x: 20, y: 100 }]],
+      ["tee", [{ x: 180, y: 100 }, { x: 100, y: 180 }, { x: 20, y: 100 }]],
+    ];
+    for (const [what, ends] of cases) {
+      const dir = terminalDirection(dock, ends);
+      // The symbol stays on the wire's axis …
+      if (dir.x === 0) fail(`${what}: the arrow left the wire's axis`);
+      // … and the name steps off it.
+      const s2 = netLabelShape("BiDir", dir);
+      if (s2.tag.x !== s2.circle.cx) fail(`${what}: the name drifted along the wire`);
+      if (s2.tag.y >= s2.circle.cy) fail(`${what}: the name did not step above the wire`);
     }
-    const vertical = terminalDirection(dock, [{ x: 100, y: 20 }, { x: 100, y: 180 }]);
-    if (vertical.x !== 1 || vertical.y !== 0) {
-      fail(`through a vertical wire faced (${vertical.x},${vertical.y}), expected right`);
-    }
-    // Order must not matter: the same wiring has to give the same facing.
-    const flipped = terminalDirection(dock, [{ x: 20, y: 100 }, { x: 180, y: 100 }]);
-    if (flipped.x !== horizontal.x || flipped.y !== horizontal.y) fail("the facing depended on edge order");
-
-    // A corner is not a through wire — one side stays free, and the old rule
-    // (face away from the first wire) still applies.
-    const corner = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 100, y: 180 }]);
-    if (corner.x !== -1 || corner.y !== 0) {
-      fail(`a corner faced (${corner.x},${corner.y}), expected away from the first wire`);
-    }
-    // Three wires meeting, two of them opposite: still a through wire.
-    const tee = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 100, y: 180 }, { x: 20, y: 100 }]);
-    if (tee.x !== 0 || tee.y !== -1) fail(`a tee faced (${tee.x},${tee.y}), expected up`);
+    // A vertical wire pushes the name sideways instead.
+    const vert = netLabelShape("BiDir", terminalDirection(dock, [{ x: 100, y: 20 }]));
+    if (vert.tag.y !== vert.circle.cy) fail("on a vertical wire the name drifted along it");
+    if (vert.tag.x <= vert.circle.cx) fail("on a vertical wire the name did not step aside");
   } },
 
-  { name: "LTSpice's own layout is reproduced (04-4_AstabileKippstufe1)", run: (fail) => {
+  { name: "the arrow follows LTSpice's layout (04-4_AstabileKippstufe1)", run: (fail) => {
     // The four connectors in that example are *all* `In`, yet LTSpice draws two
     // leftwards and two rightwards — proof the facing comes from the wiring, not
     // the port type. Coordinates lifted verbatim from the FLAG/WIRE lines.
+    //
+    // Only the arrow follows LTSpice. The *name* deliberately does not: LTSpice
+    // hangs it off the same side, along the wire, where on these sheets it lands
+    // on the next part. Ours steps across the wire instead. So the check below is
+    // on the facing, and the tag is only required to stay off the wire's axis.
     const cases: [string, { x: number; y: number }, { x: number; y: number }, number][] = [
       // [name, dock (FLAG), far end of its wire, expected tag x-side]
       ["Q1_C", { x: 160, y: 176 }, { x: 176, y: 176 }, -1], // wire right → tag left
@@ -228,11 +233,11 @@ CASES.push(
         fail(`${name}: symbol faces x=${dir.x}, expected ${side}`);
         continue;
       }
-      // The tag must hang off that same side, clear of the circle.
+      // These four sit on horizontal wires, so the name belongs above them —
+      // centred over the dock, not off to either side.
       const shape = netLabelShape("In", dir);
-      const anchor = side < 0 ? "end" : "start";
-      if (shape.tag.anchor !== anchor) fail(`${name}: tag anchored "${shape.tag.anchor}", expected "${anchor}"`);
-      if (Math.sign(shape.tag.x - shape.circle.cx) !== side) fail(`${name}: tag sits on the wrong side of the dock`);
+      if (shape.tag.x !== shape.circle.cx) fail(`${name}: the name drifted ${shape.tag.x - shape.circle.cx}px along the wire`);
+      if (shape.tag.y >= shape.circle.cy) fail(`${name}: the name did not step above the wire`);
     }
   } },
 );

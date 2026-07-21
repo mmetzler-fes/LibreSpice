@@ -809,6 +809,12 @@ function CanvasInner() {
             // fire on every press of a terminal — and it produced a plain "step"
             // edge, a second kind of wire beside the app's own.
             nodesConnectable={false}
+            // Click-to-connect is a second way into the same gesture and does not
+            // go through `isConnectable`: the handle's own click handler only
+            // consults `isConnectableStart`, which defaults to true. Left on, a
+            // click on a terminal started a connection and trailed a dashed line
+            // after the cursor instead of picking the part up.
+            connectOnClick={false}
             elementsSelectable={editorMode === "select"}
             connectionRadius={24}
             connectionMode={ConnectionMode.Loose}

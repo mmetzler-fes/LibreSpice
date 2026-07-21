@@ -363,16 +363,24 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       nodes: labelIds.size
         ? state.nodes.map((n) => (labelIds.has(n.id) ? { ...n, data: { ...n.data, label: newLabel } } : n))
         : state.nodes,
-      edges: labelIds.size ? state.edges : state.edges.map((e) => {
+      // Every wire of the net follows the new name — also when the net has a
+      // terminal. The wire-carried name outranks a terminal on the next rebuild
+      // (that is what lets a connector adopt a labelled wire), so leaving it at
+      // the old name would quietly undo this rename.
+      edges: state.edges.map((e) => {
         if (!onNetEdge(e)) return e;
-        // Every wire of the net follows the new name; the representative one also
-        // becomes visible. Clearing removes the name and hides the label.
+        // Clearing removes the name and hides the label.
         if (clearing) {
           const { netName, showLabel, ...rest } = (e.data ?? {}) as Record<string, unknown>;
           void netName; void showLabel;
           return { ...e, data: rest };
         }
-        return { ...e, data: { ...e.data, netName: newLabel, ...(e.id === shownEdgeId ? { showLabel: true } : {}) } };
+        // Only a net *without* a terminal shows the name on the wire; with one,
+        // the terminal is where it reads (see rebuildConnections).
+        return {
+          ...e,
+          data: { ...e.data, netName: newLabel, ...(labelIds.size === 0 && e.id === shownEdgeId ? { showLabel: true } : {}) },
+        };
       }),
       // Keep data-point expressions pointing at the renamed net.
       dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
@@ -676,12 +684,14 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // for a labelled wire — they live on the edge and so survive every rebuild,
     // even after the net is renumbered or merged. Apply them onto the freshly
     // built nets (overriding the port-keyed restore above).
+    /** Net id → the name its wires carry, for the invariant further down. */
+    const wireNames = new Map<string, string>();
     for (const edge of edges) {
       const nm = (edge.data as { netName?: string } | undefined)?.netName;
       if (!nm) continue;
       const port = circuit.components.get(edge.source ?? "")?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
       const nid = port?.netId;
-      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; }
+      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; wireNames.set(nid, nm); }
     }
 
     // A net whose *name* is ground — typed into the net-name field on a wire, with
@@ -723,7 +733,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     /** New label for each terminal node whose name has to give way. */
     const renamed = new Map<string, string>();
     for (const [nid, terms] of byNet) {
-      const winner = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
+      // A name the net already carried on its wire outranks every terminal: a
+      // connector dropped on a labelled wire is meant to *read* that name, not
+      // to replace it with the next free NET1/PORT1. Without this the wire lost
+      // its name the moment you put a connector on it — the wrong way round.
+      const carried = wireNames.get(nid);
+      const oldest = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
+      const winner = carried ? { id: oldest.id, name: carried } : oldest;
       for (const t of terms) {
         if (t.name === winner.name) continue;
         circuit.components.get(t.id)?.setProperty("label", winner.name);
