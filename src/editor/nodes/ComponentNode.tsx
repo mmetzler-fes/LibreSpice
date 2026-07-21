@@ -248,13 +248,6 @@ function useRotateTapProps(nodeId: string): TapProps {
   return { onClick: (e) => { e.stopPropagation(); rotateComponent(nodeId); } };
 }
 
-const TWO_PORT_TYPES: ComponentType[] = [
-  "resistor", "capacitor", "capacitor_polarized", "inductor", "diode", "led",
-  "vsource", "isource", "sinesource", "pulsesource",
-];
-const THREE_PORT_TYPES: ComponentType[] = ["bjt_npn", "bjt_pnp", "mosfet_n", "mosfet_p"];
-const SOURCE_TYPES: ComponentType[] = ["vsource", "sinesource", "pulsesource"];
-
 /** Hand-drawn symbol for the generalized voltage source, chosen by sourceType. */
 const SOURCE_SYMBOLS: Record<string, React.FC> = {
   DC: VoltageSourceSymbol,
@@ -262,56 +255,6 @@ const SOURCE_SYMBOLS: Record<string, React.FC> = {
   Pulse: PulseSourceSymbol,
   PWL: PWLSourceSymbol,
 };
-
-function getHandles(type: ComponentType, mirrored = false, tap: TapProps = {}) {
-  // Ground: one source handle at the top (ConnectionMode.Loose allows source↔source)
-  if (type === "ground") {
-    // Dock at the top of the vertical line (symbol y=-20 → local 20 in the 80px box).
-    return (
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="gnd"
-        style={{ ...HANDLE_STYLE, left: 40, top: 20, transform: "translate(-50%, -50%)" }}
-        {...tap}
-      />
-    );
-  }
-  if (SOURCE_TYPES.includes(type)) {
-    // Dock at the terminal tips (symbol terminals at y -30/+30 → local 10/70).
-    return (
-      <>
-        <Handle type="source" position={Position.Top} id="p" style={{ ...HANDLE_STYLE, left: 40, top: 10, transform: "translate(-50%, -50%)" }} {...tap} />
-        <Handle type="source" position={Position.Bottom} id="n" style={{ ...HANDLE_STYLE, left: 40, top: 70, transform: "translate(-50%, -50%)" }} {...tap} />
-      </>
-    );
-  }
-  if (TWO_PORT_TYPES.includes(type)) {
-    return (
-      <>
-        <Handle type="source" position={Position.Top} id="p" style={HANDLE_STYLE} {...tap} />
-        <Handle type="source" position={Position.Bottom} id="n" style={HANDLE_STYLE} {...tap} />
-      </>
-    );
-  }
-  if (THREE_PORT_TYPES.includes(type)) {
-    // ids must match the SpiceComponent port suffixes: drain/collector, gate/base, source/emitter
-    const isMos = type === "mosfet_n" || type === "mosfet_p";
-    const top = isMos ? "d" : "c";
-    const left = isMos ? "g" : "b";
-    const bottom = isMos ? "s" : "e";
-    // Horizontal mirror moves the side (gate/base) pin to the opposite edge so
-    // the handle tracks the flipped symbol.
-    return (
-      <>
-        <Handle type="source" position={Position.Top} id={top} style={HANDLE_STYLE} {...tap} />
-        <Handle type="source" position={mirrored ? Position.Right : Position.Left} id={left} style={HANDLE_STYLE} {...tap} />
-        <Handle type="source" position={Position.Bottom} id={bottom} style={HANDLE_STYLE} {...tap} />
-      </>
-    );
-  }
-  return null;
-}
 
 /**
  * Generic box rendering for an imported subcircuit, with one handle per
@@ -730,7 +673,9 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const rotation = nodeData.rotation ?? 0;
   const mirrored = !!nodeData.mirrored;
   const isGround = nodeData.componentType === "ground";
-  const isDigital = nodeData.componentType === "dff" || nodeData.componentType === "logicgate";
+  // Only parts without an .asy reach here (the symbol path returns above), so
+  // this is the whole hand-drawn set: sources, ground and the digital parts.
+  const pins = getLocalPins(nodeData, symbolNorm);
 
   return (
     <div
@@ -746,23 +691,23 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       }}
     >
       {selected && <PinNetLabels nodeId={id} data={nodeData} />}
-      {/* The digital parts have no fixed handle set — the gate's input count and
-          the flip-flop's pin names come from its properties — so their connectors
-          are placed from the same pin table the wiring uses. Without this they had
-          no terminals at all, and a net label dropped on one merely sat on top of
-          the drawing instead of connecting to it. */}
-      {isDigital
-        ? getLocalPins(nodeData, symbolNorm).map((pin) => (
-            <Handle
-              key={pin.handleId}
-              type="source"
-              position={Position.Top}
-              id={pin.handleId}
-              style={{ ...HANDLE_STYLE, left: pin.px, top: pin.py, transform: "translate(-50%, -50%)" }}
-              {...tap}
-            />
-          ))
-        : getHandles(nodeData.componentType, mirrored, tap)}
+      {/* Every part drawn by hand rather than from an .asy places its connectors
+          from the same pin table the wiring uses. Keeping a second, hand-written
+          handle layout beside it drifted: the terminals of a source sat 2 px off
+          its pins and ground's a full grid step, the digital parts had no
+          terminals at all, and none of them followed the symbol when it turned —
+          a rotated voltage source drew upside down with its connectors still at
+          top and bottom. */}
+      {pins.map((pin) => (
+        <Handle
+          key={pin.handleId}
+          type="source"
+          position={Position.Top}
+          id={pin.handleId}
+          style={{ ...HANDLE_STYLE, left: pin.px, top: pin.py, transform: "translate(-50%, -50%)" }}
+          {...tap}
+        />
+      ))}
       <svg
         width="80"
         height="80"

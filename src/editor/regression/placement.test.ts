@@ -82,6 +82,31 @@ const CASES: Case[] = [
     }
   } },
 
+  { name: "the terminals of a hand-drawn part turn with the symbol", run: (fail) => {
+    // Sources and ground have no `.asy` and are drawn by hand. Their pins used to
+    // be taken straight from a fixed table, so a rotated voltage source drew
+    // upside down while its terminals stayed put — a wire then left the wrong end
+    // of the symbol. Every other part turned correctly, which is what made it easy
+    // to miss.
+    const at = (type: ComponentType, rotation: number, handleId: string) =>
+      getLocalPins({ componentType: type, label: "X", rotation }).find((p) => p.handleId === handleId)!;
+
+    const up = at("vsource", 0, "p"), down = at("vsource", 0, "n");
+    if (!(up.py < down.py)) return fail(`unrotated source: p at ${up.py}, n at ${down.py}`);
+    const up180 = at("vsource", 180, "p"), down180 = at("vsource", 180, "n");
+    if (!(up180.py > down180.py)) fail(`turned 180° the source's p is still above n (${up180.py} vs ${down180.py})`);
+    // At 90° the terminals must leave the sides, not the top and bottom.
+    const up90 = at("vsource", 90, "p"), down90 = at("vsource", 90, "n");
+    if (Math.abs(up90.py - down90.py) > 0.001) fail(`turned 90° the source's terminals are still stacked vertically`);
+    if (Math.abs(up90.px - down90.px) < 1) fail(`turned 90° the source's terminals did not separate horizontally`);
+
+    // Ground's single pin sits above its centre; turned over it must sit below.
+    const g0 = at("ground", 0, "gnd"), g180 = at("ground", 180, "gnd");
+    if (!(g0.py < NODE_SIZE / 2 && g180.py > NODE_SIZE / 2)) {
+      fail(`ground pin did not turn: ${g0.py} → ${g180.py}`);
+    }
+  } },
+
   { name: "a placed component's pins land on the grid (and stay there when dragged)", run: (fail) => {
     // Placement puts the node box on the grid (snap(cursor) − NODE_SIZE/2, and
     // NODE_SIZE/2 = 40 is a multiple of the grid), and React Flow's snapGrid keeps

@@ -198,11 +198,10 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
   const digital = data.componentType === "dff" || data.componentType === "logicgate";
   const pins = digital ? digitalPins(data) : FALLBACK_PINS[data.componentType] ?? [];
   // The hand-drawn symbols turn with the node just as an .asy one does, so their
-  // pins have to turn with it too. Only the digital parts are rotated here: the
-  // rest of the fallback table is grounds, sources and transistors, whose pins
-  // the rest of the editor has always taken un-rotated, and quietly moving them
-  // would re-route existing schematics.
-  const rotation = digital ? data.rotation ?? 0 : 0;
+  // pins turn with it too. Without this a rotated voltage source drew upside
+  // down while its terminals stayed where they were, so a wire left the wrong
+  // end of the symbol — and the same held for a rotated ground.
+  const rotation = data.rotation ?? 0;
   const c = NODE_SIZE / 2;
   return pins.map((p) => {
     const [px, py] = rotatePoint(flip(p.px), p.py, c, c, rotation);
