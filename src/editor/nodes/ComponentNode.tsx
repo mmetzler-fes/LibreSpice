@@ -219,6 +219,24 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
 };
 
+/**
+ * Why every `<Handle>` here passes `isConnectable={false}`.
+ *
+ * React Flow gives every handle the `nodrag` class unconditionally, and its drag
+ * filter discards any gesture whose target sits inside a `.nodrag`. A connectable
+ * handle also carries `connectionindicator`, which is what gives it
+ * `pointer-events: all` — so a press on a connector was swallowed by the handle
+ * and then excluded from dragging: the part did not move.
+ *
+ * The flow-level `nodesConnectable={false}` does not reach here: `isConnectable`
+ * is a prop of the handle with a default of `true`, and a custom node has to
+ * forward it. Passing it explicitly drops `connectionindicator`, the handle falls
+ * back to `pointer-events: none`, and the press reaches the node — which is what
+ * makes a connector a grab point for its part.
+ *
+ * It was most visible on a net terminal, whose entire visible body *is* its
+ * handle: it could be selected but never moved.
+ */
 const HANDLE_STYLE = {
   width: 10,
   height: 10,
@@ -263,6 +281,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           type="source"
           position={Position.Left}
           id={name}
+          isConnectable={false}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
         />
       ))}
@@ -272,6 +291,7 @@ function SubcircuitBox({ nodeId, data, selected }: { nodeId: string; data: Compo
           type="source"
           position={Position.Right}
           id={name}
+          isConnectable={false}
           style={{ ...HANDLE_STYLE, top: rowTop(i) }}
         />
       ))}
@@ -353,6 +373,7 @@ function LibrarySymbolNode({
             type="source"
             position={Position.Top}
             id={handleId}
+            isConnectable={false}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
           />
         );
@@ -474,6 +495,7 @@ function AsyComponentNode({
             type="source"
             position={Position.Top}
             id={handleForOrder(data.componentType, pin.order)}
+            isConnectable={false}
             style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
           />
         );
@@ -589,7 +611,7 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
     >
       {/* No tap-to-rotate here, unlike a component: the symbol has one fixed
           orientation, so the gesture would be a silent no-op. */}
-      <Handle type="source" position={Position.Top} id="t" style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
+      <Handle type="source" position={Position.Top} id="t" isConnectable={false} style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
         {shape.stem && (
           <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
@@ -686,6 +708,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
           type="source"
           position={Position.Top}
           id={pin.handleId}
+          isConnectable={false}
           style={{ ...HANDLE_STYLE, left: pin.px, top: pin.py, transform: "translate(-50%, -50%)" }}
         />
       ))}
