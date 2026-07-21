@@ -129,6 +129,29 @@ export function AsyGeometry({ sym, mapping, strokeWidth = 1.4 }: AsyGeometryProp
       {sym.arcs.map((a, i) => (
         <polyline key={`a${i}`} points={arcPoints(a, map)} {...common} />
       ))}
+      {/* Symbol-borne text (the op-amp's Ub markings). Filled, not stroked, so
+          it reads at these sizes; `common` would outline every glyph. LTSpice's
+          size index is a font *step*, not a pixel size — 0 and 1 are its small
+          ones, which is what these markings use. */}
+      {sym.texts.map((t, i) => {
+        const [tx, ty] = map(t.x, t.y);
+        const anchor = t.just === "Right" ? "end" : t.just === "Center" ? "middle" : "start";
+        return (
+          <text
+            key={`t${i}`}
+            x={tx}
+            y={ty}
+            textAnchor={anchor}
+            dominantBaseline="central"
+            fontSize={(t.size <= 1 ? 7 : 9) * scale}
+            fontFamily="sans-serif"
+            fill="currentColor"
+            stroke="none"
+          >
+            {t.text}
+          </text>
+        );
+      })}
     </g>
   );
 }

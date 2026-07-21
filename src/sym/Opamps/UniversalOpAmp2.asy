@@ -1,18 +1,27 @@
 Version 4
 SymbolType CELL
 * Operational amplifier, IEC 60617-13 style: a rectangular outline carrying the
-* amplifier qualifying symbol as a small triangle pointing in signal direction.
-* The triangle is a *marking inside* the box, not the outline itself — that is what
-* separates the IEC drawing from the ANSI one, which is the bare triangle (see
-* UniversalOpamp2_ANSI.asy). The inputs are told apart by the - and + beside
-* them, the supplies by the marks next to Ub.
+* amplifier qualifying symbol (a triangle pointing in signal direction) followed
+* by the infinity sign for the ideal, unbounded open-loop gain. Both are
+* markings *inside* the box, not the outline itself - that is what separates the
+* IEC drawing from the ANSI one, which is the bare triangle and carries no
+* infinity sign (see UniversalOpamp2_ANSI.asy).
+*
+* The infinity sign is drawn as two tangent circles rather than typed: these
+* files are read as latin1, which has no code point for it, so a TEXT line would
+* not survive the read.
+*
+* The inputs are told apart by the - and + beside them, the supplies by the
+* marks next to Ub.
 LINE Normal -31 -31 31 -31
 LINE Normal 31 -31 31 31
 LINE Normal 31 31 -31 31
 LINE Normal -31 31 -31 -31
-LINE Normal -6 -11 -6 11
-LINE Normal -6 -11 10 0
-LINE Normal -6 11 10 0
+LINE Normal -16 -20 -16 -4
+LINE Normal -16 -20 -2 -12
+LINE Normal -16 -4 -2 -12
+CIRCLE Normal 2 -16 10 -8
+CIRCLE Normal 10 -16 18 -8
 LINE Normal -32 16 -31 16
 LINE Normal -32 -16 -31 -16
 LINE Normal 0 -32 0 -31

@@ -39,11 +39,28 @@ export interface AsyPin {
   order: number;
 }
 
+/**
+ * A text drawn as part of the symbol (LTSpice `TEXT x y <just> <size> <text>`),
+ * e.g. the supply markings on the op-amp. Distinct from the captions the editor
+ * draws around a part (reference and value): those belong to the instance, this
+ * belongs to the drawing and turns with it.
+ */
+export interface AsyText {
+  x: number;
+  y: number;
+  /** LTSpice justification keyword (Left, Center, Right, …). */
+  just: string;
+  /** LTSpice font-size index; 0 and 1 are the small ones. */
+  size: number;
+  text: string;
+}
+
 export interface AsySymbol {
   lines: AsyLine[];
   rects: AsyRect[];
   circles: AsyCircle[];
   arcs: AsyArc[];
+  texts: AsyText[];
   pins: AsyPin[];
   attrs: Record<string, string>;
 }
@@ -55,7 +72,7 @@ export interface SymbolBounds {
 }
 
 function emptySymbol(): AsySymbol {
-  return { lines: [], rects: [], circles: [], arcs: [], pins: [], attrs: {} };
+  return { lines: [], rects: [], circles: [], arcs: [], texts: [], pins: [], attrs: {} };
 }
 
 export function parseAsy(text: string): AsySymbol {
@@ -96,6 +113,15 @@ export function parseAsy(text: string): AsySymbol {
           x1: +tok[2], y1: +tok[3], x2: +tok[4], y2: +tok[5],
           sx: +tok[6], sy: +tok[7], ex: +tok[8], ey: +tok[9],
         });
+        break;
+      case "TEXT":
+        // TEXT x y <justification> <size> <text…> — the text runs to the end of
+        // the line and may contain spaces, so it is taken from the raw line
+        // rather than from the whitespace split.
+        if (tok.length >= 6) {
+          const body = line.split(/\s+/).slice(5).join(" ");
+          sym.texts.push({ x: +tok[1], y: +tok[2], just: tok[3], size: +tok[4] || 0, text: body });
+        }
         break;
       case "PIN":
         flushPin();
