@@ -19,9 +19,34 @@ export const CAPTION_LINE_HEIGHT = 1.2;
 export const LABEL_FONT_SIZE = 11;
 export const VALUE_FONT_SIZE = 10;
 
+/** Which flank a caption hugs on an upright part. */
+export type CaptionSide = "left" | "right";
+
+/**
+ * Which side a part's captions belong on: the flank carrying *fewer* pins.
+ *
+ * A caption set against a crowded flank collides with the wires running into
+ * it. An op-amp has two inputs on the left and one output on the right, a logic
+ * gate up to five inputs against one output — for those the roomy side is the
+ * right. A two-terminal part has its pins top and bottom, neither flank is
+ * busier, and the left stays the convention.
+ *
+ * `pins` are node-local pixel positions; the node box centre separates the two
+ * flanks.
+ */
+export function captionSide(pins: { px: number }[]): CaptionSide {
+  const c = NODE_SIZE / 2;
+  let left = 0, right = 0;
+  for (const p of pins) {
+    if (p.px < c - 1) left++;
+    else if (p.px > c + 1) right++;
+  }
+  return left > right ? "right" : "left";
+}
+
 /**
  * Readable caption placement that hugs the symbol's actual shape: captions sit
- * just left of a narrow part (e.g. resistor) or further out for a wide one
+ * just beside a narrow part (e.g. resistor) or further out for a wide one
  * (e.g. voltage source), and move above/below when the part lies horizontal.
  * Text always stays upright. `halfW`/`halfH` are the drawn symbol's pixel
  * half-extents (before rotation). Shared by the editor node and the SVG export
@@ -32,6 +57,7 @@ export function captionLayout(
   rotation: number,
   halfW: number,
   halfH: number,
+  side: CaptionSide = "left",
 ): { left: number; top: number; transform: string } {
   const c = NODE_SIZE / 2;
   const horizontal = rotation === 90 || rotation === 270;
@@ -43,7 +69,13 @@ export function captionLayout(
       ? { left: c, top: c - extentY - CAPTION_GAP, transform: "translate(-50%, -100%)" }
       : { left: c, top: c + extentY + CAPTION_GAP, transform: "translate(-50%, 0)" };
   }
-  // Left of the part, stacked near the vertical centre.
+  // Beside the part, stacked near the vertical centre.
+  if (side === "right") {
+    const leftEdge = c + extentX + CAPTION_GAP;
+    return kind === "label"
+      ? { left: leftEdge, top: c - 8, transform: "translate(0, -50%)" }
+      : { left: leftEdge, top: c + 9, transform: "translate(0, -50%)" };
+  }
   const rightEdge = c - extentX - CAPTION_GAP;
   return kind === "label"
     ? { left: rightEdge, top: c - 8, transform: "translate(-100%, -50%)" }
@@ -71,14 +103,16 @@ export function captionSvgPlacement(
   halfH: number,
   fontSize: number,
   offset?: { x: number; y: number },
+  side: CaptionSide = "left",
 ): { x: number; y: number; textAnchor: "start" | "middle" | "end"; baseline: "central" } {
-  const l = captionLayout(kind, rotation, halfW, halfH);
+  const l = captionLayout(kind, rotation, halfW, halfH, side);
   const off = offset ?? { x: 0, y: 0 };
   const halfLine = (CAPTION_LINE_HEIGHT * fontSize) / 2;
   // dy moves the CSS box's anchored edge to its centre, which is what `central`
   // measures from.
   const anchor: Record<string, { textAnchor: "start" | "middle" | "end"; dy: number }> = {
     "translate(-100%, -50%)": { textAnchor: "end", dy: 0 },          // centre already
+    "translate(0, -50%)": { textAnchor: "start", dy: 0 },            // right flank
     "translate(-50%, -100%)": { textAnchor: "middle", dy: -halfLine }, // bottom edge → centre
     "translate(-50%, 0)": { textAnchor: "middle", dy: +halfLine },     // top edge → centre
   };

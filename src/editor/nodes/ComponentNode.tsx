@@ -29,7 +29,7 @@ import type { PortType } from "@core/components/special/Special.js";
 import { netLabelShape, tagTransform } from "../netLabelShape.js";
 import { terminalDirection } from "../netTerminalOrientation.js";
 import type { FlowPoint } from "../WireTool.js";
-import { captionLayout, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
+import { captionLayout, captionSide, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
 
 export type ComponentType =
@@ -335,6 +335,10 @@ function LibrarySymbolNode({
   const center = NODE_SIZE / 2;
   const bounds = symbolBounds(sym);
   const halfW = (bounds.width / 2) * mapping.scale;
+  // Which flank the captions hug: the one with fewer pins, so a label does not
+  // sit in the wires. Taken from the *rotated* pins, so turning the part moves
+  // the caption with it.
+  const side = captionSide(getLocalPins(data));
   const halfH = (bounds.height / 2) * mapping.scale;
 
   return (
@@ -371,7 +375,7 @@ function LibrarySymbolNode({
         )}
         <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
       </svg>
-      {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
+      {(() => { const l = captionLayout("label", rotation, halfW, halfH, side); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
           color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
@@ -453,6 +457,10 @@ function AsyComponentNode({
   // Drawn symbol half-extents in px, to place captions right against the shape.
   const bounds = symbolBounds(sym);
   const halfW = (bounds.width / 2) * mapping.scale;
+  // Which flank the captions hug: the one with fewer pins, so a label does not
+  // sit in the wires. Taken from the *rotated* pins, so turning the part moves
+  // the caption with it.
+  const side = captionSide(getLocalPins(data));
   const halfH = (bounds.height / 2) * mapping.scale;
 
   return (
@@ -489,7 +497,7 @@ function AsyComponentNode({
         <AsyGeometry sym={sym} mapping={mapping} strokeWidth={1.6} />
       </svg>
 
-      {(() => { const l = captionLayout("label", rotation, halfW, halfH); return (
+      {(() => { const l = captionLayout("label", rotation, halfW, halfH, side); return (
         <MovableLabel
           nodeId={nodeId} kind="label" base={l} transform={l.transform} offset={data.labelOffset}
           color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
@@ -497,7 +505,7 @@ function AsyComponentNode({
           {data.label}
         </MovableLabel>
       ); })()}
-      {data.valueLabel && (() => { const l = captionLayout("value", rotation, halfW, halfH); return (
+      {data.valueLabel && (() => { const l = captionLayout("value", rotation, halfW, halfH, side); return (
         <MovableLabel
           nodeId={nodeId} kind="value" base={l} transform={l.transform} offset={data.valueOffset}
           color={selected ? "#1d4ed8" : pal.value} fontSize={VALUE_FONT_SIZE}
@@ -648,6 +656,8 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   // Only parts without an .asy reach here (the symbol path returns above), so
   // this is the whole hand-drawn set: sources, ground and the digital parts.
   const pins = getLocalPins(nodeData, symbolNorm);
+  // See LibrarySymbolNode: captions hug the flank with fewer pins.
+  const side = captionSide(pins);
 
   return (
     <div
@@ -700,7 +710,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       </svg>
 
       {/* Reference label (R1, C1, …); ground has no label */}
-      {!isGround && (() => { const l = captionLayout("label", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
+      {!isGround && (() => { const l = captionLayout("label", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h, side); return (
         <MovableLabel
           nodeId={id} kind="label" base={l} transform={l.transform} offset={nodeData.labelOffset}
           color={selected ? "#2563eb" : pal.label} fontSize={LABEL_FONT_SIZE} fontWeight={selected ? 600 : 500}
@@ -710,7 +720,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       ); })()}
 
       {/* Value label (1kΩ, 100nF, 5V …) */}
-      {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h); return (
+      {nodeData.valueLabel && !isGround && (() => { const l = captionLayout("value", rotation, DEFAULT_HALF.w, DEFAULT_HALF.h, side); return (
         <MovableLabel
           nodeId={id} kind="value" base={l} transform={l.transform} offset={nodeData.valueOffset}
           color={selected ? "#1d4ed8" : pal.value} fontSize={VALUE_FONT_SIZE}

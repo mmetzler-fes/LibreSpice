@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Node, Edge } from "@xyflow/react";
 import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, getNodePins, edgeRouteHints } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
 import { terminalDirection } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
@@ -10,7 +10,7 @@ import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTo
 import { wireNameTag } from "./wireLabelShape.js";
 import { flattenForExport } from "./markdown.js";
 import type { TextBox } from "@core/circuit/textBox.js";
-import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
+import { captionSvgPlacement, captionSide, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
   directiveBoxGeometry, type DirectiveBoxGeometry,
@@ -137,8 +137,10 @@ function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: F
   const showCaption = type !== "ground";
   // Font sizes must match the editor's caption styles — the placement depends on
   // them (the line box is CAPTION_LINE_HEIGHT × fontSize).
-  const labelPos = captionSvgPlacement("label", rotation, halfW, halfH, LABEL_FONT_SIZE, data.labelOffset);
-  const valuePos = captionSvgPlacement("value", rotation, halfW, halfH, VALUE_FONT_SIZE, data.valueOffset);
+  // Same flank the editor chose, or a saved sheet would not match the screen.
+  const side = captionSide(getLocalPins(data, norm));
+  const labelPos = captionSvgPlacement("label", rotation, halfW, halfH, LABEL_FONT_SIZE, data.labelOffset, side);
+  const valuePos = captionSvgPlacement("value", rotation, halfW, halfH, VALUE_FONT_SIZE, data.valueOffset, side);
   return (
     <g transform={`translate(${x} ${y})`} color="#0f172a">
       {inner}

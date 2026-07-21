@@ -1,4 +1,5 @@
 import { getLocalPins, NODE_SIZE } from "../pinGeometry.js";
+import { captionSide } from "../captionLayout.js";
 import { buildSchematicSvg } from "../svgExport.js";
 import { LogicGate } from "@core/components/digital/LogicGate.js";
 import { DFlipFlop } from "@core/components/digital/DFlipFlop.js";
@@ -97,6 +98,32 @@ const CASES: Case[] = [
           fail(`${p.handleId} ${p.x},${p.y} turned to ${right[i].x},${right[i].y}, expected ${-p.y},${p.x}`);
         }
       });
+    },
+  },
+  {
+    name: "captions hug the flank with fewer pins",
+    run: (fail) => {
+      // A label set against a crowded flank sits in the wires running into it.
+      // The op-amp has two inputs left and one output right, a gate up to five
+      // against one — those belong on the right. A two-terminal part has its
+      // pins top and bottom, so neither flank is busier and the left stays.
+      const at = (d: Partial<ComponentNodeData>) => captionSide(getLocalPins(data(d)));
+      if (at({ componentType: "logicgate", gateType: "and", inputs: 4 }) !== "right") fail("4-input gate kept its caption left");
+      if (at({ componentType: "vsource" }) !== "left") fail("a source moved its caption off the left");
+      if (at({ componentType: "dff" }) !== "left") fail("the flip-flop (2 left, 2 right) should keep the left");
+      // Turned over, the crowded flank swaps and the caption follows.
+      if (at({ componentType: "logicgate", gateType: "and", inputs: 4, rotation: 180 }) !== "left") {
+        fail("turning a gate 180° did not move the caption back");
+      }
+
+      // The op-amp is the case this was built for, but it draws from an `.asy`
+      // and the harness loads no symbols (see scripts/glob-shim.js), so its pin
+      // set is stated here: two inputs left, supplies on the axis, output right.
+      const c = NODE_SIZE / 2;
+      const opamp = [{ px: c - 32 }, { px: c - 32 }, { px: c }, { px: c }, { px: c + 32 }];
+      if (captionSide(opamp) !== "right") fail("the op-amp's caption stayed on its crowded flank");
+      // The supplies sit on the centre line and must count for neither flank.
+      if (captionSide([{ px: c }, { px: c }]) !== "left") fail("centre pins were counted as a flank");
     },
   },
   {
