@@ -6,6 +6,7 @@ import {
   CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
 import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
+import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -159,7 +160,7 @@ function dockPoint(verts: Pt[], t: number): Pt {
 }
 
 export class LTSpiceExporter {
-  static export(nodes: Node[], edges: Edge[], directives: string, circuit: any, dataFlags: DataFlag[] = []): string {
+  static export(nodes: Node[], edges: Edge[], directives: string, circuit: any, dataFlags: DataFlag[] = [], textBoxes: TextBox[] = []): string {
     const header = ["Version 4", "SHEET 1 880 680"];
     const symbolLines: string[] = [];
     const flagLines: string[] = [];
@@ -339,6 +340,12 @@ export class LTSpiceExporter {
 
     const dataflagLines = dataFlags.map((df) => `DATAFLAG ${Math.round(df.x)} ${Math.round(df.y)} "${df.expr}"`);
 
+    // Text boxes go out as LTSpice sheet comments, so a file written here still
+    // reads there — and a comment written there comes back as a text box.
+    const textBoxLines = textBoxes.map(
+      (t) => `TEXT ${Math.round(t.x)} ${Math.round(t.y)} Left 2 ;${encodeTextBox(t)}`,
+    );
+
     const directiveLines: string[] = [];
     if (directives) {
       let ty = 100;
@@ -347,6 +354,6 @@ export class LTSpiceExporter {
       }
     }
 
-    return [...header, ...wireLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines].join("\n");
+    return [...header, ...wireLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines, ...textBoxLines].join("\n");
   }
 }

@@ -8,6 +8,8 @@ import { terminalDirection } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
 import { wireNameTag } from "./wireLabelShape.js";
+import { flattenForExport } from "./markdown.js";
+import type { TextBox } from "@core/circuit/textBox.js";
 import { captionSvgPlacement, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_RADIUS,
@@ -178,6 +180,47 @@ function DirectiveTextBox({ box }: { box: DirectiveBoxGeometry }) {
   );
 }
 
+/**
+ * A text box, laid out line by line — SVG has no flow layout, so the wrapping
+ * the canvas gets from CSS has to be computed here (see flattenForExport).
+ */
+function TextBoxShape({ box }: { box: TextBox }) {
+  const fontSize = 11;
+  // Average glyph width of the sans-serif face at this size; good enough for a
+  // greedy wrap, and erring narrow keeps text inside the frame.
+  const charsPerLine = Math.max(4, Math.floor((box.width - 12) / (fontSize * 0.53)));
+  const lines = flattenForExport(box.text, box.markdown, charsPerLine);
+  const lineHeight = fontSize * 1.45;
+  return (
+    <g>
+      <rect
+        x={box.x} y={box.y} width={box.width} height={box.height}
+        rx={4} fill="#ffffff" stroke="#94a3b8" strokeWidth={1}
+      />
+      {lines.map((l, i) => {
+        const y = box.y + 6 + lineHeight * (i + 0.8);
+        // Clip at the frame rather than spilling past it, matching the canvas,
+        // which scrolls the overflow out of sight.
+        if (y > box.y + box.height - 2) return null;
+        return (
+          <text
+            key={i}
+            x={box.x + 6 + l.indent * fontSize * 0.9}
+            y={y}
+            fontSize={fontSize * l.scale}
+            fontWeight={l.bold ? 600 : 400}
+            fontFamily="sans-serif"
+            fill="#0f172a"
+            xmlSpace="preserve"
+          >
+            {l.text}
+          </text>
+        );
+      })}
+    </g>
+  );
+}
+
 /** The on-canvas directive box, when the user enabled "Display in circuit". */
 export interface DirectiveOverlay {
   text: string;
@@ -228,6 +271,7 @@ export function buildSchematicSvg(
   norm: SymbolNorm,
   directives?: DirectiveOverlay,
   circuit?: NetNameLookup,
+  textBoxes: TextBox[] = [],
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -276,6 +320,12 @@ export function buildSchematicSvg(
   if (directiveBox) {
     grow(directiveBox.x, directiveBox.y);
     grow(directiveBox.x + directiveBox.width, directiveBox.y + directiveBox.height);
+  }
+  // Text boxes are usually placed clear of the circuit, so they drive the bounds
+  // as much as the parts do.
+  for (const t of textBoxes) {
+    grow(t.x, t.y);
+    grow(t.x + t.width, t.y + t.height);
   }
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_SIZE; maxY = NODE_SIZE; }
   const pad = 24;
@@ -332,6 +382,7 @@ export function buildSchematicSvg(
       {wires}
       {labels}
       {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)} />)}
+      {textBoxes.map((t) => <TextBoxShape key={t.id} box={t} />)}
       {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>
   );

@@ -1,0 +1,149 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { useCircuitStore } from "@store/circuitStore.js";
+import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
+import { encodeTextBox, decodeTextBox, TEXTBOX_DEFAULT_W, type TextBox } from "@core/circuit/textBox.js";
+import { renderMarkdown, flattenForExport } from "../markdown.js";
+import type { TestReport } from "./svgExport.test.js";
+
+/**
+ * Text boxes: the annotation layer, its `.asc` round trip and the Markdown
+ * subset.
+ *
+ * The security case is the one that earns its place here. A schematic travels as
+ * a share link, so a text box can carry text written by whoever sent the link.
+ * The renderer therefore produces React elements and never an HTML string —
+ * these tests hold that line by feeding it markup and requiring it back as
+ * visible characters rather than as tags.
+ */
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const st = () => useCircuitStore.getState();
+
+type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> | void };
+
+const box = (over: Partial<TextBox> = {}): TextBox =>
+  ({ id: "tb_1", x: 10, y: 20, width: 240, height: 120, text: "Hallo", markdown: false, ...over });
+
+const html = (src: string, markdown = true) =>
+  renderToStaticMarkup(markdown ? renderMarkdown(src) as never : (src as never));
+
+const CASES: Case[] = [
+  {
+    name: "a text box survives the .asc round trip with size, text and mode",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const id = st().addTextBox(100, 200);
+      st().updateTextBox(id, { text: "Zeile 1\nZeile 2", width: 321, height: 89, markdown: true });
+      const before = st().textBoxes[0];
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes);
+      st().clearCircuit();
+      st().loadFromAsc(asc);
+      await tick();
+      await tick();
+      const after = st().textBoxes[0];
+      if (!after) return fail(`no text box came back:\n${asc}`);
+      for (const k of ["x", "y", "width", "height", "text", "markdown"] as const) {
+        if (String(after[k]) !== String(before[k])) fail(`${k}: ${String(before[k])} -> ${String(after[k])}`);
+      }
+    },
+  },
+  {
+    name: "a multi-line text stays one physical line in the file",
+    run: (fail) => {
+      // LTSpice keeps a comment on one line and spells a break "\\n"; a real
+      // newline in the file would end the TEXT and orphan the rest.
+      const asc = `TEXT 0 0 Left 2 ;${encodeTextBox(box({ text: "a\nb\nc" }))}`;
+      if (asc.split("\n").length !== 1) fail(`the encoded comment spans ${asc.split("\n").length} lines`);
+      if (!asc.includes("a\\nb\\nc")) fail(`breaks not escaped: ${asc}`);
+    },
+  },
+  {
+    name: "a plain LTSpice comment becomes a readable text box",
+    run: (fail) => {
+      // Every converted Multisim schematic carries its exercise text this way.
+      // These used to be dropped on import; they must come back verbatim and
+      // *not* be reflowed as Markdown, which would mangle hand-laid-out text.
+      const t = decodeTextBox("Arbeitsauftrag: \\n 1. Messen Sie U.", "tb_1", 96, 736);
+      if (t.markdown) fail("a foreign comment was taken as Markdown");
+      if (t.width !== TEXTBOX_DEFAULT_W) fail(`unexpected width ${t.width}`);
+      if (!t.text.includes("\n")) fail(`no real line break: ${JSON.stringify(t.text)}`);
+      if (t.text.includes("\\n")) fail(`the literal escape survived: ${JSON.stringify(t.text)}`);
+    },
+  },
+  {
+    name: "the header round-trips exactly",
+    run: (fail) => {
+      const original = box({ text: "x", width: 173, height: 44, markdown: true });
+      const back = decodeTextBox(encodeTextBox(original), "tb_1", 0, 0);
+      if (back.width !== 173 || back.height !== 44 || !back.markdown || back.text !== "x") {
+        fail(JSON.stringify(back));
+      }
+    },
+  },
+
+  // ── Markdown ──────────────────────────────────────────────────────────────
+  {
+    name: "markdown renders headings, emphasis and lists",
+    run: (fail) => {
+      const out = html("# Titel\n\nEin **fetter** Text\n\n- eins\n- zwei");
+      if (!out.includes("Titel")) fail("heading text missing");
+      if (!out.includes("<strong>fetter</strong>")) fail(`no bold: ${out}`);
+      if (!out.includes("<ul") || !out.includes("<li>eins</li>")) fail(`no list: ${out}`);
+    },
+  },
+  {
+    name: "markdown does not interpret HTML in the source",
+    run: (fail) => {
+      // The whole point of rendering to React elements: a share link from
+      // someone else must not be able to inject markup, let alone a script.
+      const out = html('<img src=x onerror="alert(1)"> <b>bold?</b> <script>alert(2)</script>');
+      if (/<img|<script|<b>/i.test(out)) fail(`raw HTML survived into the output: ${out}`);
+      if (!out.includes("&lt;script&gt;")) fail(`the markup was not shown as text: ${out}`);
+    },
+  },
+  {
+    name: "a code fence is not interpreted",
+    run: (fail) => {
+      const out = html("```\n**nicht fett**\n```");
+      if (out.includes("<strong>")) fail("emphasis was applied inside a fence");
+      if (!out.includes("**nicht fett**")) fail(`fence content missing: ${out}`);
+    },
+  },
+  {
+    name: "an unterminated fence still shows its text",
+    run: (fail) => {
+      const out = html("```\nirgendwas");
+      if (!out.includes("irgendwas")) fail(`content swallowed: ${out}`);
+    },
+  },
+
+  // ── SVG export ────────────────────────────────────────────────────────────
+  {
+    name: "the export wraps long text to the box width",
+    run: (fail) => {
+      const lines = flattenForExport("wort ".repeat(40).trim(), false, 20);
+      if (lines.length < 5) fail(`40 words wrapped into only ${lines.length} lines`);
+      for (const l of lines) if (l.text.length > 20) fail(`line longer than the wrap width: "${l.text}"`);
+    },
+  },
+  {
+    name: "the export marks headings and strips inline markers",
+    run: (fail) => {
+      const lines = flattenForExport("# Titel\n\nein **fetter** Text\n- punkt", true, 40);
+      const head = lines.find((l) => l.text.includes("Titel"));
+      if (!head?.bold || head.scale <= 1) fail(`heading not emphasised: ${JSON.stringify(head)}`);
+      if (lines.some((l) => l.text.includes("**"))) fail("inline markers reached the export");
+      if (!lines.some((l) => l.text.startsWith("• punkt"))) fail("list item lost its bullet");
+    },
+  },
+];
+
+export async function runTextBoxTests(): Promise<TestReport> {
+  const failures: { name: string; reason: string }[] = [];
+  for (const c of CASES) {
+    let failed = false;
+    await c.run((reason) => { if (!failed) { failed = true; failures.push({ name: c.name, reason }); } });
+  }
+  return { total: CASES.length, passed: CASES.length - failures.length, failures };
+}

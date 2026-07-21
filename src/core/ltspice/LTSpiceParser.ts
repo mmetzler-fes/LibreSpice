@@ -7,6 +7,7 @@ import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNod
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
+import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 
 
 /** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
@@ -50,13 +51,14 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; netNames: { compId: string; handle: string; name: string }[] } {
+  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; netNames: { compId: string; handle: string; name: string }[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
     const wires: Wire[] = [];
     const pins: Pin[] = [];
     const dataFlags: DataFlag[] = [];
+    const textBoxes: TextBox[] = [];
     // Named-flag positions, so we can also anchor the net name on a real
     // component pin (robust even if the terminal's edge is dropped at runtime).
     const namedFlags: { name: string; x: number; y: number }[] = [];
@@ -146,6 +148,13 @@ export class LTSpiceParser {
           x2: parseInt(parts[3], 10), y2: parseInt(parts[4], 10)
         });
       } else if (cmd === "TEXT") {
+        // A comment TEXT becomes a text box. These used to be dropped on the
+        // floor, which quietly discarded the exercise texts every converted
+        // Multisim schematic carries.
+        const comment = line.match(/TEXT\s+(-?\d+)\s+(-?\d+)\s+\w+\s+\d+\s+;(.*)/i);
+        if (comment) {
+          textBoxes.push(decodeTextBox(comment[3], `tb_${textBoxes.length + 1}`, parseInt(comment[1], 10), parseInt(comment[2], 10)));
+        }
         const textMatch = line.match(/TEXT\s+-?\d+\s+-?\d+\s+\w+\s+\d+\s+!(.*)/i);
         if (textMatch) {
           // LTSpice stores a multi-line directive TEXT as one physical line with
@@ -401,7 +410,7 @@ export class LTSpiceParser {
       }
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, netNames };
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, netNames };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {

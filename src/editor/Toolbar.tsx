@@ -91,7 +91,7 @@ export function Toolbar() {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
-    circuitName, setCircuitName, dataFlags,
+    circuitName, setCircuitName, dataFlags, textBoxes,
     showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
@@ -150,17 +150,33 @@ export function Toolbar() {
 
   const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
 
+  /**
+   * Drop a text box just above the circuit's top-left corner — where a title or
+   * a task description belongs, and clear of the parts.
+   *
+   * Derived from the content rather than from the viewport on purpose: the
+   * toolbar is rendered outside the React Flow provider in the regression
+   * harness, so a `useReactFlow` here would break it, and content-relative
+   * placement is deterministic anyway.
+   */
+  const handleAddTextBox = () => {
+    const ns = useCircuitStore.getState().nodes;
+    const x = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.x))) : 0;
+    const y = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.y))) - 160 : 0;
+    useCircuitStore.getState().addTextBox(x, y);
+  };
+
   const handleExportSvg = () => {
     // "Display in circuit" puts the directives on the sheet, so they belong in
     // the export too — at the spot the user dragged the box to.
     const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
     // `circuit` resolves the wires' net names — a wire stores only *whether* to
     // show a label, never the text (see NetNameLookup).
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {
-    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags);
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes);
     if ("showSaveFilePicker" in window) {
       try {
         let handle = fileHandle;
@@ -418,6 +434,12 @@ export function Toolbar() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 3v12 M8 11l4 4 4-4 M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
           <text x="12" y="9" textAnchor="middle" fontSize="7" fill="currentColor" stroke="none">SVG</text>
+        </svg>
+      </TBtn>
+
+      <TBtn title="Textfeld einfügen — Doppelklick bearbeitet, MD schaltet Markdown ein" onClick={handleAddTextBox}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 5h14 M12 5v14 M9 19h6" />
         </svg>
       </TBtn>
 
