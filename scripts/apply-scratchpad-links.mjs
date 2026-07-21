@@ -100,7 +100,19 @@ if (existsSync(jsonPath)) {
   }
 }
 
-/** An examples/ basename that really exists, trying umlaut transliterations. */
+/**
+ * Directories a linked circuit may live in. `examples/` is the hand-built set;
+ * `converted_from_multisim/` holds the converted teaching schematics, which is
+ * where the digital circuits are — a link to one of those recorded no file at
+ * all while only examples/ was searched.
+ *
+ * The recorded `file` stays a bare basename: it is bookkeeping read back only by
+ * this script, which searches both roots again on the next run. Should the same
+ * basename ever exist in both, the earlier root wins.
+ */
+const ASC_ROOTS = ["examples", "converted_from_multisim"];
+
+/** A basename that really exists under one of the roots, trying umlaut spellings. */
 function resolveAsc(name) {
   if (!name) return null;
   const swaps = [
@@ -108,9 +120,11 @@ function resolveAsc(name) {
     (s) => s.replace(/ae/g, "ä").replace(/oe/g, "ö").replace(/ue/g, "ü"),
     (s) => s.replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue"),
   ];
-  for (const f of swaps) {
-    const cand = f(name);
-    if (existsSync(resolve(root, `examples/${cand}.asc`))) return cand;
+  for (const dir of ASC_ROOTS) {
+    for (const f of swaps) {
+      const cand = f(name);
+      if (existsSync(resolve(root, `${dir}/${cand}.asc`))) return cand;
+    }
   }
   return null;
 }
