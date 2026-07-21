@@ -81,6 +81,9 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   ground: ["gnd"],
   netlabel: ["t"],
   netconnector: ["t"],
+  // The flip-flop's ids match DFlipFlop.createPorts; the logic gate's input
+  // count varies, so its handles are built per instance (see digitalPins).
+  dff: ["d", "clk", "set", "rst", "q", "qn"],
 };
 
 /** Handle id for a given component type and 1-based SPICE pin order. */
@@ -140,6 +143,39 @@ const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
 };
 
 /**
+ * Pins of the two digital parts, which have no `.asy` and whose pin *count*
+ * depends on their properties — so they cannot live in the static table above.
+ *
+ * The offsets are node-centre-relative and deliberately the same numbers as the
+ * components' own `createPorts` (LogicGate, DFlipFlop) and as `ltspiceGeometry`'s
+ * `PIN_OFFSETS`. All three have to agree: the component decides the netlist, this
+ * decides where a wire may dock, and the geometry table decides where an imported
+ * `.asc` puts the pin. A disagreement leaves a part whose wires miss its pins.
+ */
+function digitalPins(data: ComponentNodeData): LocalPin[] {
+  const c = NODE_SIZE / 2;
+  const at = (handleId: string, order: number, dx: number, dy: number): LocalPin =>
+    ({ handleId, order, px: c + dx, py: c + dy });
+
+  if (data.componentType === "dff") {
+    return [
+      at("d", 1, -32, -24), at("clk", 2, -32, 24),
+      at("set", 3, 0, -48), at("rst", 4, 0, 48),
+      at("q", 5, 32, -24), at("qn", 6, 32, 24),
+    ];
+  }
+  // Logic gate: inputs spread down the left edge, output centred on the right.
+  const single = data.gateType === "not" || data.gateType === "buffer";
+  const n = single ? 1 : (data.inputs ?? 2);
+  const span = 48;
+  const pins = Array.from({ length: n }, (_, i) =>
+    at(`in${i + 1}`, i + 1, -32, n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1))),
+  );
+  pins.push(at("out", n + 1, 32, 0));
+  return pins;
+}
+
+/**
  * Node-local pin positions, accounting for the symbol's orientation. Mirror is
  * applied *before* rotation, exactly as LTSpice's `M<deg>` is defined — the two
  * do not commute, so flipping afterwards placed the pins of every mirrored,
@@ -158,8 +194,19 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
       return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px, py };
     });
   }
-  const pins = FALLBACK_PINS[data.componentType] ?? [];
-  return mirrored ? pins.map((p) => ({ ...p, px: flip(p.px) })) : pins;
+  const digital = data.componentType === "dff" || data.componentType === "logicgate";
+  const pins = digital ? digitalPins(data) : FALLBACK_PINS[data.componentType] ?? [];
+  // The hand-drawn symbols turn with the node just as an .asy one does, so their
+  // pins have to turn with it too. Only the digital parts are rotated here: the
+  // rest of the fallback table is grounds, sources and transistors, whose pins
+  // the rest of the editor has always taken un-rotated, and quietly moving them
+  // would re-route existing schematics.
+  const rotation = digital ? data.rotation ?? 0 : 0;
+  const c = NODE_SIZE / 2;
+  return pins.map((p) => {
+    const [px, py] = rotatePoint(flip(p.px), p.py, c, c, rotation);
+    return { ...p, px, py };
+  });
 }
 
 export interface NodePin {

@@ -318,6 +318,73 @@ function lampResistance(p: Params): string {
   return String(Number((u * u / w).toPrecision(4)));
 }
 
+/** SI-suffixed SPICE number ("1m", "4.7k", "1n") as a plain number. */
+function siNum(s: string): number {
+  const m = /^\s*([-+]?[\d.]+(?:e[-+]?\d+)?)\s*([a-zµ]*)/i.exec(s ?? "");
+  if (!m) return NaN;
+  const mult: Record<string, number> = {
+    t: 1e12, g: 1e9, meg: 1e6, k: 1e3, m: 1e-3, u: 1e-6, µ: 1e-6, n: 1e-9, p: 1e-12, f: 1e-15,
+  };
+  const suf = m[2].toLowerCase();
+  // "meg" before "m": SPICE spells a million "MEG" and a milli "m".
+  const f = suf.startsWith("meg") ? mult.meg : mult[suf[0]] ?? 1;
+  return parseFloat(m[1]) * f;
+}
+
+/**
+ * The period of every periodic source in the sheet, read back off the `Value`
+ * lines already emitted — one pass over the finished symbols rather than a
+ * period threaded through each emitter.
+ */
+function sourcePeriods(symbolLines: string[]): number[] {
+  const out: number[] = [];
+  for (const line of symbolLines) {
+    const v = /^SYMATTR Value (.+)$/.exec(line)?.[1];
+    if (!v) continue;
+    const pulse = /^PULSE\(\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/i.exec(v);
+    if (pulse) { const t = siNum(pulse[7]); if (t > 0) out.push(t); continue; }
+    const sin = /^SINE?\(\s*(\S+)\s+(\S+)\s+(\S+)/i.exec(v);
+    if (sin) { const f = siNum(sin[3]); if (f > 0) out.push(1 / f); continue; }
+    // A PWL source is not periodic, but its last breakpoint is how long it has
+    // anything to say — which serves the same purpose here.
+    const pwl = /^PWL\(([^)]*)\)/i.exec(v);
+    if (pwl) {
+      const tok = pwl[1].trim().split(/\s+/).filter((t) => !/^r\s*=/i.test(t));
+      const last = siNum(tok[tok.length - 2] ?? "");
+      if (last > 0) out.push(last);
+    }
+  }
+  return out;
+}
+
+/**
+ * How many periods of the slowest source the converted schematic should run for.
+ * Enough to fill a 4-bit counter (16 clocks) and still see it wrap, which is what
+ * the counter and shift-register exercises are about.
+ */
+const TRAN_PERIODS = 20;
+/** Points per period of the *fastest* source — plenty to draw a clean edge. */
+const TRAN_RESOLUTION = 100;
+
+/**
+ * The `.tran` line for a converted sheet, sized from its own sources.
+ *
+ * Multisim stores no transient settings we can read, and the app's fallback is
+ * 1 µs / 1 ms — meaningless for these schematics, whose clocks run at 10 Hz. Left
+ * at the fallback a counter shows a hundredth of one clock period; corrected by
+ * hand to a useful stop time while keeping the 1 µs step, it is 1.6 million
+ * points and takes minutes. Both failure modes look like a broken simulation, so
+ * the stop time and the step are derived here instead.
+ */
+function tranDirective(symbolLines: string[]): string | null {
+  const periods = sourcePeriods(symbolLines);
+  if (periods.length === 0) return null;
+  const stop = Math.max(...periods) * TRAN_PERIODS;
+  const step = Math.min(...periods) / TRAN_RESOLUTION;
+  const fmt = (v: number) => Number(v.toPrecision(3)).toExponential().replace("e+0", "").replace(/e([-+]\d+)/, "e$1");
+  return `.tran ${fmt(step)} ${fmt(stop)}`;
+}
+
 /** Pulse/clock/step/triangle sources all map onto SPICE PULSE(). */
 /**
  * How far apart two PWL breakpoints are pushed when Multisim gave them the same
@@ -874,8 +941,56 @@ function wireGroups(wires: Wire[], points: Pt[]): Union {
 }
 
 /**
+ * Length of the stub between a component pin and a net label placed on it — one
+ * visible grid square, the same lead the editor leaves when a label is dropped
+ * on a pin by hand (see netLabelLead).
+ */
+const LEAD = 16;
+
+/**
+ * Which way a lead should point to get *out* of the part, or null when there is
+ * no sensible direction.
+ *
+ * Taken from the pin's position relative to the centre of its own part's pins,
+ * which the `guid/pinid` key makes available without threading a direction
+ * through every emitter. The dominant axis wins, so the stub stays orthogonal.
+ * A one-pin part (a ground connector) has no such centre and gets no lead.
+ */
+function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
+  const prefix = pinKey.slice(0, pinKey.lastIndexOf("/") + 1);
+  const siblings = Object.entries(pinPos).filter(([k]) => k.startsWith(prefix)).map(([, p]) => p);
+  if (siblings.length < 2) return null;
+  const p = pinPos[pinKey];
+  const cx = siblings.reduce((s, q) => s + q[0], 0) / siblings.length;
+  const cy = siblings.reduce((s, q) => s + q[1], 0) / siblings.length;
+  const dx = p[0] - cx, dy = p[1] - cy;
+  if (dx === 0 && dy === 0) return null;
+  return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+}
+
+/** True when a point already carries a pin or lies anywhere on a wire. */
+function occupied(p: Pt, pinPos: PinPos, wires: Wire[]): boolean {
+  for (const q of Object.values(pinPos)) if (q[0] === p[0] && q[1] === p[1]) return true;
+  for (const [x1, y1, x2, y2] of wires) {
+    const on = x1 === x2
+      ? p[0] === x1 && p[1] >= Math.min(y1, y2) && p[1] <= Math.max(y1, y2)
+      : y1 === y2 && p[1] === y1 && p[0] >= Math.min(x1, x2) && p[0] <= Math.max(x1, x2);
+    if (on) return true;
+  }
+  return false;
+}
+
+/**
  * Add net labels wherever the drawn geometry leaves one Multisim net split
  * across several disconnected islands. Returns the FLAG lines to append.
+ *
+ * A label is set one grid square off its pin and joined to it by a short wire,
+ * rather than placed on the pin itself. On the pin the tag covers the terminal
+ * and reads as part of the symbol — and since it is a component of its own, it
+ * can then be dragged away from a part it looked welded to. The stub makes the
+ * connection something the schematic actually shows. Any lead that would land on
+ * another pin or on an existing wire is dropped back onto the pin, since a stub
+ * into an occupied point would invent a connection Multisim never had.
  */
 function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags: string[]): string[] {
   // Ground already has FLAGs from the connector symbols; take their points into
@@ -891,24 +1006,34 @@ function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags:
 
   const out: string[] = [];
   for (const net of netList) {
-    const pts: Pt[] = [];
+    const pts: { p: Pt; key: string }[] = [];
     for (const obj of net.objects ?? []) {
-      const p = pinPos[`${obj.component}/${obj.pin}`];
-      if (p) pts.push(p);
+      const k = `${obj.component}/${obj.pin}`;
+      const p = pinPos[k];
+      if (p) pts.push({ p, key: k });
     }
     if (pts.length < 2) continue;
 
     // Multisim's node 0 is ground; LTSpice spells that label "0" as well.
     const name = /^\d+$/.test(net.name) ? (net.name === "0" ? "0" : `N${net.name}`) : net.name;
 
-    const islands = new Map<string, Pt>();
-    for (const p of pts) {
-      const root = uf.find(key(p));
-      if (!islands.has(root)) islands.set(root, p);
+    const islands = new Map<string, { p: Pt; key: string }>();
+    for (const it of pts) {
+      const root = uf.find(key(it.p));
+      if (!islands.has(root)) islands.set(root, it);
     }
     // One island means the wires already join every pin on this net.
     if (islands.size < 2) continue;
-    for (const p of islands.values()) out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
+    for (const { p, key: pinKey } of islands.values()) {
+      const dir = leadDirection(pinKey, pinPos);
+      const tip: Pt | null = dir ? [p[0] + dir[0] * LEAD, p[1] + dir[1] * LEAD] : null;
+      if (tip && !occupied(tip, pinPos, wires)) {
+        wires.push([p[0], p[1], tip[0], tip[1]]);
+        out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
+      } else {
+        out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
+      }
+    }
   }
   return out;
 }
@@ -1219,6 +1344,8 @@ export function convert(doc: any): ConversionResult {
   });
 
   // Directives go under the schematic, stacked so they don't overlap.
+  const tran = tranDirective(symbolLines);
+  if (tran) directives.push(tran);
   const dirY = Math.max(0, ...Object.values(pinPos).map((p) => p[1])) + 64;
   const directiveLines = directives.map((d, i) => `TEXT 64 ${dirY + i * 32} Left 2 !${d}`);
 

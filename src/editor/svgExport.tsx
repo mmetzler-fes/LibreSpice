@@ -18,7 +18,7 @@ import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
   BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol,
   VoltageSourceSymbol, CurrentSourceSymbol, SineSourceSymbol, PulseSourceSymbol, PWLSourceSymbol,
-  GroundSymbol,
+  GroundSymbol, LogicGateSymbol, DFlipFlopSymbol,
 } from "./nodes/symbols/Symbols.js";
 
 /** Hand-drawn fallback symbols (viewBox -40..40), for types without an .asy. */
@@ -100,7 +100,23 @@ function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: F
   const halfW = sym ? (symbolBounds(sym).width / 2) * mapping!.scale : DEFAULT_HALF.w;
   const halfH = sym ? (symbolBounds(sym).height / 2) * mapping!.scale : DEFAULT_HALF.h;
 
-  const inner = sym ? (
+  // The digital parts draw themselves from their properties (gate mark and lead
+  // count; clock edge, kind and Set/Reset polarity), so they are bound with those
+  // here — exactly as the editor node does. Left to the plain FALLBACK lookup they
+  // came out of the export drawn as resistors.
+  const Digital: React.FC | null =
+    type === "dff"
+      ? () => <DFlipFlopSymbol edge={data.edge} asyncPolarity={data.asyncPolarity} kind={data.kind} />
+      : type === "logicgate"
+      ? () => <LogicGateSymbol gate={data.gateType} inputs={data.inputs} />
+      : null;
+
+  const inner = Digital ? (
+    // Hand-drawn symbols live in a -40..40 space centred on the node.
+    <g transform={`translate(${NODE_SIZE / 2} ${NODE_SIZE / 2}) ${transformFor(rotation, mirrored, 0, 0) ?? ""}`}>
+      <Digital />
+    </g>
+  ) : sym ? (
     <g transform={transformFor(rotation, mirrored, NODE_SIZE / 2, NODE_SIZE / 2)}>
       <AsyGeometry sym={sym} mapping={mapping!} strokeWidth={1.6} />
     </g>

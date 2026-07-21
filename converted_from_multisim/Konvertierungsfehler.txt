@@ -1,7 +1,7 @@
 Konvertierung Multisim Live (.msjs) -> LTSpice (.asc)
 ============================================================
 
-Erzeugt am:            2026-07-20
+Erzeugt am:            2026-07-21
 Schaltungen gesamt:    108
 Vollstaendig:          102
 Mit fehlenden Teilen:  6
@@ -126,6 +126,10 @@ Mit fehlenden Teilen:  6
         1 = 3
   1_5_2_PT100_Sensor_in_4-Leiter-Schaltung_mit_2_INA333
         1 = 3, 5 = Uth
+  2_1_Tiefgaragensteuerung
+        3 = 6, 4 = 7, 5 = 8
+  2_1_Tiefgaragensteuerung_Lsg
+        3 = 6, 4 = 7, 5 = 8
   6_3_3_Universal_Schieberegister
         0 = 23
   6_3_3_Universal_Schieberegister_Lsg

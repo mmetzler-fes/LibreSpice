@@ -730,6 +730,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const rotation = nodeData.rotation ?? 0;
   const mirrored = !!nodeData.mirrored;
   const isGround = nodeData.componentType === "ground";
+  const isDigital = nodeData.componentType === "dff" || nodeData.componentType === "logicgate";
 
   return (
     <div
@@ -745,7 +746,23 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
       }}
     >
       {selected && <PinNetLabels nodeId={id} data={nodeData} />}
-      {getHandles(nodeData.componentType, mirrored, tap)}
+      {/* The digital parts have no fixed handle set — the gate's input count and
+          the flip-flop's pin names come from its properties — so their connectors
+          are placed from the same pin table the wiring uses. Without this they had
+          no terminals at all, and a net label dropped on one merely sat on top of
+          the drawing instead of connecting to it. */}
+      {isDigital
+        ? getLocalPins(nodeData, symbolNorm).map((pin) => (
+            <Handle
+              key={pin.handleId}
+              type="source"
+              position={Position.Top}
+              id={pin.handleId}
+              style={{ ...HANDLE_STYLE, left: pin.px, top: pin.py, transform: "translate(-50%, -50%)" }}
+              {...tap}
+            />
+          ))
+        : getHandles(nodeData.componentType, mirrored, tap)}
       <svg
         width="80"
         height="80"
