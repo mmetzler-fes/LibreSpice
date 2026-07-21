@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 /**
  * A deliberately small Markdown subset, rendered to React elements.
@@ -18,6 +18,13 @@ import type { ReactNode } from "react";
  * Supported: `#`…`######` headings, `-`/`*`/`1.` lists, `>` quotes, `---` rules,
  * ``` fenced and `inline` code, **bold**, *italic*, ~~strikethrough~~, and blank
  * lines as paragraph breaks. Anything else is literal text.
+ *
+ * One deliberate deviation from CommonMark: inside a paragraph every source line
+ * breaks, instead of being joined into one flowing line. These are notes pinned
+ * to a schematic — someone who presses Return means it, and `<br>` is no way out
+ * here since raw HTML is shown rather than interpreted. A trailing backslash or
+ * two trailing spaces, the CommonMark spellings of a hard break, are accepted
+ * too and simply removed.
  */
 
 /** One laid-out line for the SVG export, which has no flow layout of its own. */
@@ -145,7 +152,12 @@ export function renderMarkdown(src: string): ReactNode {
     if (para.length === 0) return;
     blocks.push(
       <p key={`p${blocks.length}`} style={{ margin: "0 0 0.5em" }}>
-        {inline(para.join(" "), `p${blocks.length}`)}
+        {para.map((l, i) => (
+          <Fragment key={i}>
+            {i > 0 && <br />}
+            {inline(l, `p${blocks.length}_${i}`)}
+          </Fragment>
+        ))}
       </p>,
     );
     para = [];
@@ -224,7 +236,10 @@ export function renderMarkdown(src: string): ReactNode {
     }
 
     flushList();
-    para.push(line.trim());
+    // A trailing "\\" (or the two spaces the raw line carried) is CommonMark's
+    // hard break. Every line breaks here anyway, so the marker is only stripped
+    // rather than acted on — it must not show up as a stray backslash.
+    para.push(line.trim().replace(/\\$/, "").trimEnd());
   }
   // An unterminated fence still shows its content rather than swallowing it.
   if (fence !== null) para.push(...fence);

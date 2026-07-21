@@ -112,6 +112,33 @@ const CASES: Case[] = [
     },
   },
   {
+    name: "every source line breaks inside a paragraph",
+    run: (fail) => {
+      // A note pinned to a schematic: pressing Return has to show as a break.
+      // <br> is no way out here — raw HTML is shown, not interpreted — so the
+      // newline itself must do it.
+      const out = html("Zeile eins\nZeile zwei");
+      if (!out.includes("<br/>") && !out.includes("<br />")) fail(`no break: ${out}`);
+      if (out.includes("Zeile eins Zeile zwei")) fail("the lines were joined into one");
+    },
+  },
+  {
+    name: "a trailing backslash is a break marker, not text",
+    run: (fail) => {
+      // CommonMark's hard break. Every line breaks here anyway, so it only has
+      // to disappear rather than show up as a stray backslash.
+      const out = html("Zeile eins\\\nZeile zwei");
+      if (out.includes("\\")) fail(`the backslash reached the output: ${out}`);
+    },
+  },
+  {
+    name: "a blank line still separates paragraphs",
+    run: (fail) => {
+      const out = html("Absatz eins\n\nAbsatz zwei");
+      if ((out.match(/<p/g) ?? []).length !== 2) fail(`expected two paragraphs: ${out}`);
+    },
+  },
+  {
     name: "markdown does not interpret HTML in the source",
     run: (fail) => {
       // The whole point of rendering to React elements: a share link from
