@@ -56,3 +56,34 @@ export function terminalDirection(dock: FlowPoint, farEnds: FlowPoint[]): FlowPo
   const first = axes[0];
   return { x: -first.x, y: -first.y };
 }
+
+/**
+ * Which of the two sides across the wire the name should take.
+ *
+ * Across the wire there are always two: above or below a horizontal run, right
+ * or left of a vertical one. The conventional side is above / right; the other
+ * is taken when something already sits there, so a name never lands on a part
+ * or on a neighbouring terminal.
+ *
+ * Derived from the surroundings rather than stored, so the file stays free of
+ * layout hints and the same schematic always draws the same way. `neighbours`
+ * are nearby points of interest in flow coordinates — other nodes' centres.
+ */
+export function terminalTagSide(dock: FlowPoint, dir: FlowPoint, neighbours: FlowPoint[]): 1 | -1 {
+  // The axis the name may move along is the one the symbol does *not* use.
+  const across = dir.x !== 0 ? "y" : "x";
+  /** How crowded one side is, counting only what is close enough to collide. */
+  const crowding = (sign: 1 | -1) => {
+    let n = 0;
+    for (const p of neighbours) {
+      const along = across === "y" ? p.x - dock.x : p.y - dock.y;
+      const off = across === "y" ? p.y - dock.y : p.x - dock.x;
+      if (Math.abs(along) <= 48 && Math.sign(off) === sign && Math.abs(off) <= 56) n++;
+    }
+    return n;
+  };
+  // "Above" is negative y, "right" is positive x — hence the differing default.
+  const preferred: 1 | -1 = across === "y" ? -1 : 1;
+  const other: 1 | -1 = preferred === 1 ? -1 : 1;
+  return crowding(preferred) > crowding(other) ? other : preferred;
+}

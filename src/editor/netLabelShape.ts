@@ -61,7 +61,7 @@ function arrowHead(tx: number, ty: number, dx: number, dy: number): string {
  * bare docking circle (a plain label), `Out` points away from the circle, `In`
  * points back into it, and `BiDir` carries a head at each end.
  */
-export function netLabelShape(portType: PortType = "None", dir: FlowPoint = UP): NetLabelShape {
+export function netLabelShape(portType: PortType = "None", dir: FlowPoint = UP, side?: 1 | -1): NetLabelShape {
   const dx = dir.x, dy = dir.y;
 
   const gap = R + 1;
@@ -84,11 +84,25 @@ export function netLabelShape(portType: PortType = "None", dir: FlowPoint = UP):
   //
   // The arrow is unaffected: it keeps pointing along the wire, since that is
   // what says which way the signal goes.
+  // `side` picks which of the two sides across the wire is used: -1 is up/left,
+  // +1 down/right. It is chosen from the surroundings (see terminalTagSide), so
+  // a name steps to whichever side is free without anything being stored.
   const reach = R + 9;
   const horizontal = dx !== 0;
+  // Unstated, the conventional side: above a horizontal wire, right of a
+  // vertical one. `terminalTagSide` overrides it when that side is occupied.
+  const s = side ?? (horizontal ? -1 : 1);
   const tag = horizontal
-    ? { x: C, y: C - reach, anchor: "middle" as const, baseline: "bottom" as const }
-    : { x: C + reach, y: C, anchor: "start" as const, baseline: "middle" as const };
+    ? {
+        x: C, y: C + s * reach,
+        anchor: "middle" as const,
+        baseline: (s < 0 ? "bottom" : "top") as "top" | "middle" | "bottom",
+      }
+    : {
+        x: C + s * reach, y: C,
+        anchor: (s < 0 ? "end" : "start") as "start" | "middle" | "end",
+        baseline: "middle" as const,
+      };
 
   return {
     circle: { cx: C, cy: C, r: R },

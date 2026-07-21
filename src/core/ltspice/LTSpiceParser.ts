@@ -3,7 +3,7 @@ import { createSpiceComponent, createSubcircuitComponent, getValueLabel, isNetTe
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
+import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNode, centeringFor, offsetFromWindow } from "./ltspiceGeometry.js";
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
@@ -620,6 +620,13 @@ export class LTSpiceParser {
         valueLabel: displayValue,
         rotation: deg,
         ...(mirrored && { mirrored: true }),
+        // Caption positions the user dragged. LTSpice stores them as WINDOW 0
+        // (reference) and WINDOW 3 (value), relative to the symbol origin; the
+        // offset is the distance from our default spot. The exporter has always
+        // written these — nothing read them back, so dragging a caption changed
+        // the file and then had no effect on reload.
+        ...(sym.windows?.[0] && { labelOffset: offsetFromWindow("label", sym.windows[0]) }),
+        ...(sym.windows?.[3] && { valueOffset: offsetFromWindow("value", sym.windows[3]) }),
         // The generalized source picks its symbol (DC / sine / pulse) from this.
         ...((comp as any).sourceType !== undefined && { sourceType: (comp as any).sourceType }),
         // The digital parts draw themselves from their properties, so the node

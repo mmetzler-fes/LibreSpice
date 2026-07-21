@@ -4,7 +4,7 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
-import { terminalDirection } from "./netTerminalOrientation.js";
+import { terminalDirection, terminalTagSide } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
 import { wireNameTag } from "./wireLabelShape.js";
@@ -49,7 +49,7 @@ function transformFor(rotation: number, mirrored: boolean, cx: number, cy: numbe
   return parts.length ? parts.join(" ") : undefined;
 }
 
-function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: FlowPoint }) {
+function SymbolNode({ node, norm, dir, tagSide }: { node: Node; norm: SymbolNorm; dir?: FlowPoint; tagSide?: 1 | -1 }) {
   const data = node.data as ComponentNodeData;
   const type = data.componentType;
   const rotation = data.rotation ?? 0;
@@ -73,7 +73,7 @@ function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: F
     const isConnector = type === "netconnector";
     const name = data.label || (isConnector ? "PORT" : "NET");
     const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
-    const shape = netLabelShape(portType, dir);
+    const shape = netLabelShape(portType, dir, tagSide);
     const th = 16;
     const tagW = Math.max(20, name.length * 6.8 + 12);
     const off = data.labelOffset ?? { x: 0, y: 0 };
@@ -85,7 +85,6 @@ function SymbolNode({ node, norm, dir }: { node: Node; norm: SymbolNorm; dir?: F
           <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
         )}
         {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
-        <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
         <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill={isConnector ? "#fde9c8" : "#e2e8f0"} stroke="#94a3b8" strokeWidth={1} />
         <text x={rectX + tagW / 2} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor="middle">{name}</text>
       </g>
@@ -357,7 +356,7 @@ export function buildSchematicSvg(
   // Which way each net terminal faces, from the wire attached to its dock — the
   // same rule the editor node applies (see terminalDirection), so the exported
   // sheet is laid out exactly like the one on screen.
-  const termDirs = new Map<string, FlowPoint>();
+  const termDirs = new Map<string, { dir: FlowPoint; side: 1 | -1 }>();
   for (const n of nodes) {
     const t = (n.data as ComponentNodeData).componentType;
     if (t !== "netlabel" && t !== "netconnector") continue;
@@ -387,7 +386,11 @@ export function buildSchematicSvg(
         if (p) farEnds.push(p);
       }
     }
-    termDirs.set(n.id, terminalDirection(dock, farEnds));
+    const dir = terminalDirection(dock, farEnds);
+    const neighbours = nodes
+      .filter((o) => o.id !== n.id)
+      .map((o) => ({ x: o.position.x + NODE_SIZE / 2, y: o.position.y + NODE_SIZE / 2 }));
+    termDirs.set(n.id, { dir, side: terminalTagSide(dock, dir, neighbours) });
   }
 
   const svg = (
@@ -395,7 +398,7 @@ export function buildSchematicSvg(
       <rect x={minX} y={minY} width={width} height={height} fill="#ffffff" />
       {wires}
       {labels}
-      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)} />)}
+      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)?.dir} tagSide={termDirs.get(n.id)?.side} />)}
       {textBoxes.map((t) => <TextBoxShape key={t.id} box={t} />)}
       {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>

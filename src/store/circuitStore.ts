@@ -846,7 +846,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // the circuit was never run they still sit in pendingProbes. Union covers both.
     const sim = useSimulationStore.getState();
     const selectedVariables = [...new Set([...sim.selectedVariables, ...sim.pendingProbes])];
-    return { version: 1, nodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
+    // A terminal's name has no position of its own any more — it sits where the
+    // wiring puts it. Any offset left over from an older snapshot is dropped, so
+    // the same schematic draws the same way however it was opened.
+    const cleanNodes = nodes.map((n) => {
+      const t = (n.data as { componentType?: string }).componentType;
+      if (t !== "netlabel" && t !== "netconnector") return n;
+      const { labelOffset: _drop, ...rest } = n.data as Record<string, unknown>;
+      return { ...n, data: rest };
+    });
+    return { version: 1, nodes: cleanNodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {

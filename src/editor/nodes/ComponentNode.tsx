@@ -24,10 +24,10 @@ import {
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, PX_PER_CM, rotatePoint, handleForOrder, getLocalPins, getNodePins } from "../pinGeometry.js";
+import { NODE_SIZE, GRID, rotatePoint, handleForOrder, getLocalPins, getNodePins } from "../pinGeometry.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { netLabelShape, tagTransform } from "../netLabelShape.js";
-import { terminalDirection } from "../netTerminalOrientation.js";
+import { terminalDirection, terminalTagSide } from "../netTerminalOrientation.js";
 import type { FlowPoint } from "../WireTool.js";
 import { captionLayout, captionSide, CAPTION_LINE_HEIGHT, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "../captionLayout.js";
 import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "../pointerDrag.js";
@@ -557,14 +557,14 @@ function AsyComponentNode({
  * pin at the other end — the waypoint is what the wire's *first segment* aims
  * at, which is the piece that actually leaves the dock.
  */
-function useTerminalDirection(nodeId: string): FlowPoint {
+function useTerminalLayout(nodeId: string): { dir: FlowPoint; side: 1 | -1 } {
   const nodes = useCircuitStore((s) => s.nodes);
   const edges = useCircuitStore((s) => s.edges);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
 
   return useMemo(() => {
     const self = nodes.find((n) => n.id === nodeId);
-    if (!self) return { x: 0, y: -1 };
+    if (!self) return { dir: { x: 0, y: -1 }, side: -1 as const };
     const dock = { x: self.position.x + NODE_SIZE / 2, y: self.position.y + NODE_SIZE / 2 };
 
     const pinAt = (id: string | null | undefined, handle: string | null | undefined) => {
@@ -598,7 +598,14 @@ function useTerminalDirection(nodeId: string): FlowPoint {
         if (end) farEnds.push({ x: end.x, y: end.y });
       }
     }
-    return terminalDirection(dock, farEnds);
+    const dir = terminalDirection(dock, farEnds);
+    // Which side across the wire is free: the centres of everything else on the
+    // sheet are enough to tell — a part or another terminal sitting there is
+    // what the name has to dodge.
+    const neighbours = nodes
+      .filter((n) => n.id !== nodeId)
+      .map((n) => ({ x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 }));
+    return { dir, side: terminalTagSide(dock, dir, neighbours) };
   }, [nodes, edges, nodeId, symbolNorm]);
 }
 
@@ -621,12 +628,11 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
   const name = data.label || (isConnector ? "PORT" : "NET");
   const pal = useTheme();
   const color = selected ? "#2563eb" : pal.netLabelStroke;
-  const dir = useTerminalDirection(nodeId);
+  const { dir, side } = useTerminalLayout(nodeId);
   // A plain net label has no direction, so it always renders the `None` shape.
   const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
-  const shape = netLabelShape(portType, dir);
-  // Tag position mirrors netLabelShape's anchor/baseline (the Handle itself is
-  // the hollow terminal circle, so we only draw the arrow + tag here).
+  const shape = netLabelShape(portType, dir, side);
+  // Tag position mirrors netLabelShape's anchor/baseline.
   const tagBase = { left: shape.tag.x, top: shape.tag.y, transform: tagTransform(shape.tag) };
   return (
     <div
@@ -635,36 +641,43 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
     >
       {/* No tap-to-rotate here, unlike a component: the symbol has one fixed
           orientation, so the gesture would be a silent no-op. */}
-      <Handle type="source" position={Position.Top} id="t" isConnectable={false}
-            isConnectableStart={false}
-            isConnectableEnd={false} style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)" }} />
+      {/* The dock, drawn as nothing: the name tag sits right on it and marks the
+          spot by itself, so a circle only added a second mark for one point. The
+          handle stays as the connection anchor — `opacity` hides it without
+          taking it out of the layout the wiring measures against. */}
+      <Handle
+        type="source" position={Position.Top} id="t"
+        isConnectable={false} isConnectableStart={false} isConnectableEnd={false}
+        style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)", opacity: 0 }}
+      />
       <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", color }}>
         {shape.stem && (
           <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
         )}
         {shape.heads.map((points, i) => <polygon key={i} points={points} fill={color} />)}
       </svg>
-      {/* The name drags free of the docking circle (up to ~1 cm) without moving
-          the dock itself — the label is annotation, the circle is the connection. */}
-      <MovableLabel
-        nodeId={nodeId} kind="label"
-        base={{ left: tagBase.left, top: tagBase.top }}
-        transform={tagBase.transform}
-        offset={data.labelOffset}
-        maxOffset={PX_PER_CM}
-        clampAround={{ x: c, y: c }}
-        color={pal.netTagText}
-        fontSize={11}
+      {/* The name is the terminal's body: fixed at its computed spot, and with
+          it the surface you grab to move the terminal. It used to float free of
+          the dock, but that position was never written to the `.asc` — it
+          survived only in a share link, so the same schematic looked different
+          depending on how it was opened. Nothing is stored now, and the side is
+          chosen from what is around it (see terminalTagSide). */}
+      <div
         style={{
+          position: "absolute",
+          left: tagBase.left, top: tagBase.top, transform: tagBase.transform,
           padding: "1px 6px", borderRadius: 4,
+          fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap",
+          color: pal.netTagText,
           background: isConnector
             ? (selected ? pal.portTagBgSel : pal.portTagBg)
             : (selected ? pal.netTagBgSel : pal.netTagBg),
           border: `1px solid ${selected ? "#2563eb" : pal.netTagBorder}`,
+          userSelect: "none", pointerEvents: "none",
         }}
       >
         {name}
-      </MovableLabel>
+      </div>
     </div>
   );
 }

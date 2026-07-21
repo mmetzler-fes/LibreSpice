@@ -4,7 +4,7 @@ import { pointAtT, projectToPolyline, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { netLabelShape } from "../netLabelShape.js";
-import { terminalDirection } from "../netTerminalOrientation.js";
+import { terminalDirection, terminalTagSide } from "../netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -186,6 +186,29 @@ CASES.push(
     const degenerate = terminalDirection(dock, [{ ...dock }, { x: 20, y: 100 }]);
     if (degenerate.x !== 1 || degenerate.y !== 0) fail("a coincident far end must be skipped, not decide the facing");
   } },
+  { name: "the name takes the free side across the wire", run: (fail) => {
+    // Across the wire there are two sides. The conventional one is above (or
+    // right of a vertical run); the other is taken when something already sits
+    // there, so a name never lands on a part or a neighbouring terminal. Derived
+    // from the surroundings, not stored — the file keeps no layout hints.
+    const dock = { x: 100, y: 100 };
+    const right = { x: 1, y: 0 };
+    if (terminalTagSide(dock, right, []) !== -1) fail("with nothing around, the name did not take the upper side");
+    // A part just above it pushes the name below.
+    if (terminalTagSide(dock, right, [{ x: 100, y: 60 }]) !== 1) fail("a part above did not push the name down");
+    // Something below as well — the upper side is no worse, so convention wins.
+    if (terminalTagSide(dock, right, [{ x: 100, y: 60 }, { x: 100, y: 140 }]) !== -1) {
+      fail("with both sides equally busy the name left its conventional side");
+    }
+    // Far enough away it does not count.
+    if (terminalTagSide(dock, right, [{ x: 100, y: -200 }]) !== -1) fail("a distant part still pushed the name");
+    // On a vertical wire the two sides are left and right, and right is the
+    // conventional one.
+    const down = { x: 0, y: 1 };
+    if (terminalTagSide(dock, down, []) !== 1) fail("on a vertical wire the name did not take the right side");
+    if (terminalTagSide(dock, down, [{ x: 140, y: 100 }]) !== -1) fail("a part to the right did not push the name left");
+  } },
+
   { name: "the name clears the wire whether it ends there or runs through", run: (fail) => {
     // The two jobs are split: the arrow keeps pointing along the wire, because
     // that is what says which way the signal runs; keeping out of the way is the
