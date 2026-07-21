@@ -17,6 +17,7 @@ import { runToolbarTests } from "./toolbar.test.js";
 import { runWireConnectorTests } from "./wireConnector.test.js";
 import { runAscExamplesTests } from "./ascExamples.test.js";
 import { runPwlSourceTests } from "./pwlSource.test.js";
+import { runPulseSourceTests } from "./pulseSource.test.js";
 import { runLogicGateTests } from "./logicGate.test.js";
 import { runDFlipFlopTests } from "./dFlipFlop.test.js";
 import { runDigitalGeometryTests } from "./digitalGeometry.test.js";
@@ -66,6 +67,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Reads every examples/*.asc, saves it to a temp file and re-reads it.
     { name: "ASC examples round-trip", ...(await runAscExamplesTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
+    { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },
     { name: "D flip-flop", ...runDFlipFlopTests() },
     { name: "Digital part geometry", ...runDigitalGeometryTests() },
