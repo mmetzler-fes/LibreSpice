@@ -23,6 +23,12 @@ export interface FlowPoint {
 /** Payload stored on a wire edge. */
 export interface WireData {
   waypoints: FlowPoint[];
+  /**
+   * The waypoints trace an imported drawing, not a route the user chose. Such a
+   * path is dropped as soon as one of the wire's parts is moved, so the wire
+   * re-routes instead of keeping a detour around the part's old position.
+   */
+  autoRoute?: boolean;
   /** Visual start point when the wire taps onto an existing wire (not a pin). */
   sourceTap?: FlowPoint;
   /** Visual end point when the wire taps onto an existing wire (not a pin). */

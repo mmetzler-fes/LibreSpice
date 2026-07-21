@@ -388,7 +388,15 @@ export class LTSpiceParser {
           target: p2.compId,
           targetHandle: p2.handle,
           type: "wire",
-          data: diagonal ? { waypoints, diagonal: true } : { waypoints },
+          // `autoRoute` marks a path that came from the source drawing rather
+          // than from the user. Such a path is worth keeping as long as the
+          // layout is the one the file described — but once a part moves it is
+          // a detour around where that part used to be, so the wire is allowed
+          // to re-route itself straight (see dropImportedRoutes). A wire the
+          // user has hand-routed carries no such flag and is never touched.
+          data: diagonal
+            ? { waypoints, diagonal: true }
+            : { waypoints, ...(waypoints.length > 0 ? { autoRoute: true } : {}) },
         });
       }
     }

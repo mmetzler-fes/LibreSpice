@@ -45,6 +45,7 @@ import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js"
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
 import { netLabelPlacement, type LeadPin } from "./netLabelLead.js";
+import { forgetImportedRoutes } from "./importedRoutes.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -670,6 +671,12 @@ function CanvasInner() {
     [clientToFlow, placeComponent],
   );
 
+  /** Forget the imported path of the wires on a moved part (see importedRoutes). */
+  const dropImportedRoutes = useCallback((movedIds: Set<string>) => {
+    const next = forgetImportedRoutes(useCircuitStore.getState().edges, movedIds);
+    if (next) useCircuitStore.getState().setEdges(next);
+  }, []);
+
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       const removals = changes.filter((c) => c.type === "remove" && "id" in c);
@@ -731,8 +738,19 @@ function CanvasInner() {
       });
 
       setNodes(applyNodeChanges(modifiedChanges, nodes));
+
+      // Once a part actually moves, the imported detours of the wires hanging off
+      // it describe a layout that no longer exists. Drop them so those wires
+      // re-route themselves squarely; every other wire, and anything the user
+      // routed by hand, is left exactly as it is.
+      const moved = new Set(
+        modifiedChanges
+          .filter((c): c is NodeChange & { id: string } => c.type === "position" && "id" in c && !!(c as any).position)
+          .map((c) => c.id),
+      );
+      if (moved.size > 0) dropImportedRoutes(moved);
     },
-    [nodes, setNodes, removeComponent, edges],
+    [nodes, setNodes, removeComponent, edges, dropImportedRoutes],
   );
 
   const onEdgesChange = useCallback(
