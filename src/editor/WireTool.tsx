@@ -7,7 +7,8 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { getNodePins, GRID, PX_PER_CM, type NodePin } from "./pinGeometry.js";
+import { getNodePins, pinOutwardAxis, GRID, PX_PER_CM, type NodePin } from "./pinGeometry.js";
+import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
@@ -98,30 +99,10 @@ function snap(v: number): number {
   return Math.round(v / GRID) * GRID;
 }
 
-/**
- * Expands a list of vertices into an orthogonal (right-angle) vertex list. The
- * lead axis of each corner follows the dominant delta, so a segment can start in
- * any of the four directions depending on cursor movement.
- */
-export function orthoVertices(points: FlowPoint[]): FlowPoint[] {
-  if (points.length === 0) return [];
-  const out: FlowPoint[] = [points[0]];
-  for (let i = 1; i < points.length; i++) {
-    const a = out[out.length - 1];
-    const b = points[i];
-    if (a.x !== b.x && a.y !== b.y) {
-      const corner = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)
-        ? { x: b.x, y: a.y } // horizontal lead
-        : { x: a.x, y: b.y }; // vertical lead
-      out.push(corner);
-    }
-    out.push(b);
-  }
-  return out;
-}
+export { orthoVertices, outwardAxis, type Axis, type RouteHints };
 
-export function orthoPath(points: FlowPoint[]): string {
-  const v = orthoVertices(points);
+export function orthoPath(points: FlowPoint[], hints?: RouteHints): string {
+  const v = orthoVertices(points, hints);
   if (v.length === 0) return "";
   return "M " + v.map((p) => `${p.x} ${p.y}`).join(" L ");
 }
@@ -152,6 +133,12 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
     return pin ? { x: pin.x, y: pin.y } : null;
   };
 
+  const axisAt = (nodeId?: string, handleId?: string | null): Axis | undefined => {
+    if (!nodeId || !handleId) return undefined;
+    const node = nodes.find((n) => n.id === nodeId);
+    return node ? pinOutwardAxis(node, handleId, symbolNorm) : undefined;
+  };
+
   const waypoints = (data?.waypoints as FlowPoint[] | undefined) ?? [];
   // When an endpoint taps an existing wire, draw only to the junction point
   // instead of routing all the way to the (electrical) target port.
@@ -159,7 +146,11 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   const targetTap = data?.targetTap as FlowPoint | undefined;
   const start = sourceTap ?? pinCenter(source, sourceHandleId) ?? { x: sourceX, y: sourceY };
   const end = targetTap ?? pinCenter(target, targetHandleId) ?? { x: targetX, y: targetY };
-  const verts = orthoVertices([start, ...waypoints, end]);
+  // An end that taps a wire is not on a pin, so it contributes no direction.
+  const verts = orthoVertices([start, ...waypoints, end], {
+    startAxis: sourceTap ? undefined : axisAt(source, sourceHandleId),
+    endAxis: targetTap ? undefined : axisAt(target, targetHandleId),
+  });
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
   const showLabel = !!data?.showLabel;

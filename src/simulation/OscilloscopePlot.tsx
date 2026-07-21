@@ -94,6 +94,24 @@ function svgReadoutBox(
 
 const DND_MIME = "application/x-librespice-trace";
 
+/**
+ * Smallest a plot pane may be dragged to, in px.
+ *
+ * One constant for both the drag clamp and the CSS floor. They used to disagree
+ * — the drag stopped at 120 while `min-height` held the pane at 200 — so the
+ * last stretch of a downward drag did nothing at all.
+ *
+ * This is not the pane's *effective* floor: the header, and the axis settings
+ * row while it is open, cannot shrink below their content, so a pane with its
+ * settings expanded bottoms out higher than its neighbours. That is the row
+ * genuinely needing the room, not a limit worth working around.
+ */
+const MIN_PANE_H = 120;
+const MIN_PANE_H_COMPACT = 100;
+
+/** Grab area of the resize edge, in px. Comfortably hittable with a mouse or a pen. */
+const RESIZE_HANDLE_H = 14;
+
 const SI_PREFIXES: { e: number; s: string }[] = [
   { e: 12, s: "T" }, { e: 9, s: "G" }, { e: 6, s: "M" }, { e: 3, s: "k" }, { e: 0, s: "" },
   { e: -3, s: "m" }, { e: -6, s: "µ" }, { e: -9, s: "n" }, { e: -12, s: "p" }, { e: -15, s: "f" },
@@ -1386,6 +1404,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
     });
   };
 
+  const minPaneH = compact ? MIN_PANE_H_COMPACT : MIN_PANE_H;
+
   // Drag the bottom edge to set this panel's height (independent of the others).
   const startResize = (e: React.PointerEvent) => {
     if (!isDragPointer(e)) return;
@@ -1393,7 +1413,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
     e.stopPropagation();
     const startY = e.clientY;
     const startH = panelRef.current?.getBoundingClientRect().height ?? dims.h;
-    trackPointerDrag(e, (ev) => onUpdate({ height: Math.max(120, startH + (ev.clientY - startY)) }));
+    trackPointerDrag(e, (ev) => onUpdate({ height: Math.max(minPaneH, startH + (ev.clientY - startY)) }));
   };
 
   return (
@@ -1401,7 +1421,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
       ref={panelRef}
       style={{
         flex: panel.height ? "0 0 auto" : "1 0 auto",
-        height: panel.height, minHeight: compact ? 150 : 200, display: "flex", flexDirection: "column",
+        height: panel.height, minHeight: minPaneH, display: "flex", flexDirection: "column",
         borderBottom: `1px solid ${pt.border}`,
         outline: dragOver ? "2px dashed #22d3ee" : "none", outlineOffset: -2,
       }}
@@ -1763,12 +1783,21 @@ function PlotPanelView(props: PlotPanelViewProps) {
         </ClampedMenu>
       )}
 
-      {/* Resize handle: drag the bottom edge to set this plot's height */}
+      {/* Resize handle: drag the bottom edge to set this plot's height. The grip
+          lines are decoration — the whole strip is the grab area. */}
       <div
         onPointerDown={startResize}
         title="Drag to resize this plot"
-        style={{ ...DRAG_TOUCH_ACTION, height: 7, flexShrink: 0, cursor: "ns-resize", background: pt.toolbarBg, borderTop: `1px solid ${pt.border}` }}
-      />
+        style={{
+          ...DRAG_TOUCH_ACTION, height: RESIZE_HANDLE_H, flexShrink: 0, cursor: "ns-resize",
+          background: pt.toolbarBg, borderTop: `1px solid ${pt.border}`,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+        }}
+      >
+        {[0, 1, 2].map((i) => (
+          <span key={i} style={{ width: 14, height: 2, borderRadius: 1, background: pt.border }} />
+        ))}
+      </div>
     </div>
   );
 }

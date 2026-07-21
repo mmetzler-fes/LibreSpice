@@ -946,6 +946,14 @@ function wireGroups(wires: Wire[], points: Pt[]): Union {
  * on a pin by hand (see netLabelLead).
  */
 const LEAD = 16;
+/**
+ * Shortest a lead may be shrunk to when the preferred one is blocked: 0.3 cm at
+ * the editor's 96 dpi, rounded up to LTSpice's 4-unit grid. Below this the
+ * connector's tag sits on whatever it connects to — two of them on one point
+ * draw on top of each other. Mirrors netLabelLead.MIN_LEAD; the two coordinate
+ * spaces are 1:1 (see pinGeometry.GRID).
+ */
+const MIN_LEAD = 12;
 
 /**
  * Which way a lead should point to get *out* of the part, or null when there is
@@ -966,6 +974,31 @@ function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
   const dx = p[0] - cx, dy = p[1] - cy;
   if (dx === 0 && dy === 0) return null;
   return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+}
+
+/**
+ * Where a label's lead should end, or null when nothing is free.
+ *
+ * The preferred spot is `LEAD` out along the pin's own axis. If that is taken
+ * the length is varied (never below {@link MIN_LEAD}) and then the other three
+ * directions are tried, so a crowded pin still gets a real stub instead of the
+ * label dropping back onto the terminal.
+ */
+function leadTip(p: Pt, dir: Pt | null, pinPos: PinPos, wires: Wire[], placed: Pt[]): Pt | null {
+  if (!dir) return null;
+  const free = (q: Pt) => !occupied(q, pinPos, wires) && !placed.some((r) => r[0] === q[0] && r[1] === q[1]);
+  const dirs: Pt[] = [dir, [-dir[0], -dir[1]], [dir[1], dir[0]], [-dir[1], -dir[0]]];
+  for (const d of dirs) {
+    for (let len = LEAD; len >= MIN_LEAD; len -= 4) {
+      const q: Pt = [p[0] + d[0] * len, p[1] + d[1] * len];
+      if (free(q)) return q;
+    }
+    for (let len = LEAD + 4; len <= LEAD + 32; len += 4) {
+      const q: Pt = [p[0] + d[0] * len, p[1] + d[1] * len];
+      if (free(q)) return q;
+    }
+  }
+  return null;
 }
 
 /** True when a point already carries a pin or lies anywhere on a wire. */
@@ -1005,6 +1038,8 @@ function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags:
   const uf = wireGroups(wires, allPts);
 
   const out: string[] = [];
+  // Label points already handed out, so two labels never land on one another.
+  const placed: Pt[] = [...flagPts];
   for (const net of netList) {
     const pts: { p: Pt; key: string }[] = [];
     for (const obj of net.objects ?? []) {
@@ -1025,12 +1060,13 @@ function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags:
     // One island means the wires already join every pin on this net.
     if (islands.size < 2) continue;
     for (const { p, key: pinKey } of islands.values()) {
-      const dir = leadDirection(pinKey, pinPos);
-      const tip: Pt | null = dir ? [p[0] + dir[0] * LEAD, p[1] + dir[1] * LEAD] : null;
-      if (tip && !occupied(tip, pinPos, wires)) {
+      const tip = leadTip(p, leadDirection(pinKey, pinPos), pinPos, wires, placed);
+      if (tip) {
         wires.push([p[0], p[1], tip[0], tip[1]]);
+        placed.push(tip);
         out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
       } else {
+        placed.push(p);
         out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
       }
     }

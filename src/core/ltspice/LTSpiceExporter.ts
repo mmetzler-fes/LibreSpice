@@ -5,6 +5,7 @@ import type { PortType } from "@core/components/special/Special.js";
 import {
   CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
+import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -137,22 +138,6 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
   return { value: fallback };
 }
 
-/** Expand a vertex list into an orthogonal (right-angle) path — mirrors WireTool. */
-function orthoVertices(points: Pt[]): Pt[] {
-  if (points.length === 0) return [];
-  const out: Pt[] = [points[0]];
-  for (let i = 1; i < points.length; i++) {
-    const a = out[out.length - 1];
-    const b = points[i];
-    if (a.x !== b.x && a.y !== b.y) {
-      const corner = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
-      out.push(corner);
-    }
-    out.push(b);
-  }
-  return out;
-}
-
 /** Point at parametric position `t` (0..1 of total length) along a polyline —
  *  mirrors WireTool.pointAtT, kept local so `core` needn't import the editor. */
 function dockPoint(verts: Pt[], t: number): Pt {
@@ -181,6 +166,9 @@ export class LTSpiceExporter {
     // Pin coordinates in LTSpice space, keyed by port id `${compId}-${handle}`,
     // so wires and net-label flags attach exactly to the terminals.
     const pinCoord = new Map<string, Pt>();
+    // Which way each pin faces, so a wire leaves the symbol squarely instead of
+    // running along its flank — the same routing the canvas draws.
+    const pinAxis = new Map<string, Axis>();
 
     for (const node of nodes) {
       const data = node.data as {
@@ -229,7 +217,12 @@ export class LTSpiceExporter {
       const subSymbol = data.symbolName || data.subName || data.label;
       const rotated = offsetsForNode(data.componentType, deg, data.pins, isSub ? subSymbol : undefined, mirrored);
       const { x: symX, y: symY } = nodeToSymbol(node.position.x, node.position.y, rotated, centeringFor(data.componentType));
-      for (const p of rotated) pinCoord.set(`${node.id}-${p.handle}`, { x: symX + p.dx, y: symY + p.dy });
+      const pts = rotated.map((p) => ({ x: symX + p.dx, y: symY + p.dy }));
+      rotated.forEach((p, i) => {
+        pinCoord.set(`${node.id}-${p.handle}`, pts[i]);
+        const ax = outwardAxis(pts[i], pts);
+        if (ax) pinAxis.set(`${node.id}-${p.handle}`, ax);
+      });
 
       // Keep the symbol the file was imported with (the IEC/European set, a
       // localized variant, …); only a freshly placed part falls back to the
@@ -278,7 +271,11 @@ export class LTSpiceExporter {
       // A wire imported along a diagonal LTSpice segment keeps its exact path:
       // orthogonalising it would insert a right-angle leg that can overlap a
       // neighbouring net's leg and merge the two on re-import (see LTSpiceParser).
-      const verts = edge.data?.diagonal ? [a, ...wps, b] : orthoVertices([a, ...wps, b]);
+      const hints: RouteHints = {
+        startAxis: edge.data?.sourceTap ? undefined : pinAxis.get(`${edge.source}-${edge.sourceHandle}`),
+        endAxis: edge.data?.targetTap ? undefined : pinAxis.get(`${edge.target}-${edge.targetHandle}`),
+      };
+      const verts = edge.data?.diagonal ? [a, ...wps, b] : orthoVertices([a, ...wps, b], hints);
       for (let i = 0; i < verts.length - 1; i++) {
         const p = verts[i], q = verts[i + 1];
         if (p.x === q.x && p.y === q.y) continue;
@@ -316,7 +313,10 @@ export class LTSpiceExporter {
         const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
         if (!a || !b) continue;
         const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
-        const dock = dockPoint(orthoVertices([a, ...wps, b]), typeof d.labelT === "number" ? d.labelT : 0.5);
+        const dock = dockPoint(orthoVertices([a, ...wps, b], {
+          startAxis: pinAxis.get(`${edge.source}-${edge.sourceHandle}`),
+          endAxis: pinAxis.get(`${edge.target}-${edge.targetHandle}`),
+        }), typeof d.labelT === "number" ? d.labelT : 0.5);
         flagLines.push(`FLAG ${Math.round(dock.x)} ${Math.round(dock.y)} ${name}`);
         labelledNets.add(netId);
       }

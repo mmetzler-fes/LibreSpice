@@ -1,12 +1,18 @@
 Version 4
 SymbolType CELL
+* Operational amplifier, IEC 60617-13 style: a rectangular outline carrying the
+* amplifier qualifying symbol as a small triangle pointing in signal direction.
+* The triangle is a *marking inside* the box, not the outline itself — that is what
+* separates the IEC drawing from the ANSI one, which is the bare triangle (see
+* UniversalOpamp2_ANSI.asy). The inputs are told apart by the - and + beside
+* them, the supplies by the marks next to Ub.
 LINE Normal -31 -31 31 -31
 LINE Normal 31 -31 31 31
 LINE Normal 31 31 -31 31
 LINE Normal -31 31 -31 -31
-LINE Normal -12 -15 -12 15
-LINE Normal -12 -15 13 0
-LINE Normal -12 15 13 0
+LINE Normal -6 -11 -6 11
+LINE Normal -6 -11 10 0
+LINE Normal -6 11 10 0
 LINE Normal -32 16 -31 16
 LINE Normal -32 -16 -31 -16
 LINE Normal 0 -32 0 -31

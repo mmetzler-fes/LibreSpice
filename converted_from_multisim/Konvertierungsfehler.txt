@@ -129,7 +129,7 @@ Mit fehlenden Teilen:  6
   2_1_Tiefgaragensteuerung
         3 = 6, 4 = 7, 5 = 8
   2_1_Tiefgaragensteuerung_Lsg
-        3 = 6, 4 = 7, 5 = 8
+        2 = 3, 2 = 5, 2 = 6, 4 = 7, 2 = 8, 2 = 9
   6_3_3_Universal_Schieberegister
         0 = 23
   6_3_3_Universal_Schieberegister_Lsg

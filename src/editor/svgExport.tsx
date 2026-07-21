@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Node, Edge } from "@xyflow/react";
 import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
-import { NODE_SIZE, GRID, getNodePins } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, getNodePins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
 import { terminalDirection } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
@@ -249,7 +249,7 @@ export function buildSchematicSvg(
     const b = data?.targetTap ?? (e.target && e.targetHandle ? pinMap.get(`${e.target}-${e.targetHandle}`) : undefined);
     if (!a || !b) { wireVerts.push([]); continue; }
     const waypoints = data?.waypoints ?? [];
-    wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint]));
+    wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint], edgeRouteHints(nodes, e, norm)));
   }
 
   // The net names the wires carry. Resolved before the bounding box, since a

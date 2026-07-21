@@ -23,7 +23,7 @@ import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
-import { NODE_SIZE, GRID, GRID_DOTS, snapToGrid, getNodePins } from "./pinGeometry.js";
+import { NODE_SIZE, GRID, GRID_DOTS, snapToGrid, getNodePins, edgeRouteHints } from "./pinGeometry.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
@@ -153,7 +153,7 @@ function CanvasInner() {
         const t = (e.data?.targetTap as FlowPoint | undefined) ?? getPinPos(e.target, e.targetHandle);
         if (!s || !t) continue;
         const wp = (e.data?.waypoints as FlowPoint[] | undefined) ?? [];
-        wires.push({ id: e.id, source: e.source, sourceHandle: e.sourceHandle ?? null, verts: orthoVertices([s, ...wp, t]) });
+        wires.push({ id: e.id, source: e.source, sourceHandle: e.sourceHandle ?? null, verts: orthoVertices([s, ...wp, t], edgeRouteHints(currentNodes, e, symbolNorm)) });
       }
 
       // True when a wire already joins these two pin endpoints (either
@@ -213,7 +213,16 @@ function CanvasInner() {
             nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y,
             ownerCx: n.position.x + NODE_SIZE / 2, ownerCy: n.position.y + NODE_SIZE / 2,
           })));
-        const placed = netLabelPlacement(terminal, pins);
+        // Existing net terminals: not parts to lead away from, but the terminal
+        // must not come to rest on one — two connectors on the same point draw
+        // their tags on top of each other.
+        const others: FlowPoint[] = useCircuitStore.getState().nodes
+          .filter((n) => {
+            const t = (n.data as ComponentNodeData).componentType;
+            return t === "netlabel" || t === "netconnector";
+          })
+          .map((n) => ({ x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 }));
+        const placed = netLabelPlacement(terminal, pins, others);
         terminal = placed.terminal;
         leadPin = placed.pin;
       }
@@ -692,7 +701,7 @@ function CanvasInner() {
                 
                 if (s && t) {
                   const wp = (hostWire.data?.waypoints as FlowPoint[] | undefined) ?? [];
-                  const verts = orthoVertices([s, ...wp, t]);
+                  const verts = orthoVertices([s, ...wp, t], edgeRouteHints(nodes, hostWire, symbolNorm));
                   let bestTap: FlowPoint | null = null;
                   let minD2 = Infinity;
                   for (let i = 0; i < verts.length - 1; i++) {

@@ -2,6 +2,7 @@ import type { Node } from "@xyflow/react";
 import { symbolForType, type SymbolNorm } from "@sym/asyParser.js";
 import { mapSymbol } from "@sym/AsySymbol.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
+import { outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 
 /** Editor node box size in px (also the React Flow node footprint). */
 export const NODE_SIZE = 80;
@@ -207,6 +208,45 @@ export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "defaul
     const [px, py] = rotatePoint(flip(p.px), p.py, c, c, rotation);
     return { ...p, px, py };
   });
+}
+
+/**
+ * The axis a wire should leave this node's pin along, or undefined when the pin
+ * offers no direction (a ground or a net terminal, which is its part's only pin).
+ * Feeds the wire router, so a lead goes out of the symbol instead of running
+ * along its flank.
+ */
+export function pinOutwardAxis(node: Node, handleId: string, norm: SymbolNorm = "default"): Axis | undefined {
+  const data = node.data as ComponentNodeData;
+  if (!data) return undefined;
+  const pins = getLocalPins(data, norm);
+  const pin = pins.find((p) => p.handleId === handleId);
+  if (!pin) return undefined;
+  return outwardAxis({ x: pin.px, y: pin.py }, pins.map((p) => ({ x: p.px, y: p.py })));
+}
+
+/**
+ * Route hints for one wire, from the parts its two ends sit on. The single place
+ * that decides this, so the canvas, the SVG export and the `.asc` exporter all
+ * draw a wire the same way — they route it independently.
+ *
+ * An end that taps an existing wire is not on a pin and contributes nothing.
+ */
+export function edgeRouteHints(
+  nodes: Node[],
+  edge: { source?: string; sourceHandle?: string | null; target?: string; targetHandle?: string | null; data?: unknown },
+  norm: SymbolNorm = "default",
+): RouteHints {
+  const d = edge.data as { sourceTap?: unknown; targetTap?: unknown } | undefined;
+  const axis = (id?: string, handle?: string | null) => {
+    if (!id || !handle) return undefined;
+    const node = nodes.find((n) => n.id === id);
+    return node ? pinOutwardAxis(node, handle, norm) : undefined;
+  };
+  return {
+    startAxis: d?.sourceTap ? undefined : axis(edge.source, edge.sourceHandle),
+    endAxis: d?.targetTap ? undefined : axis(edge.target, edge.targetHandle),
+  };
 }
 
 export interface NodePin {
