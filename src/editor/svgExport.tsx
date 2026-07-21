@@ -375,6 +375,18 @@ export function buildSchematicSvg(
         : (e.source && e.sourceHandle ? pinMap.get(`${e.source}-${e.sourceHandle}`) : undefined);
       if (far) farEnds.push(far);
     }
+    // Tapped onto a wire: our own edge is zero-length at the dock, so the wire we
+    // sit on supplies the direction — same rule as the editor (see ComponentNode).
+    for (const e of edges) {
+      if (e.source !== n.id && e.target !== n.id) continue;
+      const hostId = (e.data as { hostEdgeId?: string } | undefined)?.hostEdgeId;
+      const host = hostId ? edges.find((h) => h.id === hostId) : undefined;
+      if (!host) continue;
+      for (const k of [`${host.source}-${host.sourceHandle}`, `${host.target}-${host.targetHandle}`]) {
+        const p = pinMap.get(k);
+        if (p) farEnds.push(p);
+      }
+    }
     termDirs.set(n.id, terminalDirection(dock, farEnds));
   }
 

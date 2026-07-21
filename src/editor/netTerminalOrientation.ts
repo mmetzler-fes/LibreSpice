@@ -42,9 +42,21 @@ export function axisDirection(from: FlowPoint, to: FlowPoint): FlowPoint | null 
  * whenever the edge order changes.
  */
 export function terminalDirection(dock: FlowPoint, farEnds: FlowPoint[]): FlowPoint {
+  const axes: FlowPoint[] = [];
   for (const end of farEnds) {
-    const wire = axisDirection(dock, end);
-    if (wire) return { x: -wire.x, y: -wire.y };
+    const a = axisDirection(dock, end);
+    if (a) axes.push(a);
   }
-  return { x: 0, y: -1 };
+  if (axes.length === 0) return { x: 0, y: -1 };
+
+  const first = axes[0];
+  // A wire that runs *through* the dock leaves along the same axis in both
+  // directions, so neither side of it is free. Laying the symbol out along that
+  // axis would put the name on top of the wire — and on a through wire that is
+  // exactly where the next parts sit. Step off it at a right angle instead:
+  // above a horizontal wire, to the right of a vertical one.
+  const through = axes.some((a) => a.x === -first.x && a.y === -first.y);
+  if (through) return first.x !== 0 ? { x: 0, y: -1 } : { x: 1, y: 0 };
+
+  return { x: -first.x, y: -first.y };
 }

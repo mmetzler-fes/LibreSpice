@@ -182,6 +182,34 @@ CASES.push(
     const degenerate = terminalDirection(dock, [{ ...dock }, { x: 20, y: 100 }]);
     if (degenerate.x !== 1 || degenerate.y !== 0) fail("a coincident far end must be skipped, not decide the facing");
   } },
+  { name: "a terminal on a through wire steps off it at a right angle", run: (fail) => {
+    // On a wire that continues past the dock, neither side along the wire is
+    // free — and that is where the next parts sit. Laying the name out along the
+    // wire buries it under them, so the symbol goes perpendicular instead.
+    const dock = { x: 100, y: 100 };
+
+    const horizontal = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 20, y: 100 }]);
+    if (horizontal.x !== 0 || horizontal.y !== -1) {
+      fail(`through a horizontal wire faced (${horizontal.x},${horizontal.y}), expected up`);
+    }
+    const vertical = terminalDirection(dock, [{ x: 100, y: 20 }, { x: 100, y: 180 }]);
+    if (vertical.x !== 1 || vertical.y !== 0) {
+      fail(`through a vertical wire faced (${vertical.x},${vertical.y}), expected right`);
+    }
+    // Order must not matter: the same wiring has to give the same facing.
+    const flipped = terminalDirection(dock, [{ x: 20, y: 100 }, { x: 180, y: 100 }]);
+    if (flipped.x !== horizontal.x || flipped.y !== horizontal.y) fail("the facing depended on edge order");
+
+    // A corner is not a through wire — one side stays free, and the old rule
+    // (face away from the first wire) still applies.
+    const corner = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 100, y: 180 }]);
+    if (corner.x !== -1 || corner.y !== 0) {
+      fail(`a corner faced (${corner.x},${corner.y}), expected away from the first wire`);
+    }
+    // Three wires meeting, two of them opposite: still a through wire.
+    const tee = terminalDirection(dock, [{ x: 180, y: 100 }, { x: 100, y: 180 }, { x: 20, y: 100 }]);
+    if (tee.x !== 0 || tee.y !== -1) fail(`a tee faced (${tee.x},${tee.y}), expected up`);
+  } },
 
   { name: "LTSpice's own layout is reproduced (04-4_AstabileKippstufe1)", run: (fail) => {
     // The four connectors in that example are *all* `In`, yet LTSpice draws two

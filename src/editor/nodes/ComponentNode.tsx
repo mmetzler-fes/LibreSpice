@@ -574,6 +574,20 @@ function useTerminalDirection(nodeId: string): FlowPoint {
       const far = atSource ? pinAt(e.target, e.targetHandle) : pinAt(e.source, e.sourceHandle);
       if (far) farEnds.push({ x: far.x, y: far.y });
     }
+
+    // Tapped onto an existing wire: our own edge ends at the tap point, which is
+    // the dock — zero length, so it says nothing about direction. The wire we sit
+    // on does: take *its* two ends, which straddle the dock and so read as a wire
+    // running through it (see terminalDirection).
+    for (const e of edges) {
+      if (e.source !== nodeId && e.target !== nodeId) continue;
+      const hostId = (e.data as { hostEdgeId?: string } | undefined)?.hostEdgeId;
+      const host = hostId ? edges.find((h) => h.id === hostId) : undefined;
+      if (!host) continue;
+      for (const end of [pinAt(host.source, host.sourceHandle), pinAt(host.target, host.targetHandle)]) {
+        if (end) farEnds.push({ x: end.x, y: end.y });
+      }
+    }
     return terminalDirection(dock, farEnds);
   }, [nodes, edges, nodeId, symbolNorm]);
 }
