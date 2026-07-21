@@ -1,6 +1,6 @@
 import { matchResultVariable } from "@core/circuit/probeUtils.js";
 import type { SimulationResult } from "@store/simulationStore.js";
-import { splitUnitAnnotation } from "./units.js";
+import { splitUnitAnnotation, PHASE_FNS } from "./units.js";
 
 /**
  * Arithmetic expressions over probe variables, e.g. `V(punkt1)-V(punkt2)`,
@@ -89,9 +89,6 @@ export function resolveSeries(result: SimulationResult, ref: string): Float64Arr
   const match = matchResultVariable(result, [ref]);
   return match ? result.data[match] ?? null : null;
 }
-
-/** Names that mean "the phase of", in degrees (LTSpice writes `ph()`). */
-const PHASE_FNS = new Set(["ph", "phase"]);
 
 /** A value node compiled to `(sampleIndex) => number`. */
 type Eval = (i: number) => number;

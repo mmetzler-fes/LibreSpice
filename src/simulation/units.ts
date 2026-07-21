@@ -7,7 +7,16 @@
  * dimensionless/unknown, matching how such traces get their own axis.
  */
 
-interface Dim { v: number; a: number }
+/**
+ * Volts and amperes, plus `d` for degrees.
+ *
+ * An angle is not a combination of the other two — `ph(V(out))` is degrees no
+ * matter what is inside it — so it needs its own slot rather than a special
+ * case. Carrying it through the arithmetic is what lets a phase *difference*
+ * (`ph(V(U1))-ph(V(U2))`, the usual way to ask how far two signals are apart)
+ * come out as degrees too.
+ */
+interface Dim { v: number; a: number; d: number }
 
 type Tok =
   | { t: "num" }
@@ -36,12 +45,13 @@ function refDim(ref: string): Dim {
   const s = ref.toLowerCase();
   // `i(...)` and the terminal currents `ic(q1)` / `id(m1)`, plus the raw
   // `@dev[i]` / `@q1[ic]` vectors — all amperes.
-  if (/\[i\w*\]$/.test(s) || /^i[a-z]?\s*\(/.test(s)) return { v: 0, a: 1 };
-  if (/\[p\]$/.test(s)) return { v: 1, a: 1 };
-  return { v: 1, a: 0 }; // node voltages: V(...) or bare node names
+  if (/\[i\w*\]$/.test(s) || /^i[a-z]?\s*\(/.test(s)) return { v: 0, a: 1, d: 0 };
+  if (/\[p\]$/.test(s)) return { v: 1, a: 1, d: 0 };
+  return { v: 1, a: 0, d: 0 }; // node voltages: V(...) or bare node names
 }
 
-const eq = (x: Dim | null, y: Dim | null) => !!x && !!y && x.v === y.v && x.a === y.a;
+const eq = (x: Dim | null, y: Dim | null) =>
+  !!x && !!y && x.v === y.v && x.a === y.a && x.d === y.d;
 
 function compile(toks: Tok[]): Dim | null {
   let pos = 0;
@@ -62,8 +72,25 @@ function compile(toks: Tok[]): Dim | null {
       if (opAt() === ")") pos++;
       return inner;
     }
-    if (t.t === "num") { pos++; return { v: 0, a: 0 }; }
-    if (t.t === "ref") { pos++; return refDim(t.v); }
+    if (t.t === "num") { pos++; return { v: 0, a: 0, d: 0 }; }
+    if (t.t === "ref") {
+      pos++;
+      // `ph(...)` tokenises as the bare name `ph` followed by a parenthesised
+      // group, because the reference pattern refuses nested parens. Skip over
+      // the argument — whatever signal it names, the result is an angle.
+      const next = toks[pos];
+      if (PHASE_FNS.has(t.v.toLowerCase()) && next && next.t === "op" && next.v === "(") {
+        pos++;
+        for (let depth = 1; pos < toks.length && depth > 0; pos++) {
+          const x = toks[pos];
+          if (x.t !== "op") continue;
+          if (x.v === "(") depth++;
+          else if (x.v === ")") depth--;
+        }
+        return { v: 0, a: 0, d: 1 };
+      }
+      return refDim(t.v);
+    }
     pos++;
     return null;
   };
@@ -75,8 +102,8 @@ function compile(toks: Tok[]): Dim | null {
       const right = factor();
       if (!left || !right) { left = null; continue; }
       left = op === "*"
-        ? { v: left.v + right.v, a: left.a + right.a }
-        : { v: left.v - right.v, a: left.a - right.a };
+        ? { v: left.v + right.v, a: left.a + right.a, d: left.d + right.d }
+        : { v: left.v - right.v, a: left.a - right.a, d: left.d - right.d };
     }
     return left;
   };
@@ -94,9 +121,13 @@ function compile(toks: Tok[]): Dim | null {
   return expr();
 }
 
-function label(d: Dim | null): string {
-  if (!d) return "";
-  const { v, a } = d;
+function label(dim: Dim | null): string {
+  if (!dim) return "";
+  const { v, a, d } = dim;
+  // A plain angle. Anything else involving degrees (°², V/°) has no meaningful
+  // axis, so it falls through to "" and gets the dimensionless one.
+  if (d === 1 && v === 0 && a === 0) return "°";
+  if (d !== 0) return "";
   if (v === 0 && a === 0) return "";
   if (v === 1 && a === 0) return "V";
   if (v === 0 && a === 1) return "A";
@@ -120,6 +151,9 @@ export function splitUnitAnnotation(name: string): { body: string; unit: string 
   const m = name.match(/^(.*\S)\s+\[([^\]]+)\]\s*$/);
   return m ? { body: m[1], unit: m[2].trim() } : { body: name, unit: null };
 }
+
+/** Names that mean "the phase of", in degrees (LTSpice writes `ph()`). */
+export const PHASE_FNS = new Set(["ph", "phase"]);
 
 /** Human-readable unit label for a trace (`""` = dimensionless/unknown). */
 export function inferUnit(name: string): string {

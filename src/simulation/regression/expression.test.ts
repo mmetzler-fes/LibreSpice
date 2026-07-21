@@ -123,6 +123,86 @@ const CASES: Case[] = [
       if (exprCheckResult(plain, null) !== plain) fail("an unstepped result must be passed through unchanged");
     },
   },
+  {
+    // A Bode plot needs both curves at once, so the phase has to land on its own
+    // y-axis. Panels split their axes by unit, and the unit is inferred from the
+    // trace name — so `ph(V(out))` reporting "V" put a ±180° swing on the volt
+    // axis, where it squashed the magnitude flat.
+    name: "ph() is an angle, not the unit of its argument",
+    run: (fail) => {
+      if (inferUnit("ph(V(out))") !== "°") fail(`ph(V(out)) unit = "${inferUnit("ph(V(out))")}"`);
+      if (inferUnit("phase(V(out))") !== "°") fail(`phase() unit = "${inferUnit("phase(V(out))")}"`);
+      if (inferUnit("PH(I(R1))") !== "°") fail(`PH(I(R1)) unit = "${inferUnit("PH(I(R1))")}"`);
+      // The magnitude of the same signal keeps its own unit, which is what puts
+      // the two on separate axes of one panel.
+      if (inferUnit("V(out)") !== "V") fail(`V(out) unit = "${inferUnit("V(out)")}"`);
+      // Only a whole-expression call is a phase. A plain probe whose node
+      // happens to start with "ph" must not be mistaken for one.
+      if (inferUnit("V(phase1)") !== "V") fail(`V(phase1) unit = "${inferUnit("V(phase1)")}"`);
+    },
+  },
+  {
+    // "How far apart are U1 and U2?" is a difference of two phases, so the
+    // degrees have to survive the subtraction — otherwise the answer lands back
+    // on the volt axis, which is the whole problem this fixes.
+    name: "a phase difference is still degrees",
+    run: (fail) => {
+      const u = (e: string) => inferUnit(e);
+      if (u("ph(V(U1))-ph(V(U2))") !== "°") fail(`difference unit = "${u("ph(V(U1))-ph(V(U2))")}"`);
+      if (u("ph(V(U1)) - ph(V(U2))") !== "°") fail(`spaced difference = "${u("ph(V(U1)) - ph(V(U2))")}"`);
+      if (u("ph(I(R1))-ph(V(U1))") !== "°") fail(`mixed-argument difference = "${u("ph(I(R1))-ph(V(U1))")}"`);
+      // A phase plus a voltage is not a quantity — it must not claim either axis.
+      if (u("ph(V(U1))+V(U2)") !== "") fail(`phase+voltage = "${u("ph(V(U1))+V(U2)")}"`);
+      // The argument is skipped whole, so what follows still parses: a phase
+      // scaled by a number stays an angle.
+      if (u("2*ph(V(U1))") !== "°") fail(`scaled phase = "${u("2*ph(V(U1))")}"`);
+    },
+  },
+  {
+    name: "a phase difference evaluates to the angle between two signals",
+    run: (fail) => {
+      // U1 at +90°, U2 at +30° → U1 leads U2 by 60°.
+      const res: SimulationResult = {
+        variables: ["frequency", "v(u1)", "v(u2)"],
+        time: new Float64Array([1]),
+        data: { "v(u1)": new Float64Array([1]), "v(u2)": new Float64Array([1]) },
+        complex: {
+          "v(u1)": { re: new Float64Array([0]), im: new Float64Array([1]) },
+          "v(u2)": { re: new Float64Array([Math.cos(Math.PI / 6)]), im: new Float64Array([Math.sin(Math.PI / 6)]) },
+        },
+      };
+      const r = evalExpression(res, "ph(V(U1))-ph(V(U2))");
+      if (r.error) return fail(r.error);
+      if (!r.values || Math.abs(r.values[0] - 60) > 1e-6) fail(`got ${r.values?.[0]} ≠ 60`);
+    },
+  },
+  {
+    name: "ph() returns degrees from the .ac phasors",
+    run: (fail) => {
+      // Three points at 0°, +90° and −45°.
+      const res: SimulationResult = {
+        variables: ["frequency", "v(out)"],
+        time: new Float64Array([1, 2, 3]),
+        data: { "v(out)": new Float64Array([1, 1, Math.SQRT2]) },
+        complex: { "v(out)": { re: new Float64Array([1, 0, 1]), im: new Float64Array([0, 1, -1]) } },
+      };
+      const r = evalExpression(res, "ph(V(out))");
+      if (r.error) return fail(r.error);
+      const got = r.values && Array.from(r.values).map((v) => Math.round(v));
+      if (!got || got.join(",") !== "0,90,-45") fail(`got ${got}`);
+    },
+  },
+  {
+    name: "ph() on a transient result explains itself",
+    run: (fail) => {
+      // No phasors — the message must name the reason rather than claim the
+      // variable is unknown, since the variable is right there.
+      const res = makeResult({ "v(out)": [1, 2, 3] });
+      const r = evalExpression(res, "ph(V(out))");
+      if (!r.error) return fail("expected an error without an .ac result");
+      if (!/\.ac/.test(r.error)) fail(`unhelpful message: ${r.error}`);
+    },
+  },
 ];
 
 /** A stepped result: one run per tag, each with its own v(c) and Ic. */

@@ -716,8 +716,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
               value={exprInput}
               onChange={(e) => { setExprInput(e.target.value); setExprError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") handleAddExpression(); }}
-              placeholder="V(a)-V(b)  ·  {R1}*I(D2) [V]"
-              title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
+              placeholder="V(a)-V(b)  ·  {R1}*I(D2) [V]  ·  ph(V(a))"
+              title="Arithmetik über Messgrößen. {name} = Bauteilwert/.param. ph(V(a)) = Phase in Grad (nur .ac); sie bekommt eine eigene y-Achse. Optionale Einheit am Ende, z. B. [V], erzwingt die geteilte y-Achse."
               style={{
                 flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 10, fontFamily: "monospace",
                 background: pt.inputBg,
@@ -1597,7 +1597,12 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <g clipPath={`url(#osc-clip-${panel.id})`}>
               {traces.map((t) => {
                 const d = seriesMap[t];
-                return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)), xsOf(t))} stroke={colorFor(t)} strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" /> : null;
+                // A Bode phase runs dashed, as LTSpice draws it: magnitude and
+                // phase share the panel on two axes, and the line style says at
+                // a glance which curve belongs to which. Keyed on the unit, so a
+                // phase *difference* is dashed too.
+                const dash = groupOf(t).unit === "°" ? "6 3" : undefined;
+                return d ? <path key={t} d={buildPath(d, mkToSy(groupOf(t)), xsOf(t))} stroke={colorFor(t)} strokeWidth={1.5} strokeDasharray={dash} fill="none" vectorEffect="non-scaling-stroke" /> : null;
               })}
             </g>
             {/* Stamped cursor positions: dashed marker + dot (readout shown as HTML below SVG) */}
