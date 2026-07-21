@@ -151,11 +151,19 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
       }
     }
 
-    // Parse model/subckt files into entries under the `server` scope.
+    // Parse model/subckt files into entries under the `server` scope. Per file,
+    // like the symbols above: without this a single unparsable drop-in would
+    // throw out of the whole load, leaving the library empty — and an empty
+    // library is not a quiet degradation. Every op-amp then fails with "unknown
+    // subckt: level2", which reads as a broken circuit, not a missing file.
     const serverEntries: StoredEntry[] = [];
     for (const text of data.models ?? []) {
-      for (const entry of ModelParser.parse(text).entries) {
-        serverEntries.push({ entry, scope: "server" });
+      try {
+        for (const entry of ModelParser.parse(text).entries) {
+          serverEntries.push({ entry, scope: "server" });
+        }
+      } catch {
+        /* skip a malformed model file without failing the whole load */
       }
     }
     const serverNames = new Set(serverEntries.map((e) => e.entry.name.toLowerCase()));
