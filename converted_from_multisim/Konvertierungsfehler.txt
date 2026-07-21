@@ -3,77 +3,29 @@ Konvertierung Multisim Live (.msjs) -> LTSpice (.asc)
 
 Erzeugt am:            2026-07-20
 Schaltungen gesamt:    108
-Vollstaendig:          84
-Mit fehlenden Teilen:  24
+Vollstaendig:          102
+Mit fehlenden Teilen:  6
 
 1. FEHLENDE BAUTEILE (nach betroffenen Schaltungen)
 ------------------------------------------------------------
 
-   11x  D Flip-Flop
-    8x  Arbitrary Voltage Source
     4x  Digital Hexadecimal 7-Segment Display
-    2x  Arbitrary Current Source
-    2x  T Flip-flop
-    1x  MCR08B
-    1x  MCR8SN
-    1x  MCR716
-    1x  LM317
-    1x  BZB84-B6V2
-    1x  D Latch
     1x  74LS139D
-    1x  Ideal Comparator
-    1x  74LS93N
     1x  Thermal Noise
 
 2. BETROFFENE SCHALTUNGEN
 ------------------------------------------------------------
 
-  11_1_1_Thyristor_als_Gleichstromschalter_1
-        MCR08B
-  11_1_2_Thyristor_als_Gleichstromschalter_2
-        MCR8SN
-  11_2_3_Nullspannungsschalter_mit_Thyristor (1)
-        MCR716
-  1_2_1_Induktion_Energie_der_Spule
-        Arbitrary Current Source
-  1_2_2_L_Zeitkonstante_mit_U
-        Arbitrary Current Source
-  1_5_3_Konstantstromquelle_mit_LM317
-        LM317
-  5_7_2_Spannungsstabilisierung_mit_Z-Diode
-        BZB84-B6V2
-  6_1_4_Taktflankengesteuertes_D_Flipflop
-        D Latch, D Flip-Flop
-  6_1_5_Toggle_Flipflop
-        D Flip-Flop, T Flip-flop
   6_2_1_Asynchroner_Frequenzteiler
-        D Flip-Flop, Digital Hexadecimal 7-Segment Display
+        Digital Hexadecimal 7-Segment Display
   6_2_1_Asynchroner_Frequenzteiler_Lsg
-        D Flip-Flop, Digital Hexadecimal 7-Segment Display
-  6_2_2_Asynchroner_Dezimalzähler
-        T Flip-flop
-  6_3_1_Schieberegister_Prinzip (1)
-        D Flip-Flop, Arbitrary Voltage Source
-  6_3_1_Schieberegister_Prinzip
-        D Flip-Flop, Arbitrary Voltage Source
-  6_3_2_Rechts_Links_Schieberegister
-        D Flip-Flop, Arbitrary Voltage Source
-  6_3_2_Rechts_Links_Schieberegister_Lsg
-        D Flip-Flop, Arbitrary Voltage Source
-  6_3_3_Universal_Schieberegister
-        D Flip-Flop, Arbitrary Voltage Source
-  6_3_3_Universal_Schieberegister_Lsg
-        D Flip-Flop, Arbitrary Voltage Source
+        Digital Hexadecimal 7-Segment Display
   8_1_1_DAC_mit_Kettenleiter
         74LS139D
   8_2_2_Parallel_Wandler_Flash
         Digital Hexadecimal 7-Segment Display
   8_2_3_Dual_Slope_ADC
-        Ideal Comparator, 74LS93N, D Flip-Flop, Digital Hexadecimal 7-Segment Display
-  9_4_1_Wien_Oszillator_1
-        Arbitrary Voltage Source
-  9_4_2_Wien_Oszillator_2
-        Arbitrary Voltage Source
+        Digital Hexadecimal 7-Segment Display
   9_4_3_Wien_Oszillator_Amp_Controled (1)
         Thermal Noise
 
@@ -122,27 +74,27 @@ Mit fehlenden Teilen:  24
   6_1_3_Taktzustandsgesteuertes_D_Flipflop
         Digital Constant (als Spannungsquelle), 2-Input NAND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle), Inverter (ideales Gatter, ohne Laufzeit)
   6_1_4_Taktflankengesteuertes_D_Flipflop
-        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle), Inverter (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit)
+        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle), Inverter (ideales Gatter, ohne Laufzeit), D Latch (ideales Latch, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), D Flip-Flop (ideales Flipflop, ohne Laufzeit)
   6_1_5_Toggle_Flipflop
-        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle)
+        Digital Constant (als Spannungsquelle), Digital Clock (als Spannungsquelle), D Flip-Flop (ideales Flipflop, ohne Laufzeit), T Flip-flop (ideales Flipflop, ohne Laufzeit)
   6_2_1_Asynchroner_Frequenzteiler
-        Digital Clock (als Spannungsquelle)
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle)
   6_2_1_Asynchroner_Frequenzteiler_Lsg
-        Digital Clock (als Spannungsquelle)
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle)
   6_2_2_Asynchroner_Dezimalzähler
-        Digital Clock (als Spannungsquelle), Digital Constant (als Spannungsquelle), 2-Input AND (ideales Gatter, ohne Laufzeit)
+        Digital Clock (als Spannungsquelle), T Flip-flop (ideales Flipflop, ohne Laufzeit), Digital Constant (als Spannungsquelle), 2-Input AND (ideales Gatter, ohne Laufzeit)
   6_3_1_Schieberegister_Prinzip (1)
-        Digital Clock (als Spannungsquelle)
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle)
   6_3_1_Schieberegister_Prinzip
-        Digital Clock (als Spannungsquelle)
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle)
   6_3_2_Rechts_Links_Schieberegister
-        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_2_Rechts_Links_Schieberegister_Lsg
-        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_3_Universal_Schieberegister
-        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   6_3_3_Universal_Schieberegister_Lsg
-        Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
+        D Flip-Flop (ideales Flipflop, ohne Laufzeit), Digital Clock (als Spannungsquelle), 2-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit), Digital Constant (als Spannungsquelle), SPDT
   8_1_1_2_DAC_4_Bit_mit_Kettenleiter
         Voltage Controlled SPST (Steuereingang ctrlp/ctrln entfällt), Digital Constant (als Spannungsquelle), 4-Input AND (ideales Gatter, ohne Laufzeit), Buffer (ideales Gatter, ohne Laufzeit), Inverter (ideales Gatter, ohne Laufzeit)
   8_1_1_DAC_mit_Kettenleiter
@@ -154,7 +106,7 @@ Mit fehlenden Teilen:  24
   8_2_2_Parallel_Wandler_Flash
         Inverter (ideales Gatter, ohne Laufzeit), 4-Input OR (ideales Gatter, ohne Laufzeit), 2-Input AND (ideales Gatter, ohne Laufzeit), 2-Input OR (ideales Gatter, ohne Laufzeit)
   8_2_3_Dual_Slope_ADC
-        2-Input AND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle), Voltage Controlled SPDT (Steuereingang ctrlp/ctrln entfällt), 4-Input AND (ideales Gatter, ohne Laufzeit)
+        2-Input AND (ideales Gatter, ohne Laufzeit), Digital Clock (als Spannungsquelle), Voltage Controlled SPDT (Steuereingang ctrlp/ctrln entfällt), 4-Input AND (ideales Gatter, ohne Laufzeit), D Flip-Flop (ideales Flipflop, ohne Laufzeit)
   Trigger
         2-Input NAND (ideales Gatter, ohne Laufzeit)
 
@@ -180,5 +132,7 @@ Mit fehlenden Teilen:  24
         0 = 23
   8_1_1_DAC_mit_Kettenleiter
         16 = 7
+  8_2_3_Dual_Slope_ADC
+        10 = 12, 15 = 16
   Trigger
         0 = 1, 0 = 3

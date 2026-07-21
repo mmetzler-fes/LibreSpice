@@ -19,6 +19,7 @@ import {
   PulseSourceSymbol,
   PWLSourceSymbol,
   LogicGateSymbol,
+  DFlipFlopSymbol,
   GroundSymbol,
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
@@ -42,6 +43,7 @@ export type ComponentType =
   | "schottky"
   | "opamp"
   | "logicgate"
+  | "dff"
   | "bjt_npn"
   | "bjt_pnp"
   | "mosfet_n"
@@ -73,6 +75,12 @@ export interface ComponentNodeData {
   gateType?: string;
   /** Logic-gate input count; the symbol draws one lead per input. */
   inputs?: number;
+  /** For a D flip-flop: "rising" | "falling" — picks the clock wedge drawn. */
+  edge?: string;
+  /** For a D flip-flop: "high" | "low" — bubbles the Set/Reset pins when low. */
+  asyncPolarity?: string;
+  /** For a D flip-flop: "dff" | "tff" | "dlatch" — picks the data/clock pin names. */
+  kind?: string;
   /** Net-connector direction (LTSpice `IOPIN`): "None" | "In" | "Out" | "BiDir". */
   portType?: PortType;
   hasProbe?: boolean;
@@ -205,6 +213,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   pulsesource: PulseSourceSymbol,
   ground: GroundSymbol,
   logicgate: GroundSymbol, // unused: bound with its gate props at the call site
+  dff: GroundSymbol, // unused: bound with its flip-flop props at the call site
   netlabel: GroundSymbol, // unused: net-label nodes render their own tag
   netconnector: GroundSymbol, // unused: net-connector nodes render their own symbol
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
@@ -707,10 +716,13 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   if (asySym) {
     return <AsyComponentNode sym={asySym} data={nodeData} nodeId={id} selected={selected} />;
   }
-  // The logic gate is the one symbol whose drawing depends on its properties
-  // (mark and lead count), so it is bound here rather than looked up bare.
+  // The digital parts are the symbols whose drawing depends on their properties
+  // (gate mark and lead count; clock edge and Set/Reset polarity), so they are
+  // bound with those props here rather than looked up bare.
   const SymbolComponent =
-    nodeData.componentType === "logicgate"
+    nodeData.componentType === "dff"
+      ? () => <DFlipFlopSymbol edge={nodeData.edge} asyncPolarity={nodeData.asyncPolarity} kind={nodeData.kind} />
+      : nodeData.componentType === "logicgate"
       ? () => <LogicGateSymbol gate={nodeData.gateType} inputs={nodeData.inputs} />
       : nodeData.componentType === "vsource"
         ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol

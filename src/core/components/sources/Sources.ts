@@ -56,6 +56,13 @@ export class VoltageSource extends Source {
   sOffset = 0; sAmpl = 1; sFreq = 1000; sTd = 0; sTheta = 0; sPhi = 0; sNcycles = 0;
   /** PWL breakpoints as `time value` pairs, e.g. `0 0 10m 5 20m 5 25m 0`. */
   pwlPoints = DEFAULT_PWL_V;
+  /**
+   * Replay the PWL breakpoints forever instead of holding the last value.
+   * Emitted as ngspice's `r=0` (repeat from t = 0), which is a flag rather than
+   * a breakpoint — hence its own field, so re-loading the points from a
+   * measurement file cannot silently drop it.
+   */
+  pwlRepeat = false;
   // Parasitics (shared by all source types)
   seriesR = 0; parallelC = 0; showParasitics: "yes" | "no" = "no";
   /**
@@ -88,7 +95,7 @@ export class VoltageSource extends Source {
       case "Pulse":
         return `PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
       case "PWL":
-        return `PWL(${normalizeMicro(this.pwlPoints.trim())})`;
+        return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
       default:
         return `DC ${this.dcValue}${this.acAmplitude ? ` AC ${this.acAmplitude}` : ""}`;
     }
@@ -139,6 +146,7 @@ export class VoltageSource extends Source {
     } else if (this.sourceType === "PWL") {
       props.push(
         { key: "pwlPoints", label: "Points (t v t v …)", value: this.pwlPoints, type: "string" },
+        { key: "pwlRepeat", label: "Repeat", value: this.pwlRepeat ? "yes" : "no", type: "select", options: ["no", "yes"] },
       );
     } else {
       props.push(
@@ -182,6 +190,7 @@ export class VoltageSource extends Source {
       case "sPhi": this.sPhi = num; break;
       case "sNcycles": this.sNcycles = num; break;
       case "pwlPoints": this.pwlPoints = String(value); break;
+      case "pwlRepeat": this.pwlRepeat = String(value) === "yes"; break;
       case "seriesR": this.seriesR = num; break;
       case "parallelC": this.parallelC = num; break;
       case "showParasitics": this.showParasitics = value === "yes" ? "yes" : "no"; break;
@@ -195,7 +204,7 @@ export class VoltageSource extends Source {
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
-      pwlPoints: this.pwlPoints,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat ? "yes" : "no",
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
@@ -208,7 +217,7 @@ export class VoltageSource extends Source {
       sourceType: this.sourceType, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
-      pwlPoints: this.pwlPoints,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });
@@ -222,6 +231,8 @@ export class CurrentSource extends Source {
   sOffset = 0; sAmpl = 1e-3; sFreq = 50; sTd = 0; sTheta = 0; sPhi = 0;
   /** PWL breakpoints as `time value` pairs, e.g. `0 0 5m 10m 15m 10m 20m 0`. */
   pwlPoints = DEFAULT_PWL_I;
+  /** Replay the breakpoints forever; see VoltageSource.pwlRepeat. */
+  pwlRepeat = false;
   /** Verbatim SPICE spec (e.g. an imported `SIN(0 1.414 50)`), see VoltageSource.rawSpec. */
   rawSpec = "";
 
@@ -236,7 +247,7 @@ export class CurrentSource extends Source {
       return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
     }
     if (this.sourceType === "PWL") {
-      return `PWL(${normalizeMicro(this.pwlPoints.trim())})`;
+      return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
     }
     return `DC ${this.dcValue} AC ${this.acAmplitude}`;
   }
@@ -266,6 +277,7 @@ export class CurrentSource extends Source {
     } else if (this.sourceType === "PWL") {
       props.push(
         { key: "pwlPoints", label: "Points (t i t i …)", value: this.pwlPoints, type: "string" },
+        { key: "pwlRepeat", label: "Repeat", value: this.pwlRepeat ? "yes" : "no", type: "select", options: ["no", "yes"] },
       );
     } else {
       props.push(
@@ -294,6 +306,7 @@ export class CurrentSource extends Source {
       case "sTheta": this.sTheta = num; break;
       case "sPhi": this.sPhi = num; break;
       case "pwlPoints": this.pwlPoints = String(value); break;
+      case "pwlRepeat": this.pwlRepeat = String(value) === "yes"; break;
     }
   }
 
@@ -304,7 +317,7 @@ export class CurrentSource extends Source {
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
-      pwlPoints: this.pwlPoints,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat ? "yes" : "no",
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
     };
@@ -316,7 +329,7 @@ export class CurrentSource extends Source {
       acAmplitude: this.acAmplitude, sourceType: this.sourceType,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
-      pwlPoints: this.pwlPoints,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });
     return i;

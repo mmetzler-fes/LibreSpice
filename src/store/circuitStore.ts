@@ -216,10 +216,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // otherwise changing the gate or its input count redraws nothing.
     const gateType = (component as { gateType?: string }).gateType;
     const inputs = (component as { inputs?: number }).inputs;
+    // Same for the flip-flop: the clock wedge and the Set/Reset bubbles are
+    // drawn from these two.
+    const edge = (component as { edge?: string }).edge;
+    const asyncPolarity = (component as { asyncPolarity?: string }).asyncPolarity;
+    const kind = (component as { kind?: string }).kind;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }), ...(gateType !== undefined && { gateType }), ...(inputs !== undefined && { inputs }) } }
+          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }), ...(gateType !== undefined && { gateType }), ...(inputs !== undefined && { inputs }), ...(edge !== undefined && { edge }), ...(asyncPolarity !== undefined && { asyncPolarity }), ...(kind !== undefined && { kind }) } }
           : n,
       ),
       propertyVersion: state.propertyVersion + 1,

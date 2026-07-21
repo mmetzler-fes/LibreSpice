@@ -1,0 +1,32 @@
+* LibreSpice — generischer Thyristor (SCR)
+*
+* Die klassische Zweitransistor-Ersatzschaltung: ein PNP und ein NPN ueber
+* Kreuz gekoppelt. Ein Gatestrom schaltet den NPN durch, dessen Kollektorstrom
+* den PNP treibt, der wiederum die NPN-Basis speist — die Mitkopplung haelt
+* sich danach selbst, auch wenn das Gate wieder losgelassen wird. Der Thyristor
+* sperrt erst wieder, wenn der Anodenstrom unter den Haltestrom faellt.
+*
+* RGK ueberbrueckt die NPN-Basis-Emitter-Strecke und legt damit fest, wieviel
+* Gatestrom zum Zuenden noetig ist; RF ist der Sperrstrompfad.
+*
+* Ein generisches Modell, kein Typ: die MCR-Thyristoren aus den Multisim-
+* Schaltungen sind alle darauf abgebildet. Zuendstrom, Haltestrom und
+* Sperrspannung entsprechen daher keinem bestimmten Datenblatt.
+*
+* Anschlussreihenfolge: A G K
+
+* Hinweis zur Vorlage: dort hing die Mitkopplung an einem internen Knoten "6",
+* waehrend der Anschluss G im Subcircuit gar nicht vorkam — das Gate war also
+* unbeschaltet und der Thyristor liess sich nicht zuenden (gegen die Engine
+* nachgestellt: Gate bekommt Spannung, die Laststrecke bleibt hochohmig). In
+* der Zweitransistor-Ersatzschaltung *ist* dieser Knoten die NPN-Basis, also
+* das Gate; hier steht deshalb ueberall G statt 6.
+
+.SUBCKT SCR A G K
+QP G 4 A POUT OFF
+QN 4 G K NOUT OFF
+RF G 4 10MEG
+RGK G K 1k
+.model POUT PNP(BF=1 CJE=1n)
+.model NOUT NPN(BF=100 RC=0.1 CJE=1n)
+.ENDS SCR

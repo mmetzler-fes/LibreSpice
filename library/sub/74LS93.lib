@@ -1,0 +1,69 @@
+* LibreSpice — 74LS93, 4-Bit-Ripplezaehler (Teiler 2 und Teiler 8)
+*
+* Aufgebaut aus vier Zaehl-Flipflops und einem NAND, wie im Datenblatt-
+* Blockbild: FF A haengt allein an CKA (Teiler 2), FF B..D bilden die Kette an
+* CKB (Teiler 8). Zum durchgaengigen 4-Bit-Zaehler wird QA extern auf CKB
+* gelegt — genau wie beim echten Baustein.
+*
+* Die Flipflops sind dieselben Verhaltenszellen wie das LibreSpice-Flipflop:
+* ein Kondensator als Speicher, getrieben von einer B-Stromquelle, die sich wie
+* ein Widerstand gegen den Zielpegel verhaelt solange die Zelle transparent ist
+* und sonst Leerlauf ist. Master und Slave sind auf gegenteilige Taktpegel
+* gattert, daraus entsteht die Flankensteuerung. Jeder Speicherknoten braucht
+* seinen Ableitwiderstand, sonst weist ngspice den Knoten mangels
+* Gleichstrompfad ab, bevor der Transient ueberhaupt startet.
+*
+* Getriggert wird auf die *fallende* Flanke, wie beim 74LS93.
+*
+* Der Reset: R01 und R02 gehen auf ein NAND, dessen Ausgang MR die Zellen
+* asynchron auf 0 zwingt. Beide Eingaenge high => alle Ausgaenge 0.
+*
+* Ideal: keine Laufzeit, kein Setup/Hold, kein Fan-out. Fuer die Zaehl- und
+* Frequenzteileruebungen ist das die brauchbare Abstraktion; eine Schaltung,
+* die auf die Durchlaufzeit der Ripple-Kette baut, verhaelt sich nicht wie der
+* echte Baustein.
+*
+* Anschlussreihenfolge: CKA CKB R01 R02 QA QB QC QD
+
+.SUBCKT 74LS93 CKA CKB R01 R02 QA QB QC QD
+
+* --- Reset-NAND: MR wird low, sobald beide R0-Eingaenge high sind ----------
+BMR MR 0 V = ((v(R01)>2.5) && (v(R02)>2.5)) ? 0 : 5
+
+* --- FF A: haengt allein an CKA -------------------------------------------
+BAM AM 0 I = ((v(MR)<2.5) || (v(CKA)>2.5)) ? (v(AM) - ((v(MR)<2.5) ? 0 : ((v(AS)>2.5) ? 0 : 5)))/1 : 0
+CAM AM 0 1n
+RAM AM 0 1t
+BAS AS 0 I = ((v(MR)<2.5) || (v(CKA)<2.5)) ? (v(AS) - ((v(MR)<2.5) ? 0 : ((v(AM)>2.5) ? 5 : 0)))/1 : 0
+CAS AS 0 1n
+RAS AS 0 1t
+BAQ QA 0 V = (v(AS)>2.5) ? 5 : 0
+
+* --- FF B: erste Stufe der Teiler-8-Kette, an CKB -------------------------
+BBM BM 0 I = ((v(MR)<2.5) || (v(CKB)>2.5)) ? (v(BM) - ((v(MR)<2.5) ? 0 : ((v(BS)>2.5) ? 0 : 5)))/1 : 0
+CBM BM 0 1n
+RBM BM 0 1t
+BBS BS 0 I = ((v(MR)<2.5) || (v(CKB)<2.5)) ? (v(BS) - ((v(MR)<2.5) ? 0 : ((v(BM)>2.5) ? 5 : 0)))/1 : 0
+CBS BS 0 1n
+RBS BS 0 1t
+BBQ QB 0 V = (v(BS)>2.5) ? 5 : 0
+
+* --- FF C: getaktet von QB ------------------------------------------------
+BCM CM 0 I = ((v(MR)<2.5) || (v(QB)>2.5)) ? (v(CM) - ((v(MR)<2.5) ? 0 : ((v(CS)>2.5) ? 0 : 5)))/1 : 0
+CCM CM 0 1n
+RCM CM 0 1t
+BCS CS 0 I = ((v(MR)<2.5) || (v(QB)<2.5)) ? (v(CS) - ((v(MR)<2.5) ? 0 : ((v(CM)>2.5) ? 5 : 0)))/1 : 0
+CCS CS 0 1n
+RCS CS 0 1t
+BCQ QC 0 V = (v(CS)>2.5) ? 5 : 0
+
+* --- FF D: getaktet von QC ------------------------------------------------
+BDM DM 0 I = ((v(MR)<2.5) || (v(QC)>2.5)) ? (v(DM) - ((v(MR)<2.5) ? 0 : ((v(DS)>2.5) ? 0 : 5)))/1 : 0
+CDM DM 0 1n
+RDM DM 0 1t
+BDS DS 0 I = ((v(MR)<2.5) || (v(QC)<2.5)) ? (v(DS) - ((v(MR)<2.5) ? 0 : ((v(DM)>2.5) ? 5 : 0)))/1 : 0
+CDS DS 0 1n
+RDS DS 0 1t
+BDQ QD 0 V = (v(DS)>2.5) ? 5 : 0
+
+.ENDS 74LS93

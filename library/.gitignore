@@ -10,4 +10,14 @@
 # --- curated defaults (tracked) ---
 !/sub/UniversalOpAmp2.lib
 !/sub/Discretes.lib
+# The LM317 and its symbol: the converted Multisim schematics reference both by
+# name, so they have to ship or those tracked .asc files are incomplete.
+!/sub/LM317.lib
+!/sym/Ureg.asy
+# The 74LS93 counter, likewise referenced by name from a converted schematic.
+!/sub/74LS93.lib
+!/sym/74LS93.asy
+# The generic thyristor, same story.
+!/sub/Thyristor.lib
+!/sym/SCR.asy
 !/sym/OpAmps/

@@ -152,6 +152,55 @@ export const LogicGateSymbol = ({ gate = "and", inputs = 2 }: { gate?: string; i
 };
 
 /**
+ * D flip-flop, drawn in the IEC style: a plain box with the pins named inside
+ * and a wedge marking the clock. The wedge points into the box on a rising-edge
+ * part and carries an inversion bubble on a falling-edge one, which is the only
+ * visual difference between the two.
+ */
+export const DFlipFlopSymbol = ({ edge = "rising", asyncPolarity = "high", kind = "dff" }: { edge?: string; asyncPolarity?: string; kind?: string }) => {
+  const latch = kind === "dlatch";
+  const falling = edge === "falling";
+  const asyncLow = asyncPolarity === "low";
+  const pin = { fontSize: 8, fontFamily: "sans-serif", fill: "currentColor", stroke: "none" } as const;
+  return (
+    <g>
+      <rect x="-20" y="-40" width="40" height="80" fill="none" stroke="currentColor" strokeWidth="1.5" />
+
+      {/* Left: D above, clock below. */}
+      <line x1="-32" y1="-24" x2="-20" y2="-24" stroke="currentColor" strokeWidth="1.5" />
+      <text x="-17" y="-24" textAnchor="start" dominantBaseline="central" {...pin}>{kind === "tff" ? "T" : "D"}</text>
+      <line x1="-32" y1="24" x2="-20" y2="24" stroke="currentColor" strokeWidth="1.5" />
+      {/* A latch is level-sensitive, so it gets a named EN pin; the flip-flops
+          get the clock wedge, bubbled when they trigger on the falling edge. */}
+      {latch ? (
+        <text x="-17" y="24" textAnchor="start" dominantBaseline="central" {...pin}>EN</text>
+      ) : (
+        <>
+          {falling && <circle cx="-24" cy="24" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+          <polyline points="-20,19 -13,24 -20,29" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </>
+      )}
+
+      {/* Right: Q and its complement, the bar drawn rather than typed so it
+          lines up with the glyph at any font size. */}
+      <line x1="20" y1="-24" x2="32" y2="-24" stroke="currentColor" strokeWidth="1.5" />
+      <text x="17" y="-24" textAnchor="end" dominantBaseline="central" {...pin}>Q</text>
+      <line x1="20" y1="24" x2="32" y2="24" stroke="currentColor" strokeWidth="1.5" />
+      <text x="17" y="24" textAnchor="end" dominantBaseline="central" {...pin}>Q</text>
+      <line x1="10" y1="17" x2="17" y2="17" stroke="currentColor" strokeWidth="1" />
+
+      {/* Top and bottom: the asynchronous pins, bubbled when they are active low. */}
+      <line x1="0" y1="-48" x2="0" y2="-40" stroke="currentColor" strokeWidth="1.5" />
+      {asyncLow && <circle cx="0" cy="-43.5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      <text x="0" y="-33" textAnchor="middle" dominantBaseline="central" {...pin}>S</text>
+      <line x1="0" y1="40" x2="0" y2="48" stroke="currentColor" strokeWidth="1.5" />
+      {asyncLow && <circle cx="0" cy="43.5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      <text x="0" y="33" textAnchor="middle" dominantBaseline="central" {...pin}>R</text>
+    </g>
+  );
+};
+
+/**
  * Piecewise-linear source. Drawn as a ramp-hold-ramp trace so it reads as
  * sloped segments at a glance, rather than the square edges of the pulse
  * source it sits next to in the type selector.

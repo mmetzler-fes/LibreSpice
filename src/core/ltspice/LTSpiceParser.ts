@@ -475,6 +475,18 @@ export class LTSpiceParser {
       if (lsAttrs.vhigh) c.vHigh = Number(lsAttrs.vhigh);
       c.rebuildPorts?.();
     }
+
+    // A D flip-flop's symbol says nothing about which edge it triggers on or
+    // whether SET/RESET are active low, so those come back from our attribute.
+    if (cType === "dff") {
+      // Kind first: it renames the data and clock pins, and the `pins=` list
+      // read further up has to agree with what the component ends up with.
+      if (lsAttrs.kind) { c.kind = lsAttrs.kind; c.rebuildPorts?.(); }
+      if (lsAttrs.edge) c.edge = lsAttrs.edge;
+      if (lsAttrs.async) c.asyncPolarity = lsAttrs.async;
+      if (lsAttrs.vth) c.threshold = Number(lsAttrs.vth);
+      if (lsAttrs.vhigh) c.vHigh = Number(lsAttrs.vhigh);
+    }
     if (cType === "vsource" || cType === "isource") {
       // Generalized source: waveform kind + every field of its spec, so a phase,
       // delay or damping factor set in LTSpice (or by us on the last save) is
@@ -485,7 +497,13 @@ export class LTSpiceParser {
       const pwl = valueStr.match(/^\s*pwl\s*\(([^)]*)\)/i);
       if (pwl) {
         c.sourceType = "PWL";
-        c.pwlPoints = pwl[1].trim();
+        // `r=<t>` is ngspice's repeat flag, not a breakpoint. Split it off, or
+        // it would sit in the points text and be read as a time/value pair —
+        // and the next load from a measurement file would drop it silently.
+        const body = pwl[1].trim();
+        const rep = body.match(/\s*\br\s*=\s*\S+\s*$/i);
+        c.pwlRepeat = !!rep;
+        c.pwlPoints = rep ? body.slice(0, rep.index).trim() : body;
       }
 
       const wave = valueStr.match(/^\s*(sine?|pulse)\s*\(([^)]*)\)/i);
@@ -587,6 +605,12 @@ export class LTSpiceParser {
         ...(mirrored && { mirrored: true }),
         // The generalized source picks its symbol (DC / sine / pulse) from this.
         ...((comp as any).sourceType !== undefined && { sourceType: (comp as any).sourceType }),
+        // The digital parts draw themselves from their properties, so the node
+        // needs them at load time too — without this a loaded XOR came back
+        // drawn as an AND, and a falling-edge flip-flop with a rising-edge
+        // wedge, until some unrelated property edit refreshed the node.
+        ...((comp as any).gateType !== undefined && { gateType: (comp as any).gateType, inputs: (comp as any).inputs }),
+        ...((comp as any).edge !== undefined && { edge: (comp as any).edge, asyncPolarity: (comp as any).asyncPolarity, kind: (comp as any).kind }),
         // Library part: its handles, its `.asy` symbol and the subcircuit name.
         ...(cType === "subcircuit" && { pins: subPins ?? [], symbolName: symBase, subName: valueStr || symBase }),
         // Remember the symbol the file actually used (e.g. `Misc\EuropeanResistor`

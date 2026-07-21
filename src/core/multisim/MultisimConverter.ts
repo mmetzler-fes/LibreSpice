@@ -52,6 +52,12 @@ interface PartType {
   /** Multisim connection names, in the LTSpice symbol's pin order. */
   pins: (string | null)[];
   value: (p: Params) => string;
+  /**
+   * Extra `SYMATTR` lines, verbatim. Library parts need `Prefix`/`SpiceModel`
+   * rather than a `Value`, because they are a `.subckt` call rather than a
+   * device with a magnitude.
+   */
+  attrs?: string[];
 }
 
 interface SwitchSpec {
@@ -128,6 +134,8 @@ const TYPES: Record<string, PartType> = {
   "Clock Voltage": { sym: "voltage", prefix: "V", pins: ["1", "2"], value: pulse },
   "Step Voltage": { sym: "voltage", prefix: "V", pins: ["1", "2"], value: pulse },
   "Triangular Voltage": { sym: "voltage", prefix: "V", pins: ["1", "2"], value: pulse },
+  "Arbitrary Voltage Source": { sym: "voltage", prefix: "V", pins: ["1", "2"], value: pwl },
+  "Arbitrary Current Source": { sym: "current", prefix: "I", pins: ["1", "2"], value: pwl },
 
   // A lamp is a plain resistor to SPICE. Multisim rates it by voltage and power
   // rather than resistance, so derive R = U²/P — the hot-filament value, which
@@ -148,6 +156,48 @@ const TYPES: Record<string, PartType> = {
   // Both map onto UniversalOpAmp2, whose pin order is In+ In- V+ V- OUT.
   "3 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", null, null, "OUT"], value: () => "UniversalOpAmp2" },
   "5 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "V+", "V-", "OUT"], value: () => "UniversalOpAmp2" },
+  // The LM317 is a library part, not a primitive: the `Ureg` symbol plus the
+  // `LM317/TI` subcircuit from library/sub/LM317.lib, which the netlist
+  // generator pulls in because the schematic references it by name. Pin order
+  // follows Ureg.asy's SpiceOrder — in, adj, out.
+  LM317: {
+    sym: "Ureg", prefix: "X", forcePrefix: "X", pins: ["IN", "ADJ", "OUT"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel LM317/TI"],
+  },
+
+  // The three MCR thyristors all map onto one generic SCR (library/sub/
+  // Thyristor.lib): the classic two-transistor equivalent, which latches on a
+  // gate pulse and drops out when the anode current does. It is a generic part,
+  // not a type — trigger current, holding current and blocking voltage match no
+  // particular datasheet.
+  ...Object.fromEntries(["MCR08B", "MCR8SN", "MCR716"].map((n) => [n, {
+    sym: "SCR", prefix: "X", forcePrefix: "X", pins: ["A", "G", "K"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel SCR"],
+  }])),
+
+  // The BZB84 is a dual Zener in one package, but Multisim places one *section*
+  // at a time — a plain two-terminal Zener. The second section's cathode is
+  // spelled "2K", so both names map onto the same pin.
+  "BZB84-B6V2": { sym: "zener", prefix: "D", pins: ["A", "K"], value: () => "BZB84B6V2" },
+
+  // The 74LS93 ripple counter, as a library part: four counting flip-flops and
+  // the reset NAND, in library/sub/74LS93.lib. Multisim's VCC and Ground pins
+  // have no counterpart — the behavioural cells carry their own fixed logic
+  // levels — so they are dropped like the 3-terminal op-amp's supplies.
+  "74LS93N": {
+    sym: "74LS93", prefix: "U", forcePrefix: "X",
+    pins: ["INA", "INB", "R01", "R02", "QA", "QB", "QC", "QD"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel 74LS93"],
+  },
+
+  // Multisim's ideal comparator is an op-amp with no supply pins and a defined
+  // output swing (Output_level, Rise_fall_time). Mapped onto the generic op-amp
+  // it keeps the comparison but not the output levels: the converted stage
+  // swings to whatever its supply rails allow rather than to Output_level, and
+  // the specified edge time is lost. Close enough for a threshold decision,
+  // which is what these circuits use it for.
+  "Ideal Comparator": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", null, null, "OUT"], value: () => "UniversalOpAmp2" },
+
   // The INA333 is an instrumentation amplifier, not an op-amp: its gain is set
   // by an external resistor across RG1/RG2 and its output is referred to REF.
   // Mapped onto the generic op-amp those three pins have no counterpart, so the
@@ -191,6 +241,15 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   pnp: [[64, 0], [0, 48], [64, 96]],
   njf: [[64, 0], [0, 48], [64, 96]],
   UniversalOpAmp2: [[-32, 16], [-32, -16], [0, -32], [0, 32], [32, 0]],
+  // library/sym/Ureg.asy, in SpiceOrder: in, adj, out.
+  Ureg: [[-48, -16], [0, 32], [48, -16]],
+  // library/sym/SCR.asy, in SpiceOrder: A, G, K.
+  SCR: [[0, -64], [48, 40], [0, 64]],
+  // library/sym/74LS93.asy, in SpiceOrder: CKA CKB R01 R02 QA QB QC QD.
+  "74LS93": [[-48, -48], [-48, -16], [-48, 16], [-48, 48], [48, -48], [48, -16], [48, 16], [48, 48]],
+  // D, CLK, SET, RESET, Q, ~Q — the same numbers as ltspiceGeometry's `dff`
+  // entry, which is what the editor places the pins on.
+  "Digital\\dflop": [[-32, -24], [-32, 24], [0, -48], [0, 48], [32, -24], [32, 24]],
 };
 
 // ---------------------------------------------------------------------------
@@ -260,6 +319,50 @@ function lampResistance(p: Params): string {
 }
 
 /** Pulse/clock/step/triangle sources all map onto SPICE PULSE(). */
+/**
+ * How far apart two PWL breakpoints are pushed when Multisim gave them the same
+ * timestamp. A nanosecond is far below anything these schematics resolve (their
+ * waveforms run in tens of milliseconds and up) but is a real, finite edge.
+ */
+const PWL_EDGE = 1e-9;
+
+/**
+ * The arbitrary sources are Multisim's name for a PWL source: the parameter is
+ * already a list of `time value` pairs, just one pair per line. `Repeat` is a
+ * separate flag ("pwlrepeat" = replay forever), which becomes ngspice's `r=0`.
+ *
+ * The pairs go through `si` for the micro sign but are otherwise passed
+ * through, so SI suffixes survive exactly as they do for a hand-typed PWL.
+ */
+function pwl(p: Params): string {
+  const tok = si(p["Time/Voltage pairs"] ?? p["Time/Current pairs"]).split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let prev = -Infinity;
+  for (let i = 0; i + 1 < tok.length; i += 2) {
+    const t = Number(tok[i]);
+    // Multisim draws a vertical edge as two points sharing one timestamp.
+    // ngspice warns about "non-increasing PWL time points" and its reading of a
+    // duplicate is not defined, so the second point is nudged into a real (very
+    // fast) edge. Only plain decimals are touched: anything with an SI suffix or
+    // a `{param}` is passed through, since it cannot be compared numerically.
+    if (Number.isFinite(t) && String(t) === tok[i] && t <= prev) {
+      // Rounded, or binary floating point leaves "0.32000000100000003" in the
+      // schematic; 15 digits is well inside a double's exact range.
+      const nudged = Number((prev + PWL_EDGE).toPrecision(15));
+      out.push(String(nudged), tok[i + 1]);
+      prev = nudged;
+    } else {
+      out.push(tok[i], tok[i + 1]);
+      if (Number.isFinite(t)) prev = t;
+    }
+  }
+  // An odd trailing token would be a time without its value; keep it rather than
+  // dropping data silently, and let the netlist show the problem.
+  if (tok.length % 2) out.push(tok[tok.length - 1]);
+  const repeat = /pwlrepeat/i.test(String(p.Repeat ?? "")) ? " r=0" : "";
+  return `PWL(${out.join(" ")}${repeat})`;
+}
+
 function pulse(p: Params): string {
   const f = (k: string, d: string) => si(p[k]) || d;
   return `PULSE(${f("VI", "0")} ${f("VP", "1")} ${f("TD", "0")} ${f("TR", "1n")} ${f("TF", "1n")} ${f("PW", "0.5m")} ${f("Per", "1m")})`;
@@ -441,6 +544,77 @@ function emitGate(part: any, inst: any, doc: any, spec: { gate: string; ins: str
 
   spec.ins.forEach((conn, i) => at(conn, [origin[0] + offs[i][0], origin[1] + offs[i][1]]));
   at("Y", outAbs);
+}
+
+/**
+ * Multisim connection names of a D flip-flop, in the order of the symbol's pin
+ * offsets above. The offsets have to be exactly what `offsetsForNode` returns
+ * for the `dff` type, because the converter anchors the SYMBOL origin so that
+ * origin + offset lands on the Multisim pin — an offset that disagrees puts the
+ * part a fixed distance away from every wire that should meet it.
+ */
+/**
+ * The Multisim connection names for each kind, in the pin-offset order above.
+ * Only the first two differ: the data input and the clock/enable.
+ */
+const FF_CONNS: Record<string, string[]> = {
+  dff: ["D", "CLK", "SET", "RESET", "Q", "~Q"],
+  tff: ["T", "CLK", "SET", "RESET", "Q", "~Q"],
+  dlatch: ["D", "EN", "SET", "RESET", "Q", "~Q"],
+};
+const ffPins = (kind: string): { conn: string; off: Pt }[] =>
+  FF_CONNS[kind].map((conn, i) => ({ conn, off: PIN_OFFSETS["Digital\\dflop"][i] }));
+
+/**
+ * Emit a D flip-flop.
+ *
+ * Multisim carries the trigger edge and the Set/Reset sense as model generics
+ * rather than as different parts, so both are read off the instance and written
+ * into the LibreSpice attribute; the LTSpice `dflop` symbol has nowhere to put
+ * them. The converted part is ideal — the `*_delay` generics Multisim also
+ * stores (1 ns rise, fall, clock, set and reset) have no equivalent and are
+ * dropped, so a circuit that races on those delays will not behave as it did.
+ *
+ * Anchored on Q, the pin that exists on every flip-flop and that the following
+ * stage is wired to.
+ */
+function emitDFlipFlop(part: any, inst: any, doc: any, kind: string, ctx: Ctx): void {
+  const { symbolLines, pinPos, used } = ctx;
+  const name = uniqueName(inst?.refdes?.prefix || "U", inst?.refdes?.number, used);
+
+  const p = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
+  const edge = p.Negative_Edge_Trigg_CLOCK === "1" ? "falling" : "rising";
+  const asyncPol = p.ACTIVE_LOW_SET_and_RESET === "1" ? "low" : "high";
+
+  const symId = inst?.activesymbol;
+  const map: Record<string, string> = {};
+  const bp = doc.blueprints?.components?.[part.component]?.component;
+  for (const sc of bp?.symbolConfigurations ?? []) {
+    for (const sec of sc.sections ?? []) {
+      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
+    }
+  }
+  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
+  const qLocal = svgPins[map["Q"]];
+  const qAbs: Pt = qLocal ? scaled(applyMatrix(part.matrix, qLocal), ctx.to) : [0, 0];
+  const pins = ffPins(kind);
+  const qOff = pins.find((x) => x.conn === "Q")!.off;
+  const origin: Pt = [qAbs[0] - qOff[0], qAbs[1] - qOff[1]];
+
+  symbolLines.push(`SYMBOL Digital\\dflop ${origin[0]} ${origin[1]} R0`);
+  symbolLines.push(`SYMATTR InstName ${name}`);
+  const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH" }[kind] ?? "DFF";
+  symbolLines.push(`SYMATTR Value ${kind === "dlatch" ? mark : mark + (edge === "falling" ? "-" : "+")}`);
+  symbolLines.push(
+    `SYMATTR LibreSpice kind=${kind};edge=${edge};async=${asyncPol};` +
+    `vth=${LOGIC_THRESHOLD};vhigh=${LOGIC_HIGH};pins=${pins.map((x) => x.conn).join(",")}`,
+  );
+
+  // Multisim spells the complement "~Q" on some symbols and "Qneg" on others.
+  for (const { conn, off } of pins) {
+    const id = map[conn] ?? (conn === "~Q" ? map["Qneg"] : undefined);
+    if (id !== undefined) pinPos[`${part.guid}/${id}`] = [origin[0] + off[0], origin[1] + off[1]];
+  }
 }
 
 /**
@@ -873,6 +1047,19 @@ export function convert(doc: any): ConversionResult {
       continue;
     }
 
+    // The T flip-flop and the D latch are the same storage cell wired
+    // differently, so they share the emitter; `kind` picks the variant and the
+    // pin names that go with it.
+    const FF_KINDS: Record<string, string> = {
+      "D Flip-Flop": "dff", "T Flip-flop": "tff", "D Latch": "dlatch",
+    };
+    if (FF_KINDS[bp.name]) {
+      const kind = FF_KINDS[bp.name];
+      emitDFlipFlop(part, instances[part.guid], doc, kind, ctx);
+      substituted.push(`${bp.name} (${kind === "dlatch" ? "ideales Latch" : "ideales Flipflop"}, ohne Laufzeit)`);
+      continue;
+    }
+
     if (bp.name === "Digital Constant" || bp.name === "Digital Clock") {
       emitDigitalSource(part, instances[part.guid], doc,
         bp.name === "Digital Clock" ? "clock" : "constant", ctx);
@@ -940,6 +1127,7 @@ export function convert(doc: any): ConversionResult {
     const flat = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
     const value = type.value(flat);
     if (value) symbolLines.push(`SYMATTR Value ${value}`);
+    for (const a of type.attrs ?? []) symbolLines.push(`SYMATTR ${a}`);
 
     // Where LTSpice's pin spacing differs from Multisim's, the Multisim wire
     // still ends at the original point — bridge the gap with a stub so the net

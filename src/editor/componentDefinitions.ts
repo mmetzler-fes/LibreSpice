@@ -25,6 +25,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "isource", label: "I Source", category: "Sources", defaultLabel: "I1", description: "Current Source" },
   { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },
   { type: "logicgate", label: "Logic Gate", category: "Digital", defaultLabel: "U1", description: "AND / OR / NAND / NOR / XOR / NOT / Buffer — behavioural, 1–5 inputs" },
+  { type: "dff", label: "Flip-Flop / Latch", category: "Digital", defaultLabel: "U1", description: "D or T flip-flop (edge-triggered) or transparent D latch, with asynchronous Set/Reset — behavioural" },
   { type: "ground", label: "Ground", category: "Special", defaultLabel: "GND", description: "Ground reference (node 0)" },
   { type: "netlabel", label: "Net Label", category: "Special", defaultLabel: "NET1", description: "Named terminal – nets with the same name are connected (LTSpice FLAG)" },
   { type: "netconnector", label: "Net Connector", category: "Special", defaultLabel: "PORT1", description: "Named terminal that is also an interface pin – In / Out / BiDir (LTSpice FLAG + IOPIN)" },

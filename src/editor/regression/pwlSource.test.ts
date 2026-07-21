@@ -168,6 +168,77 @@ const CASES: Case[] = [
       if (r.points !== "0 0 10u 5 20u 0") fail(`points = ${r.points}`);
     },
   },
+  {
+    name: "the repeat flag is emitted as ngspice's r=0",
+    run: (fail) => {
+      // Verified against the engine: with `r=0` the breakpoints replay from
+      // t = 0 forever, without it the source holds its last value.
+      const v = new VoltageSource("v1", "V1");
+      v.setProperty("sourceType", "PWL");
+      v.setProperty("pwlPoints", "0 0 1m 5 1.1m 0");
+      if (specOf(v) !== "PWL(0 0 1m 5 1.1m 0)") fail(`off: ${specOf(v)}`);
+      v.setProperty("pwlRepeat", "yes");
+      if (specOf(v) !== "PWL(0 0 1m 5 1.1m 0 r=0)") fail(`on: ${specOf(v)}`);
+    },
+  },
+  {
+    name: "a current source repeats too",
+    run: (fail) => {
+      const i = new CurrentSource("i1", "I1");
+      i.setProperty("sourceType", "PWL");
+      i.setProperty("pwlPoints", "0 0 1m 5m");
+      i.setProperty("pwlRepeat", "yes");
+      if (specOf(i) !== "PWL(0 0 1m 5m r=0)") fail(specOf(i));
+    },
+  },
+  {
+    name: "r= is split off the points on import, not kept as a breakpoint",
+    run: (fail) => {
+      // Left in the points text it would be read as a time/value pair, and the
+      // next load from a measurement file would drop the repeat silently.
+      const asc = `Version 4
+SHEET 1 880 680
+SYMBOL voltage 100 100 R0
+SYMATTR InstName V1
+SYMATTR Value PWL(0 0 1m 5 1.1m 0 r=0)
+`;
+      const comp = LTSpiceParser.parse(asc).components[0] as unknown as {
+        sourceType: string; pwlPoints: string; pwlRepeat: boolean;
+      };
+      if (comp.sourceType !== "PWL") fail(`type = ${comp.sourceType}`);
+      if (comp.pwlPoints !== "0 0 1m 5 1.1m 0") fail(`points = "${comp.pwlPoints}"`);
+      if (comp.pwlRepeat !== true) fail("repeat lost");
+    },
+  },
+  {
+    name: "a PWL without r= imports as non-repeating",
+    run: (fail) => {
+      const asc = `Version 4
+SHEET 1 880 680
+SYMBOL voltage 100 100 R0
+SYMATTR InstName V1
+SYMATTR Value PWL(0 0 1m 5)
+`;
+      const comp = LTSpiceParser.parse(asc).components[0] as unknown as {
+        pwlPoints: string; pwlRepeat: boolean;
+      };
+      if (comp.pwlRepeat !== false) fail("repeat invented");
+      if (comp.pwlPoints !== "0 0 1m 5") fail(`points = "${comp.pwlPoints}"`);
+    },
+  },
+  {
+    name: "the repeat flag survives a save/load round trip",
+    run: (fail) => {
+      const v = new VoltageSource("v1", "V1");
+      v.setProperty("sourceType", "PWL");
+      v.setProperty("pwlPoints", "0 0 1m 5");
+      v.setProperty("pwlRepeat", "yes");
+      const back = new VoltageSource("v2", "V2");
+      back.deserialize(v.serialize());
+      if (back.pwlRepeat !== true) fail("serialize/deserialize lost it");
+      if (v.clone().pwlRepeat !== true) fail("clone lost it");
+    },
+  },
 ];
 
 export function runPwlSourceTests(): TestReport {

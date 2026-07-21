@@ -5,6 +5,7 @@ import { Diode, LED, Zener, Schottky, BJT, MOSFET } from "@core/components/semic
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
 import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector } from "@core/components/special/Special.js";
 import { LogicGate, GATE_LABELS } from "@core/components/digital/LogicGate.js";
+import { DFlipFlop, KIND_LABELS } from "@core/components/digital/DFlipFlop.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
@@ -27,6 +28,7 @@ export function createSpiceComponent(
     case "schottky":    return new Schottky(id, label, pos);
     case "opamp":       return new OpAmp(id, label, pos);
     case "logicgate":   return new LogicGate(id, label, pos);
+    case "dff":         return new DFlipFlop(id, label, pos);
     case "bjt_npn":     return new BJT(id, label, pos, "NPN");
     case "bjt_pnp":     return new BJT(id, label, pos, "PNP");
     case "mosfet_n":    return new MOSFET(id, label, pos, "NMOS");
@@ -183,6 +185,15 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
     case "logicgate": {
       const g = component as unknown as { gateType: keyof typeof GATE_LABELS; inputs: number };
       return GATE_LABELS[g.gateType] ?? "";
+    }
+    case "dff": {
+      // The caption names the kind and, for the edge-triggered ones, the edge:
+      // the symbol's clock wedge is easy to miss, and a flip-flop on the wrong
+      // edge fails in a way that looks like a wiring mistake.
+      const f = component as unknown as { kind: keyof typeof KIND_LABELS; edge: string };
+      if (f.kind === "dlatch") return "Latch";
+      const mark = f.kind === "tff" ? "TFF" : "DFF";
+      return f.edge === "falling" ? `${mark} \u2193` : `${mark} \u2191`;
     }
     default: return "";
   }

@@ -27,6 +27,7 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   // LTSpice's Digital library; the exact gate comes from our own attribute.
   and: "logicgate", or: "logicgate", nand: "logicgate", nor: "logicgate",
   xor: "logicgate", xnor: "logicgate", inv: "logicgate", buf: "logicgate",
+  dflop: "dff", dflipflop: "dff", srflop: "dff",
 };
 
 const SYMBOL_TO_TYPE_LC: Record<string, ComponentType> = Object.fromEntries(
@@ -67,6 +68,7 @@ export const TYPE_TO_SYMBOL: Record<string, string> = {
   opamp: "UniversalOpAmp2",
   // Overridden per gate by the exporter (Digital\\and, \\or, …); this is the fallback.
   logicgate: "Digital\\and",
+  dff: "Digital\\dflop",
 };
 
 export interface PinOffset { handle: string; dx: number; dy: number }
@@ -111,6 +113,16 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
     { handle: "vcc", dx: 0, dy: -32 },
     { handle: "vee", dx: 0, dy: 32 },
     { handle: "out", dx: 32, dy: 0 },
+  ],
+  // D flip-flop, mirroring DFlipFlop.createPorts: data in and clock on the left,
+  // Q and ~Q on the right, the asynchronous pins above and below.
+  dff: [
+    { handle: "d", dx: -32, dy: -24 },
+    { handle: "clk", dx: -32, dy: 24 },
+    { handle: "set", dx: 0, dy: -48 },
+    { handle: "rst", dx: 0, dy: 48 },
+    { handle: "q", dx: 32, dy: -24 },
+    { handle: "qn", dx: 32, dy: 24 },
   ],
 };
 

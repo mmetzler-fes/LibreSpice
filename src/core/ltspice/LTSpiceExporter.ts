@@ -100,6 +100,18 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
     return { value: String(comp.gateType).toUpperCase(), extra };
   }
 
+  // A D flip-flop, likewise: LTSpice's `dflop` symbol carries no polarity, so
+  // trigger edge, set/reset sense and the levels ride in our own attribute.
+  if (type === "dff") {
+    const pins = comp.ports.map((p: any) => p.name).join(",");
+    const extra = [
+      `kind=${comp.kind}`, `edge=${comp.edge}`, `async=${comp.asyncPolarity}`,
+      `vth=${comp.threshold}`, `vhigh=${comp.vHigh}`, `pins=${pins}`,
+    ].join(";");
+    const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH" }[String(comp.kind)] ?? "DFF";
+    return { value: comp.kind === "dlatch" ? mark : `${mark}${comp.edge === "falling" ? "-" : "+"}`, extra };
+  }
+
   if (comp.sourceType !== undefined) {
     const a: SymAttrs = { value: sourceSpec(comp) };
     if (comp.acAmplitude) a.value2 = `AC ${comp.acAmplitude}`;

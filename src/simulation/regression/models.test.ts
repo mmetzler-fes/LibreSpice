@@ -28,8 +28,13 @@ async function nodeApi(): Promise<any> {
 
 /** The shipped model text, so the test reads what the app would load. */
 async function shippedModels(): Promise<string> {
+  return shippedLib("Discretes.lib");
+}
+
+/** Any one shipped library file, by name. */
+async function shippedLib(name: string): Promise<string> {
   const { fs, path, proc } = await nodeApi();
-  return fs.readFileSync(path.join(proc.cwd(), "library/sub/Discretes.lib"), "utf8");
+  return fs.readFileSync(path.join(proc.cwd(), "library/sub", name), "utf8");
 }
 
 async function sim(netlist: string): Promise<Record<string, Float64Array>> {
@@ -109,6 +114,94 @@ const CASES: Case[] = [
       const got = await rds(vgs, id);
       if (off(got, want) > 0.15) fail(`Rds(on) at Vgs=${vgs} V, |Id|=${id * 1000} mA is ${got.toFixed(3)} Ω, datasheet ${want} Ω`);
     }
+  } },
+
+  { name: "LM317 holds its 1.25 V reference across the load range", run: async (fail) => {
+    // The regulator's one defining figure. Wired as a constant-current source —
+    // which is what the schematic that needs it does — a 62 ohm resistor between
+    // out and adj should pass 1.25/62 = 20.2 mA whatever the load, so both the
+    // reference voltage and the fact that it *regulates* are checked at once.
+    const text = await shippedLib("LM317.lib");
+    const currents: number[] = [];
+    for (const rload of [100, 400, 800]) {
+      const d = await sim(
+        `* lm317\nV1 in 0 24\nX1 in adj out LM317/TI\nR1 out adj 62\nRload adj 0 ${rload}\n${text}\n.op\n.end\n`,
+      );
+      const drop = last(d, "v(out)") - last(d, "v(adj)");
+      if (!(drop > 1.15 && drop < 1.35)) {
+        fail(`reference is ${drop.toFixed(3)} V at Rload=${rload}, outside 1.15…1.35 V`);
+        return;
+      }
+      currents.push(drop / 62);
+    }
+    // Regulation: the current must not drift more than a few percent as the
+    // load changes eightfold. A model that merely sat at 1.25 V open-circuit
+    // would pass the check above but fail this one.
+    const spread = (Math.max(...currents) - Math.min(...currents)) / Math.min(...currents);
+    if (spread > 0.05) fail(`current varies by ${(spread * 100).toFixed(1)}% across the load range`);
+  } },
+
+  { name: "74LS93 counts 0..15 and clears on both reset inputs", run: async (fail) => {
+    // Four counting flip-flops and a reset NAND. QA is wired to CKB, which is
+    // how the datasheet makes the two dividers one 4-bit counter, so this walks
+    // the whole cycle rather than just checking that something toggles.
+    const text = await shippedLib("74LS93.lib");
+    const d = await sim(
+      `* 74ls93\nVck cka 0 PULSE(5 0 0 1n 1n 2u 4u)\n` +
+      `Vr1 r01 0 PULSE(5 0 1u 1n 1n 100u 200u)\nVr2 r02 0 PULSE(5 0 1u 1n 1n 100u 200u)\n` +
+      `X1 cka qa r01 r02 qa qb qc qd 74LS93\n${text}\n.tran 0.05u 72u\n.end\n`,
+    );
+    const time = d["time"];
+    const bits = ["v(qa)", "v(qb)", "v(qc)", "v(qd)"].map((k) => d[k]);
+    if (bits.some((b) => !b)) { fail(`missing outputs: ${Object.keys(d).join(",")}`); return; }
+    const countAt = (us: number) => {
+      let i = 0;
+      for (let k = 0; k < time.length; k++) if (time[k] <= us * 1e-6) i = k;
+      return bits.reduce((acc, b, n) => acc + (b[i] > 2.5 ? 1 << n : 0), 0);
+    };
+    // Both resets are high until 1 us, so the counter must be held at zero.
+    if (countAt(0.5) !== 0) fail(`reset did not clear: count = ${countAt(0.5)}`);
+    // Then one full cycle plus the roll-over, sampled between clock edges.
+    for (let n = 0; n <= 16; n++) {
+      const got = countAt(3 + n * 4);
+      if (got !== n % 16) { fail(`step ${n}: counted ${got}, expected ${n % 16}`); return; }
+    }
+  } },
+
+  { name: "SCR latches on a gate pulse and holds after it is released", run: async (fail) => {
+    // The defining thyristor behaviour, and the one the model got wrong at
+    // first: with the gate pin left out of the subcircuit it could never be
+    // triggered at all. Gate pulse at 2 ms, gone again by 2.2 ms.
+    const text = await shippedLib("Thyristor.lib");
+    const d = await sim(
+      `* scr\nV1 vcc 0 DC 12\nRload vcc load 100\nX1 load gate 0 SCR\n` +
+      `Vg src 0 PULSE(0 3 2m 1u 1u 0.2m 100m)\nRg src gate 100\n${text}\n.tran 0.02m 10m\n.end\n`,
+    );
+    const time = d["time"], load = d["v(load)"];
+    if (!load) { fail(`no v(load): ${Object.keys(d).join(",")}`); return; }
+    const at = (ms: number) => {
+      let i = 0;
+      for (let k = 0; k < time.length; k++) if (time[k] <= ms * 1e-3) i = k;
+      return load[i];
+    };
+    // Blocking: the load carries no current, so it sits at the supply.
+    if (at(1) < 11) fail(`did not block before the trigger: v(load) = ${at(1).toFixed(2)} V`);
+    // Conducting: the anode-cathode drop is a volt or so.
+    if (at(3) > 2) fail(`did not fire: v(load) = ${at(3).toFixed(2)} V`);
+    // Latched: still on long after the gate went away.
+    if (at(9) > 2) fail(`did not stay latched: v(load) = ${at(9).toFixed(2)} V`);
+  } },
+
+  { name: "BZB84-B6V2 breaks down at its 6.2 V rating", run: async (fail) => {
+    // Reverse-biased through a resistor: the zener must clamp near 6.2 V, and
+    // conduct normally in the forward direction.
+    const text = await shippedModels();
+    const rev = await sim(`* z\nV1 in 0 DC 15\nR1 in k 1k\nD1 0 k BZB84B6V2\n${text}\n.op\n.end\n`);
+    const vz = last(rev, "v(k)");
+    if (!(vz > 5.8 && vz < 6.8)) fail(`breakdown is ${vz.toFixed(2)} V, outside the 5.8…6.6 V band`);
+    const fwd = await sim(`* z\nV1 in 0 DC 5\nR1 in a 1k\nD1 a 0 BZB84B6V2\n${text}\n.op\n.end\n`);
+    const vf = last(fwd, "v(a)");
+    if (!(vf > 0.4 && vf < 1.0)) fail(`forward drop is ${vf.toFixed(2)} V, not a conducting diode`);
   } },
 ];
 
