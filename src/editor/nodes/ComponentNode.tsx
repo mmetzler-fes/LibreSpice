@@ -720,17 +720,28 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   if (asySym) {
     return <AsyComponentNode sym={asySym} data={nodeData} nodeId={id} selected={selected} />;
   }
+  // Everything else is looked up from the tables, whose entries keep the same
+  // identity across renders.
+  const TableSymbol =
+    nodeData.componentType === "vsource"
+      ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol
+      : SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
   // The digital parts are the symbols whose drawing depends on their properties
   // (gate mark and lead count; clock edge and Set/Reset polarity), so they are
   // bound with those props here rather than looked up bare.
-  const SymbolComponent =
+  //
+  // Bound as an *element*, not by wrapping them in a component. A wrapper
+  // declared here would be a fresh function — and so, to React, a different
+  // component type — on every render, which tore down and rebuilt the whole
+  // symbol subtree each time. Harmless in effect, since these symbols are pure
+  // SVG with no state or effects to lose, but pointless DOM churn on every
+  // flip-flop and gate on the sheet.
+  const symbolElement =
     nodeData.componentType === "dff"
-      ? () => <DFlipFlopSymbol edge={nodeData.edge} asyncPolarity={nodeData.asyncPolarity} kind={nodeData.kind} />
+      ? <DFlipFlopSymbol edge={nodeData.edge} asyncPolarity={nodeData.asyncPolarity} kind={nodeData.kind} />
       : nodeData.componentType === "logicgate"
-      ? () => <LogicGateSymbol gate={nodeData.gateType} inputs={nodeData.inputs} />
-      : nodeData.componentType === "vsource"
-        ? SOURCE_SYMBOLS[nodeData.sourceType ?? "DC"] ?? VoltageSourceSymbol
-        : SYMBOL_MAP[nodeData.componentType] ?? ResistorSymbol;
+      ? <LogicGateSymbol gate={nodeData.gateType} inputs={nodeData.inputs} />
+      : <TableSymbol />;
   const rotation = nodeData.rotation ?? 0;
   const mirrored = !!nodeData.mirrored;
   const isGround = nodeData.componentType === "ground";
@@ -790,7 +801,7 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
             fill="none" stroke="#2563eb" strokeWidth="1.5" strokeDasharray="4 2" opacity={0.6}
           />
         )}
-        <SymbolComponent />
+        {symbolElement}
       </svg>
 
       {/* Reference label (R1, C1, …); ground has no label */}

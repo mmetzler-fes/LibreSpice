@@ -109,17 +109,21 @@ function SymbolNode({ node, norm, dir, tagSide }: { node: Node; norm: SymbolNorm
   // count; clock edge, kind and Set/Reset polarity), so they are bound with those
   // here — exactly as the editor node does. Left to the plain FALLBACK lookup they
   // came out of the export drawn as resistors.
-  const Digital: React.FC | null =
+  // Bound as an element rather than as a wrapper component: a function declared
+  // here is a new component type on every render, which makes React rebuild the
+  // subtree instead of updating it (see ComponentNode, where the same shape was
+  // fixed).
+  const digital =
     type === "dff"
-      ? () => <DFlipFlopSymbol edge={data.edge} asyncPolarity={data.asyncPolarity} kind={data.kind} />
+      ? <DFlipFlopSymbol edge={data.edge} asyncPolarity={data.asyncPolarity} kind={data.kind} />
       : type === "logicgate"
-      ? () => <LogicGateSymbol gate={data.gateType} inputs={data.inputs} />
+      ? <LogicGateSymbol gate={data.gateType} inputs={data.inputs} />
       : null;
 
-  const inner = Digital ? (
+  const inner = digital ? (
     // Hand-drawn symbols live in a -40..40 space centred on the node.
     <g transform={`translate(${NODE_SIZE / 2} ${NODE_SIZE / 2}) ${transformFor(rotation, mirrored, 0, 0) ?? ""}`}>
-      <Digital />
+      {digital}
     </g>
   ) : sym ? (
     <g transform={transformFor(rotation, mirrored, NODE_SIZE / 2, NODE_SIZE / 2)}>
