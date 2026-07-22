@@ -1,6 +1,9 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { formatAnchor, isGroundAnchor } from "@core/circuit/netAnchor.js";
+import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
+import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
+import { getNodePins } from "@editor/pinGeometry.js";
 import { withSymbols } from "./withSymbols.js";
 
 /**
@@ -71,6 +74,63 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
             `    only from nodes:   ${only(written, fromAnchors).slice(0, 6).join(" | ") || "—"}\n` +
             `    only from anchors: ${only(fromAnchors, written).slice(0, 6).join(" | ") || "—"}`);
         }
+      } catch (e) {
+        fail(name, `threw: ${(e as Error).message}`);
+      }
+    }
+
+    // ── Geometry finds the same net the topology does ──────────────────────
+    // The mechanism the switch stands or falls on. Today a label's net comes
+    // from the edge it hangs on; an anchor has no edge and must find its net by
+    // lying on a wire, the way LTSpice does. So: for every named flag in every
+    // bundled schematic, does the geometric answer match the one the wired-up
+    // label node already gives?
+    for (const file of files) {
+      total++;
+      const name = `anchors resolve to the same nets in ${file}`;
+      try {
+        st().clearCircuit();
+        st().loadFromAsc(fs.readFileSync(path.join(dir, file), "latin1"));
+        await tick(); await tick();
+        const s = st();
+
+        // Wires as the canvas draws them — flow coordinates, so the anchor is
+        // measured against the wire the user actually sees (see wireRoutes).
+        const flowPins: PinLookup = {
+          at: (nodeId, handle) => {
+            const n = s.nodes.find((x) => x.id === nodeId);
+            if (!n) return undefined;
+            const p = getNodePins(n).find((q) => q.handleId === handle);
+            return p ? { x: p.x, y: p.y } : undefined;
+          },
+        };
+        const netOfEdge = (e: { source: string; sourceHandle?: string | null }) =>
+          s.circuit.components.get(e.source)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId;
+        const routes: RoutedNet[] = wireRoutes(s.edges, flowPins)
+          .map(({ edge, verts }) => ({ netId: netOfEdge(edge) ?? "", verts }))
+          .filter((r) => r.netId !== "");
+
+        const mismatches: string[] = [];
+        for (const a of s.ascAnchors) {
+          if (isGroundAnchor(a)) continue; // ground stays a component for now
+          // The label node the parser made for this same flag.
+          const node = s.nodes.find((n) => {
+            const d = n.data as { componentType?: string; label?: string };
+            return (d.componentType === "netlabel" || d.componentType === "netconnector")
+              && d.label === a.name
+              && Math.abs(n.position.x + 40 - a.x) < 1 && Math.abs(n.position.y + 40 - a.y) < 1;
+          });
+          if (!node) continue;
+          const viaTopology = s.circuit.components.get(node.id)?.ports[0]?.netId ?? null;
+          const viaGeometry = resolveAnchor(a, routes);
+          // A label on a wire nobody else touches has no edge at all, so the
+          // topology gives it a net of its own that geometry cannot see. Only
+          // disagreement about a *shared* net matters here.
+          if (viaTopology && viaGeometry && viaTopology !== viaGeometry) {
+            mismatches.push(`${a.name}@${a.x},${a.y}: topology ${viaTopology}, geometry ${viaGeometry}`);
+          }
+        }
+        if (mismatches.length) fail(name, mismatches.slice(0, 6).join("\n    "));
       } catch (e) {
         fail(name, `threw: ${(e as Error).message}`);
       }
