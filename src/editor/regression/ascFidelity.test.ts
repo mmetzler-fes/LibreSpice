@@ -1,6 +1,7 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { canonicalAscLines } from "@core/ltspice/ascPreserve.js";
+import { withSymbols } from "./withSymbols.js";
 
 /**
  * File-fidelity guard: opening a `.asc` and saving it again must give back the
@@ -138,6 +139,7 @@ export async function runAscFidelityTests(): Promise<{ total: number; passed: nu
   let total = 0;
   const fail = (name: string, reason: string) => { failures.push({ name, reason }); };
 
+  return await withSymbols(async () => {
   const { fs, path } = await nodeApi();
   const dir = path.resolve("examples");
   const files: string[] = fs.existsSync(dir)
@@ -227,4 +229,5 @@ export async function runAscFidelityTests(): Promise<{ total: number; passed: nu
   }
 
   return { total, passed: total - failures.length, failures };
+  });
 }

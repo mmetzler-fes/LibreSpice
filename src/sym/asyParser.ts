@@ -266,3 +266,19 @@ export function registerSymbol(name: string, rawAsy: string): AsySymbol {
   LIB_INDEX[name.toLowerCase()] = sym;
   return sym;
 }
+
+/**
+ * Removes a symbol registered by {@link registerSymbol}, so lookups fall back to
+ * whatever they resolved to before.
+ *
+ * The registry is module-level state shared by everything that draws, which is
+ * fine in the browser — the bundled symbols load once and never change. The
+ * regression harness has no bundled symbols at all (its `import.meta.glob` stub
+ * returns nothing), so a suite that needs real geometry has to add it; without a
+ * way to take it out again that suite would silently change the ones that run
+ * after it, several of which assert the *fallback* geometry on purpose.
+ */
+export function unregisterSymbol(name: string): void {
+  delete SYMBOL_LIBRARY[name];
+  delete LIB_INDEX[name.toLowerCase()];
+}

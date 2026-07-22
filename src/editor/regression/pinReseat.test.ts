@@ -4,6 +4,7 @@ import { getNodePins } from "../pinGeometry.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { canonicalAscLines } from "@core/ltspice/ascPreserve.js";
+import { withSymbols } from "./withSymbols.js";
 
 /**
  * Turning a part must not leave its wires crossing its body — and the reference
@@ -16,12 +17,16 @@ import { canonicalAscLines } from "@core/ltspice/ascPreserve.js";
  * reverse the SPICE node order; the alternative — pinning the netlist and
  * letting the wires cross — would make the drawing contradict the measurement.
  *
- * Everything here uses a *voltage source* as the two-pin part. That is not
- * arbitrary: the regression harness deliberately stubs out `import.meta.glob`,
- * so no `.asy` symbol is registered and a resistor or capacitor has no pin
- * geometry at all here (see pinGeometry's FALLBACK_PINS, which covers sources
- * but not passives). A source is the one two-terminal part whose pins exist in
- * both environments.
+ * Most of this uses a *voltage source* as the two-pin part, which is not
+ * arbitrary: the regression harness stubs out `import.meta.glob`, so no `.asy`
+ * symbol is registered and a resistor or capacitor has no pin geometry at all
+ * (see pinGeometry's FALLBACK_PINS, which covers sources but not passives). A
+ * source is the one two-terminal part whose pins exist in both environments.
+ *
+ * The final block borrows the real symbols via {@link withSymbols} and rotates a
+ * *capacitor* — the part the bug was actually reported on, horizontal and drawn
+ * from cap.asy with the arrow that makes its pin order visible. Without it the
+ * suite would only ever exercise a vertical source.
  */
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -157,6 +162,59 @@ export async function runPinReseatTests(): Promise<{ total: number; passed: numb
       sorted(exportCurrent()) === sorted(before),
       "undoing both rotations left the schematic in a different state");
   }
+
+  // ── With real `.asy` geometry: the case that was actually reported ────────
+  // Everything above uses a source, the only two-terminal part with pins in the
+  // bare harness. The bug users hit was a *capacitor* — horizontal, drawn from
+  // cap.asy, with the current arrow that makes its pin order visible. Borrow the
+  // real symbols for this block so that case is covered too.
+  await withSymbols(async () => {
+    if (!fs.existsSync(file)) return;
+    const exportCurrent = () => {
+      const s = st();
+      return LTSpiceExporter.export(
+        s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
+        { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
+      );
+    };
+    const wiresOf = (t: string) => canonicalAscLines(t).filter((l) => l.startsWith("WIRE ")).sort().join("\n");
+    const capLine = () => st().netlist.split("\n").find((l) => /^C1\b/i.test(l)) ?? "";
+
+    st().clearCircuit();
+    st().loadFromAsc(fs.readFileSync(file, "latin1"));
+    await tick(); await tick();
+    st().regenerateNetlist();
+
+    const cap = st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "capacitor");
+    check("the capacitor has real pin geometry", !!cap && getNodePins(cap).length === 2,
+      "cap.asy did not load — the rest of this block would pass vacuously");
+    if (!cap) return;
+
+    const wiresBefore = wiresOf(exportCurrent());
+    const netBefore = capLine();
+
+    st().setSelectedComponentId(cap.id);
+    st().rotateSelected();
+    st().rotateSelected();
+    await tick(); await tick();
+    st().regenerateNetlist();
+
+    // The reported symptom: after half a turn the wires ran through the body.
+    check("half a turn leaves the capacitor's wires untouched",
+      wiresOf(exportCurrent()) === wiresBefore,
+      `wires changed:\n  before:\n    ${wiresBefore.replace(/\n/g, "\n    ")}\n  after:\n    ${wiresOf(exportCurrent()).replace(/\n/g, "\n    ")}`);
+
+    // …and the arrow turned with it, so the node order must have too.
+    check("half a turn reverses the capacitor's SPICE node order",
+      netBefore !== "" && capLine() !== "" && netBefore !== capLine(),
+      `C1 unchanged: "${netBefore}" vs "${capLine()}"`);
+
+    // The only thing the file should record is the new orientation.
+    const symbolOf = (t: string) => canonicalAscLines(t).find((l) => l.startsWith("SYMBOL cap")) ?? "";
+    check("the saved file differs only in the capacitor's SYMBOL line",
+      symbolOf(exportCurrent()) !== "" && symbolOf(exportCurrent()).endsWith("R270"),
+      `got "${symbolOf(exportCurrent())}", expected the cap at R270`);
+  });
 
   return { total, passed: total - failures.length, failures };
 }
