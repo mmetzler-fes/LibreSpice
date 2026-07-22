@@ -734,11 +734,28 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // wires disappear behind the pasted ones. (`idStart` covers the nodes; edges
     // are numbered separately and were missed.)
     const usedEdgeIds = new Set(curEdges.map((e) => e.id));
+    const shift = (p?: { x: number; y: number }) => (p ? { x: p.x + dx, y: p.y + dy } : p);
     const pastedEdges = parsed.edges.map((e) => {
       let id = e.id;
       for (let n = 1; usedEdgeIds.has(id); n++) id = `${e.id}_${n}`;
       usedEdgeIds.add(id);
-      return id === e.id ? e : { ...e, id };
+      // A wire's shape is not carried by its ends alone: the waypoints and tap
+      // points are absolute coordinates too, and moving only the parts left them
+      // where the block was copied from. The wire then ran from the pasted pin
+      // all the way back to the original's coordinates and down again — long
+      // strokes across the sheet that looked like the paste had wired itself
+      // into the circuit it came from.
+      const d = (e.data ?? {}) as { waypoints?: { x: number; y: number }[]; sourceTap?: { x: number; y: number }; targetTap?: { x: number; y: number } };
+      return {
+        ...e,
+        id,
+        data: {
+          ...d,
+          ...(d.waypoints ? { waypoints: d.waypoints.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : {}),
+          ...(d.sourceTap ? { sourceTap: shift(d.sourceTap) } : {}),
+          ...(d.targetTap ? { targetTap: shift(d.targetTap) } : {}),
+        },
+      };
     });
 
     const added = parsed.nodes.map((n) => ({

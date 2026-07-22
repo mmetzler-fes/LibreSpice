@@ -8,6 +8,8 @@ import { useUIStore } from "@store/uiStore.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import { ghostify } from "@editor/FragmentGhost.js";
 import { buildSchematicSvg } from "@editor/svgExport.js";
+import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
+import { getNodePins } from "@editor/pinGeometry.js";
 
 /**
  * Cut / copy / paste of a selection, carried as a `.asc` fragment.
@@ -146,6 +148,44 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
       `expected: ${before.join(" | ")}\n    got:      ${connectivity().join(" | ")}`);
     check("the netlist is not empty afterwards", /^[RCVL]/im.test(st().netlist),
       `netlist:\n${st().netlist}`);
+
+    // ── A pasted block keeps to itself ──────────────────────────────────────
+    // Reported: long strokes ran from the pasted parts back into the schematic
+    // they came from. A wire's shape is not carried by its ends alone — the
+    // waypoints are absolute coordinates too, and moving only the parts left
+    // them behind, so every bent wire reached back to where it was copied from.
+    {
+      const want = new Set(["D3", "D4", "C1", "RL", "UA1", "UA2"]);
+      st().clearCircuit();
+      st().loadFromAsc(fs.readFileSync(path.resolve("examples", "05-2-3_Brummspannung1.asc"), "latin1"));
+      await tick(); await tick();
+      st().setNodes(st().nodes.map((x) => ({ ...x, selected: want.has(String((x.data as { label?: string }).label)) })));
+      const frag = buildFragment(st().nodes, st().edges, st().circuit);
+      const idsBefore = new Set(st().nodes.map((x) => x.id));
+      st().pasteFragment(frag, { x: 100, y: 600 });
+      await tick(); await tick();
+
+      const s2 = st();
+      const flowPins: PinLookup = {
+        at: (nodeId, handle) => {
+          const n = s2.nodes.find((x) => x.id === nodeId);
+          if (!n) return undefined;
+          const p = getNodePins(n).find((q) => q.handleId === handle);
+          return p ? { x: p.x, y: p.y } : undefined;
+        },
+      };
+      let oldMax = -Infinity, newMin = Infinity;
+      for (const { edge, verts } of wireRoutes(s2.edges, flowPins)) {
+        const isNew = !idsBefore.has(edge.source) || !idsBefore.has(edge.target);
+        for (const v of verts) {
+          if (isNew) newMin = Math.min(newMin, v.y);
+          else oldMax = Math.max(oldMax, v.y);
+        }
+      }
+      check("pasted wires stay below the circuit they came from",
+        newMin > oldMax,
+        `pasted wires start at y=${newMin}, the original still runs to y=${oldMax}`);
+    }
 
     // ── A fragment holds the selection and nothing else ─────────────────────
     // Reported on a partial copy: parts appeared with wires nobody had drawn.
