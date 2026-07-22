@@ -176,5 +176,40 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     useLibraryStore.getState().removeEntry("MYAMP");
   }
 
+  // ── The in-app clipboard, for devices without a keyboard ──────────────────
+  // iOS shows its copy/paste callout only on editable elements, so on an iPad
+  // without a keyboard the clipboard *events* never fire and the toolbar buttons
+  // are the only way in. Those cannot rely on reading the system clipboard —
+  // that needs a confirmation the user has to tap, and may be refused outright —
+  // so a copy also parks the fragment here.
+  await withSymbols(async () => {
+    const load = (m: string) => import(/* @vite-ignore */ m);
+    const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+    const file = path.resolve("examples", "06-2-2_RC_HP1_orig.asc");
+    if (!fs.existsSync(file)) return;
+
+    st().clearCircuit();
+    st().loadFromAsc(fs.readFileSync(file, "latin1"));
+    await tick(); await tick();
+    st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
+
+    const fragment = buildFragment(st().nodes, st().edges, st().circuit);
+    st().setFragmentClipboard(fragment);
+    check("a copy is remembered in-app", st().fragmentClipboard === fragment);
+
+    // Now paste from that alone, with no system clipboard in play at all — the
+    // situation on a device that refuses to hand one over.
+    st().clearCircuit();
+    await tick();
+    check("the in-app copy survives loading another circuit", st().fragmentClipboard === fragment,
+      "clearCircuit must not wipe the clipboard — pasting into a fresh sheet is the whole point");
+
+    const n = st().pasteFragment(st().fragmentClipboard, { x: 0, y: 0 });
+    await tick(); await tick();
+    st().regenerateNetlist();
+    check("pasting from the in-app copy works", n > 0 && /^[RCVL]/im.test(st().netlist),
+      `inserted ${n}, netlist:\n${st().netlist}`);
+  });
+
   return { total, passed: total - failures.length, failures };
 }

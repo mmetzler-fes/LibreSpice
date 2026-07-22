@@ -14,6 +14,7 @@ import { readMsjs, convert } from "@core/multisim/MultisimConverter.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildShareQrSvg } from "./qrExport.js";
+import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 import { SymbolPreview } from "./SymbolPreview.js";
 
 // ── Tiny SVG icon components ──────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export function Toolbar() {
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
     circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
-    showDirectivesOnCanvas, directivesPos,
+    showDirectivesOnCanvas, directivesPos, setFragmentClipboard,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect } = useUIStore();
   const theme = useTheme();
@@ -164,6 +165,58 @@ export function Toolbar() {
     const x = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.x))) : 0;
     const y = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.y))) - 160 : 0;
     useCircuitStore.getState().addTextBox(x, y);
+  };
+
+  /**
+   * Cut / copy / paste from the toolbar, for use without a keyboard.
+   *
+   * Ctrl/Cmd+C/X/V already work through the clipboard events (see
+   * SchematicCanvas), but iOS only offers its copy/paste callout on editable
+   * elements — on a canvas there is nothing to long-press, so on an iPad without
+   * a keyboard the feature was unreachable. These buttons are the same actions
+   * through the async Clipboard API, which *is* allowed inside a click.
+   */
+  const copySelectionToClipboard = async (cut: boolean) => {
+    const fragment = buildFragment(nodes, edges, circuit);
+    if (!fragment) return;
+    // Kept in-app as well, so pasting works even where reading the system
+    // clipboard is refused (see fragmentClipboard).
+    setFragmentClipboard(fragment);
+    try {
+      await navigator.clipboard?.writeText(fragment);
+    } catch {
+      // No system clipboard — the in-app copy above still carries this session.
+    }
+    if (cut) deleteSelected();
+  };
+
+  /**
+   * Where a pasted block lands when the button is used: clear to the right of
+   * everything already on the sheet, so it never drops on top of the original.
+   *
+   * Content-relative rather than viewport-relative on purpose — the toolbar is
+   * rendered outside the React Flow provider in the regression harness, so it
+   * cannot ask for the viewport (same reason as handleAddTextBox).
+   */
+  const pasteAnchor = () => {
+    const ns = useCircuitStore.getState().nodes;
+    if (ns.length === 0) return { x: 0, y: 0 };
+    return {
+      x: Math.round(Math.max(...ns.map((n) => n.position.x))) + 160,
+      y: Math.round(Math.min(...ns.map((n) => n.position.y))),
+    };
+  };
+
+  const handlePaste = async () => {
+    let text = "";
+    try {
+      text = (await navigator.clipboard?.readText()) ?? "";
+    } catch {
+      // Refused or unsupported — fall through to what we copied ourselves.
+    }
+    if (!isFragment(text)) text = useCircuitStore.getState().fragmentClipboard;
+    if (!isFragment(text)) return;
+    useCircuitStore.getState().pasteFragment(text, pasteAnchor());
   };
 
   const handleExportSvg = () => {
@@ -616,6 +669,24 @@ export function Toolbar() {
       </TBtn>
       <TBtn title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo()}>
         <Ico d="M15 14l5-5-5-5 M20 9H9a4 4 0 0 0 0 8h1" />
+      </TBtn>
+      <TBtn title="Copy selection (Ctrl+C)" onClick={() => copySelectionToClipboard(false)} disabled={!hasSelection}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="9" y="9" width="12" height="12" rx="2" />
+          <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+        </svg>
+      </TBtn>
+      <TBtn title="Cut selection (Ctrl+X)" onClick={() => copySelectionToClipboard(true)} disabled={!hasSelection}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" />
+          <path d="M8.1 15.9 20 4M4 4l11.9 11.9" />
+        </svg>
+      </TBtn>
+      <TBtn title="Paste (Ctrl+V)" onClick={handlePaste}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" />
+        </svg>
       </TBtn>
       <TBtn title="Delete selected (Del)" onClick={deleteSelected} disabled={!hasSelection}>
         <Ico d="M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

@@ -44,6 +44,16 @@ interface CircuitState {
   ascHeader: Record<string, string>;
   /** `WIRE` lines of the loaded file that no edge represents; preserved on save. */
   ascOrphanWires: string[];
+  /**
+   * Last copied fragment, kept inside the app beside the system clipboard.
+   *
+   * Reading the system clipboard needs a permission step the user has to confirm
+   * — on iPadOS a native "Paste" tap — which is a poor fit for a button pressed
+   * repeatedly while building a circuit. Copying fills both, and the paste button
+   * falls back to this one whenever the system clipboard cannot be read. The
+   * keyboard path never touches it: there the browser hands us the data outright.
+   */
+  fragmentClipboard: string;
   /** Show the SPICE directives as a text box on the schematic (LTSpice-style). */
   showDirectivesOnCanvas: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */
@@ -95,6 +105,8 @@ interface CircuitActions {
   loadFromAsc: (ascContent: string) => void;
   /** Insert a `.asc` fragment at `at` (flow coords); returns how many parts landed. */
   pasteFragment: (text: string, at?: { x: number; y: number }) => number;
+  /** Remember a fragment in-app (see fragmentClipboard). */
+  setFragmentClipboard: (text: string) => void;
   clearCircuit: () => void;
   setFileHandle: (handle: any | null, name: string | null) => void;
   undo: () => void;
@@ -151,6 +163,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   directiveRaw: [],
   ascHeader: {},
   ascOrphanWires: [],
+  fragmentClipboard: "",
   showDirectivesOnCanvas: false,
   directivesPos: { x: 40, y: 40 },
   circuitName: "Untitled",
@@ -658,6 +671,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     setTimeout(() => get().rebuildConnections(), 0);
     return added.length;
   },
+
+  setFragmentClipboard: (text) => set({ fragmentClipboard: text }),
 
   clearCircuit: () => {
     const snap = { nodes: get().nodes, edges: get().edges };
