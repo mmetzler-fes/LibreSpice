@@ -767,6 +767,13 @@ function CanvasInner() {
       removals.forEach((c) => removeComponent((c as any).id));
 
       const symbolNorm = useUIStore.getState().symbolNorm;
+      // Read the *current* nodes and wires, never the ones this callback closed
+      // over. A click can change the store before React Flow's own change for the
+      // same click arrives — putting down a cut/copied block is exactly that —
+      // and rebuilding from the stale array then threw the new parts away again.
+      // The paste had happened, the notice appeared, and the block never showed.
+      const nodes = useCircuitStore.getState().nodes;
+      const edges = useCircuitStore.getState().edges;
       
       const modifiedChanges = changes.map(change => {
         if (change.type === 'position' && change.position && change.id) {
@@ -834,18 +841,19 @@ function CanvasInner() {
       );
       if (moved.size > 0) dropImportedRoutes(moved);
     },
-    [nodes, setNodes, removeComponent, edges, dropImportedRoutes],
+    [setNodes, removeComponent, dropImportedRoutes],
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       const removals = changes.filter((c) => c.type === "remove" && "id" in c);
-      setEdges(applyEdgeChanges(changes, edges));
+      // Current wires, not the closed-over ones — same hazard as onNodesChange.
+      setEdges(applyEdgeChanges(changes, useCircuitStore.getState().edges));
       if (removals.length > 0) {
         setTimeout(() => rebuildConnections(), 0);
       }
     },
-    [edges, setEdges, rebuildConnections],
+    [setEdges, rebuildConnections],
   );
 
   const cursorStyle =
