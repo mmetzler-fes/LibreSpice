@@ -54,6 +54,15 @@ interface CircuitState {
    * keyboard path never touches it: there the browser hands us the data outright.
    */
   fragmentClipboard: string;
+  /**
+   * Net names a paste joined onto existing ones, or null when there were none.
+   *
+   * Keeping the names is LTSpice's behaviour and stays the default, but it wires
+   * the pasted block into the original wherever they meet — invisible on screen
+   * and expensive to find afterwards (it took reading the netlist to spot two
+   * rectifiers running in parallel). The canvas shows this as a dismissible note.
+   */
+  pasteNotice: string[] | null;
   /** Show the SPICE directives as a text box on the schematic (LTSpice-style). */
   showDirectivesOnCanvas: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */
@@ -107,6 +116,8 @@ interface CircuitActions {
   pasteFragment: (text: string, at?: { x: number; y: number }) => number;
   /** Remember a fragment in-app (see fragmentClipboard). */
   setFragmentClipboard: (text: string) => void;
+  /** Dismiss the "these net names already existed" notice. */
+  clearPasteNotice: () => void;
   clearCircuit: () => void;
   setFileHandle: (handle: any | null, name: string | null) => void;
   undo: () => void;
@@ -152,6 +163,46 @@ function labelAnchor(host: Edge, nodes: Node[]): FlowPoint | null {
   return { x: snap((a.x + b.x) / 2), y: snap((a.y + b.y) / 2) };
 }
 
+/**
+ * Give every net the name of its *oldest* net terminal.
+ *
+ * A net needs exactly one name in the netlist — SPICE has one node per net — but
+ * the *schematic* may carry several, and LTSpice files do: `leitungstest.asc`
+ * has `x1` and `x2` on one net, and two net connectors `nc1`/`nc2` on another.
+ * Those extra names are aliases, not mistakes, and they must survive a save.
+ *
+ * So the winner is chosen here and nowhere else. It used to be decided twice,
+ * with different rules: this pass picked the oldest terminal, and
+ * `regenerateNetlist` then re-imposed every terminal's name in map order, so the
+ * last one silently won. Worse, the losing *terminal* was renamed to match,
+ * which destroyed the name in the file — opening and saving `leitungstest.asc`
+ * turned its `x2` into a second `x1`.
+ *
+ * Ids are handed out in ascending order (`netlabel_3`, `netconnector_7`), so the
+ * smallest is the terminal that was there first — and on import, the first FLAG
+ * in the file, which is the name LTSpice itself shows.
+ */
+/** `0` and `GND` name the ground net wherever they appear. */
+function isGroundName(s: string): boolean {
+  return /^(0|gnd)$/i.test(s.trim());
+}
+
+function applyNetNames(circuit: Circuit): void {
+  const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
+  const oldest = new Map<string, { id: string; name: string }>();
+  for (const comp of circuit.components.values()) {
+    const name = comp.getNetLabel();
+    const netId = comp.ports[0]?.netId;
+    if (name === null || !netId || netId === "0") continue;
+    const cur = oldest.get(netId);
+    if (!cur || ordinal(comp.id) < ordinal(cur.id)) oldest.set(netId, { id: comp.id, name });
+  }
+  for (const [netId, winner] of oldest) {
+    const net = circuit.nets.get(netId);
+    if (net) net.nodeLabel = winner.name;
+  }
+}
+
 export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) => ({
   circuit: new Circuit(),
   nodes: [],
@@ -164,6 +215,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   ascHeader: {},
   ascOrphanWires: [],
   fragmentClipboard: "",
+  pasteNotice: null,
   showDirectivesOnCanvas: false,
   directivesPos: { x: 40, y: 40 },
   circuitName: "Untitled",
@@ -343,16 +395,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   regenerateNetlist: () => {
     const { circuit, simulationConfig, spiceDirectives } = get();
-    // Apply net-label terminals: each imposes its name on its connected net, so
-    // nets sharing a name collapse to one node (connecting distant parts).
-    for (const comp of circuit.components.values()) {
-      const name = comp.getNetLabel();
-      const netId = comp.ports[0]?.netId;
-      if (name && netId && netId !== "0") {
-        const net = circuit.nets.get(netId);
-        if (net) net.nodeLabel = name;
-      }
-    }
+    // Net-label terminals name their net, so nets sharing a name collapse to one
+    // node (which is how distant parts connect). Where several name one net, the
+    // same winner is chosen as everywhere else — this used to impose each name in
+    // turn, letting whichever came last win.
+    applyNetNames(circuit);
     const generator = new NetlistGenerator();
     const libraryBlocks = useLibraryStore.getState().getDefinitionBlocks();
     const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryBlocks);
@@ -523,7 +570,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -566,12 +613,17 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     }));
     setTimeout(() => {
       get().rebuildConnections();
-      // Apply LTSpice net labels (named FLAGs) so imported DATAFLAG expressions
-      // like V(U1) resolve. Skip GND — it is always net "0".
-      for (const { compId, handle, name } of netNames) {
-        const port = get().circuit.components.get(compId)?.ports.find((p) => p.id === `${compId}-${handle}`);
-        if (port?.netId && port.netId !== "0") get().renameNet(port.netId, name);
-      }
+      // A named `FLAG` already arrives as a net-label terminal, and
+      // `applyNetNames` gives its net that name — so nothing more is needed here
+      // for an imported `V(U1)` to resolve.
+      //
+      // This used to call `renameNet` once per flag, which renames *every*
+      // terminal on the net. On a net carrying two names that meant the second
+      // flag overwrote the first, and the file lost a name simply by being
+      // opened. It stayed hidden for a while because `netNames` only lists flags
+      // that could be tied to a real device pin: `leitungstest.asc` has no
+      // devices at all, so it looked fine there while every real schematic was
+      // affected.
       // Auto-apply the loaded directives: adopt the file's analysis command
       // (.tran/.ac/.dc/.op) into the sim config so the Simulation Panel and plot
       // match — no need to open the SPICE Directives dialog and press Apply.
@@ -634,12 +686,23 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const taken = new Set([...circuit.components.values()].map((c) => c.label));
     const snap = { nodes: cur, edges: curEdges };
 
+    // Net names that the sheet already used. Keeping them is deliberate — it is
+    // what LTSpice does and how a pasted block is meant to join an existing one —
+    // but it is also invisible: the two circuits become one net without anything
+    // on screen saying so. Collected here so the paste can report it.
+    const existingNetNames = new Set(
+      [...circuit.components.values()].filter((c) => c.getNetLabel() !== null).map((c) => c.label),
+    );
+    const merged = new Set<string>();
+
     for (const comp of parsed.components) {
       const node = parsed.nodes.find((n) => n.id === comp.id);
       const type = (node?.data as { componentType?: ComponentType })?.componentType;
       const label = pasteLabelFor(type, comp.label, taken);
       if (label !== comp.label) comp.setProperty("label", label);
       taken.add(label);
+      // A net terminal whose name is already on the sheet joins that net.
+      if (comp.getNetLabel() !== null && !isGroundName(label) && existingNetNames.has(label)) merged.add(label);
       comp.position = { x: comp.position.x + dx, y: comp.position.y + dy };
       // Same re-link as loadFromAsc: the `.asc` names the subcircuit but does not
       // define it, and `CustomSubcircuit.getNetlistLine` reads the name back out
@@ -682,10 +745,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       _future: [],
     }));
     setTimeout(() => get().rebuildConnections(), 0);
+    if (merged.size) set({ pasteNotice: [...merged].sort() });
     return added.length;
   },
 
   setFragmentClipboard: (text) => set({ fragmentClipboard: text }),
+
+  clearPasteNotice: () => set({ pasteNotice: null }),
 
   clearCircuit: () => {
     const snap = { nodes: get().nodes, edges: get().edges };
@@ -928,43 +994,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuit.nets.delete(nid);
     }
 
-    // ── One name per net, shown in one place ──────────────────────────────
-    // The name belongs to the net, not to the tag: a net carries at most one,
-    // and a terminal placed on an already-named net adopts that name rather than
-    // imposing its own. Without this, two terminals on one net each claimed it —
-    // whichever was applied last won and silently renamed the other, so a label
-    // added to name a probe point came back under a different name after a
-    // save/reload, looking like it had vanished.
-    //
-    // Oldest terminal wins. Ids are handed out in ascending order
-    // (`netlabel_3`, `netconnector_7`), so the smallest is the one that was
-    // already there — and on import, the first FLAG in the file.
-    const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
-    const byNet = new Map<string, { id: string; name: string }[]>();
+    // ── The net's name for the netlist ─────────────────────────────────────
+    // One name wins (see applyNetNames); the other terminals keep theirs. They
+    // are aliases for the same net, exactly as LTSpice stores them, and renaming
+    // them here would rewrite the user's file the moment they opened it.
+    applyNetNames(circuit);
+    const byNet = new Map<string, true>();
     for (const comp of circuit.components.values()) {
-      const nm = comp.getNetLabel();
       const nid = comp.ports[0]?.netId;
-      if (nm === null || !nid || nid === "0") continue;
-      const list = byNet.get(nid) ?? [];
-      list.push({ id: comp.id, name: nm });
-      byNet.set(nid, list);
-    }
-    /** New label for each terminal node whose name has to give way. */
-    const renamed = new Map<string, string>();
-    for (const [nid, terms] of byNet) {
-      // A name the net already carried outranks a terminal placed later: a
-      // terminal dropped on a named net is meant to *read* that name, not to
-      // replace it with the next free NET1. The carried name comes from the
-      // labels themselves now that naming a wire places one (see renameNet);
-      // the oldest label is the one that was there first.
-      const winner = terms.reduce((a, b) => (ordinal(a.id) <= ordinal(b.id) ? a : b));
-      for (const t of terms) {
-        if (t.name === winner.name) continue;
-        circuit.components.get(t.id)?.setProperty("label", winner.name);
-        renamed.set(t.id, winner.name);
-      }
-      const net = circuit.nets.get(nid);
-      if (net) net.nodeLabel = winner.name;
+      if (comp.getNetLabel() !== null && nid && nid !== "0") byNet.set(nid, true);
     }
 
     // A named net shows its name at its terminal, so the wire must not repeat it.
@@ -977,9 +1015,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     set((state) => ({
       netVersion: state.netVersion + 1,
-      nodes: renamed.size
-        ? state.nodes.map((n) => (renamed.has(n.id) ? { ...n, data: { ...n.data, label: renamed.get(n.id) } } : n))
-        : state.nodes,
       edges: state.edges.map((e) => {
         const nid = netOfEdge2(e);
         if (!nid || !labelledNets.has(nid) || !(e.data as { showLabel?: boolean } | undefined)?.showLabel) return e;

@@ -125,27 +125,27 @@ function isGroundName(s: string): boolean {
 }
 
 /**
- * The label a pasted part should carry — free of anything already on the sheet.
+ * The label a pasted part should carry.
  *
- * Net labels are renumbered like devices. That is a reversal: they used to keep
- * their name, on the reasoning that a net name is a *connection*, so pasting a
- * block whose input is `UE` beside a circuit that has `UE` is how the two get
- * joined. LTSpice does behave that way. It was the wrong default here, and
- * duplicating a block — the thing people actually reach for copy/paste to do —
- * showed why: the copy silently merged into the original. Duplicating the
- * Brummspannung rectifier produced `V1 UE 0` and `V2 UE 0` on one net, two
- * bridges shorted together, and a diode with both ends on `UA2`. Nothing on
- * screen said so; the user had to find it in the netlist and rename by hand.
+ * **Devices** are renumbered on collision — two `R1` are one part declared twice
+ * as far as SPICE is concerned, and LTSpice renumbers them on paste as well.
  *
- * Joining by name is still one rename away, and it is the rarer intent. Silently
- * shorting two circuits together is the more expensive mistake, so the default
- * moved to the safe side.
+ * **Net labels and connectors keep their name.** Verified against LTSpice:
+ * pasting a block there duplicates the flag names as they are, and a net happily
+ * carries several (`leitungstest.asc`, drawn in LTSpice, has `x1` and `x2` on one
+ * net and `nc1`/`nc2` on another). The consequence is real — the copy joins the
+ * original wherever the names meet — but it is what the format means and what
+ * users coming from LTSpice expect. It is surfaced instead of prevented: the
+ * paste reports which names already existed (see circuitStore.pasteFragment), so
+ * the merge is visible rather than silently shorting two circuits together.
  *
- * Ground is the exception in both directions: `0` and `GND` name the ground net
- * wherever they are pasted, and renumbering one would cut the copy loose from
- * ground instead of protecting it.
+ * We did briefly renumber them, after a paste of the Brummspannung rectifier
+ * merged into its original unnoticed. Matching LTSpice won: a file has to mean
+ * the same thing in both programs, and a notice closes the gap that renaming was
+ * meant to close.
  */
 export function pasteLabelFor(componentType: string | undefined, label: string, taken: Set<string>): string {
+  if (componentType === "netlabel" || componentType === "netconnector") return label;
   if (componentType === "ground" || isGroundName(label)) return label;
   return freeLabel(label, taken);
 }

@@ -36,23 +36,11 @@ const st = () => useCircuitStore.getState();
  * pixels. The two that mean something:
  *   - `TGM-Abi2025_A2-2-9`: a source valued `{USt1}` loses the parameter
  *     expression at *import* and comes back as `DC 1`.
- *   - `OP-nicht_inv_Verstärker`: two different names (`U+`, `UE`) flag one net;
- *     our model holds a single name per net, so one wins.
  */
 const FIDELITY_BUDGET: Record<string, number> = {
-  // A file saved from a paste made before the fix in this area: net labels kept
-  // their names, so the copy merged into the original and two differently named
-  // labels (`UE` and a left-over `UA2`) ended up on one net. Our model holds a
-  // single name per net, so saving renames one of them — the same limitation as
-  // `OP-nicht_inv_Verstärker` below, reached here through a bug rather than by
-  // drawing. The wire diffs follow from the same tangle. Kept as a fixture
-  // because it is a real file a user produced; regenerating the paste now gives
-  // a clean one.
-  "test_Brummspannung1.asc": 17,
   "06-2-3_RC_BP1.asc": 2,
   "InvSummierverstaerker.asc": 4,
   "OP-inv_Verstärker.asc": 4,
-  "OP-nicht_inv_Verstärker.asc": 2,
   "RL-Parallelkompensation4b.asc": 2,
   "RLC_Reihenschwingkreis.asc": 2,
   "Spannungsteiler_unbelastet.asc": 2,

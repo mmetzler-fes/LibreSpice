@@ -71,7 +71,7 @@ function CanvasInner() {
     setSelectedComponentId, connectPorts, regenerateNetlist,
     undo, redo, canUndo, canRedo,
     rotateSelected, rotateComponent, mirrorSelected, deleteSelected, rebuildConnections,
-    circuit, addDataFlag, renameNet, viewFitNonce,
+    circuit, addDataFlag, renameNet, viewFitNonce, pasteNotice, clearPasteNotice,
   } = useCircuitStore();
 
   // After a full load (import / snapshot) the content may sit off-screen (e.g.
@@ -926,6 +926,40 @@ function CanvasInner() {
           <DataFlagLayer />
           <TextBoxLayer />
           <DirectiveBox />
+
+          {/* Keeping a pasted block's net names is LTSpice's behaviour and stays
+              the default — but it wires the copy into the original wherever the
+              names meet, and nothing on the schematic shows that. Saying so here
+              is what makes the merge a decision instead of a surprise found later
+              in the netlist. */}
+          {pasteNotice && (
+            <div
+              style={{
+                position: "absolute", left: "50%", top: 12, transform: "translateX(-50%)",
+                zIndex: 20, maxWidth: "min(560px, 90%)",
+                display: "flex", alignItems: "flex-start", gap: 10,
+                padding: "8px 12px", borderRadius: 4, fontSize: 12, lineHeight: 1.45,
+                background: theme.panelBg, color: theme.symPreview,
+                border: `1px solid ${theme.border}`, boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+              }}
+            >
+              <span>
+                Diese Netznamen gab es schon: <b>{pasteNotice.join(", ")}</b>. Der eingefügte
+                Block ist dadurch mit der vorhandenen Schaltung verbunden — wie in LTSpice.
+                Nicht gewollt? Mit Strg+Z rückgängig machen oder die Label umbenennen.
+              </span>
+              <button
+                onClick={clearPasteNotice}
+                title="Hinweis schließen"
+                style={{
+                  flexShrink: 0, border: "none", background: "transparent", cursor: "pointer",
+                  color: "inherit", fontSize: 16, lineHeight: 1, padding: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {editorMode === "wire" && (
             <WireOverlay wrapperRef={wrapperRef} nodes={nodes} edges={edges} onCreateWire={onCreateWire} />

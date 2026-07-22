@@ -204,7 +204,13 @@ const CASES: Case[] = [
     // claim the net for itself, and whichever claim was applied last renamed the
     // other. After a save/reload the label you had added came back under a
     // different name — indistinguishable from having vanished.
-    name: "a terminal added to an already-named net adopts that name",
+    // A second name on a net does not displace the first, and does not lose
+    // itself either. Both are kept, as LTSpice keeps them: `leitungstest.asc`,
+    // drawn in LTSpice, carries `x1` and `x2` on one net and two connectors
+    // `nc1`/`nc2` on another. This used to make the newcomer adopt the existing
+    // name, which read well on screen but rewrote the user's file the moment it
+    // was opened — the second name was simply gone.
+    name: "a second terminal on a net keeps its own name, the net keeps the first",
     run: async (fail) => {
       st().clearCircuit();
       await tick();
@@ -220,9 +226,15 @@ const CASES: Case[] = [
       await tick();
 
       const before = terminals();
-      if (before.join() !== "N9|netlabel|-,N9|netlabel|-") {
-        return fail(`the second terminal did not adopt the net's name: [${before.join(", ")}]`);
+      if (before.join() !== "N9|netlabel|-,Q4|netlabel|-") {
+        return fail(`a terminal lost its own name: [${before.join(", ")}]`);
       }
+      // The netlist needs one node name, and it must be the one that was there
+      // first — the original complaint was a net losing its name to a newcomer.
+      const netId = st().circuit.components.get(v.id)?.ports.find((p) => p.id.endsWith("-n"))?.netId;
+      const netName = netId ? st().circuit.nets.get(netId)?.nodeLabel : undefined;
+      if (netName !== "N9") return fail(`the net should still be called N9, not ${netName}`);
+
       await roundTrip();
       const after = terminals();
       if (after.join() !== before.join()) fail(`before: [${before.join(", ")}] after: [${after.join(", ")}]`);
@@ -296,14 +308,17 @@ const CASES: Case[] = [
       st().rebuildConnections();
       await tick();
 
-      // Naming the net already placed a label (see renameNet), so the net now
-      // carries two terminals — and both must read the same name.
+      // What was reported is that the *net* lost its name: dropping the connector
+      // replaced `UB` with the next free `NET1`. That must not happen — the name
+      // belongs to the net, and the terminal that was there first defines it.
+      // The connector keeping its own `PORT1` is not the bug; it is what LTSpice
+      // does, and overwriting it would destroy a name in the file.
       const names = terminals();
-      if (!names.every((n) => n.startsWith("UB|"))) {
-        fail(`terminals disagree: [${names.join(", ")}], all should read "UB"`);
+      if (!names.some((n) => n.startsWith("UB|"))) {
+        fail(`the net's own label is gone: [${names.join(", ")}]`);
       }
-      if (!names.some((n) => n === "UB|netconnector|Out")) {
-        fail(`the connector did not adopt the name: [${names.join(", ")}]`);
+      if (!names.some((n) => n === "PORT1|netconnector|Out")) {
+        fail(`the connector lost its own name: [${names.join(", ")}]`);
       }
       const net = st().circuit.nets.get(
         st().circuit.components.get(v.id)!.ports.find((p) => p.id.endsWith("-n"))!.netId!,

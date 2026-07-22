@@ -54,11 +54,13 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
   // is one part declared twice as far as SPICE is concerned.
   check("a designator without a number gets one", freeLabel("RL", new Set(["RL"])) === "RL2",
     `got ${freeLabel("RL", new Set(["RL"]))}`);
-  // Net labels are renumbered like devices. Keeping the name merged a pasted
-  // block into the original — see pasteLabelFor for why that default moved.
-  check("a colliding net label is renumbered", pasteLabelFor("netlabel", "UE", new Set(["UE"])) === "UE2",
+  // Net labels keep their name, verified against LTSpice: pasting there
+  // duplicates the flag names as they are, and a net may carry several. The
+  // merge that follows is reported to the user instead of being prevented.
+  check("a net label keeps its name", pasteLabelFor("netlabel", "UE", new Set(["UE"])) === "UE",
     `got ${pasteLabelFor("netlabel", "UE", new Set(["UE"]))}`);
-  check("a device is too", pasteLabelFor("resistor", "R1", new Set(["R1"])) === "R2");
+  check("a connector does too", pasteLabelFor("netconnector", "PORT1", new Set(["PORT1"])) === "PORT1");
+  check("a device is renumbered", pasteLabelFor("resistor", "R1", new Set(["R1"])) === "R2");
   // …but ground names the ground net wherever it lands.
   check("ground keeps its name", pasteLabelFor("ground", "0", new Set(["0"])) === "0");
   check("a GND label keeps its name", pasteLabelFor("netlabel", "GND", new Set(["GND"])) === "GND");
@@ -258,7 +260,6 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
       const t = line.trim().split(/\s+/);
       return /^[RCLVID]/i.test(t[0]) ? t.slice(1, 3) : [];
     };
-    const before = st().netlist.split("\n").filter((l) => /^[A-Z]/i.test(l) && !/^\./.test(l));
 
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
     st().pasteFragment(buildFragment(st().nodes, st().edges, st().circuit), { x: 100, y: 500 });
@@ -279,15 +280,13 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     check("no device ends up shorted across itself", shorted.length === 0,
       `shorted: ${shorted.join(" | ")}`);
 
-    // The two halves must share nothing but ground.
-    const netsOf = (ls: string[]) => new Set(ls.flatMap(nodesOf).filter((x) => x !== "0"));
-    const origNets = netsOf(before);
-    const copyNets = netsOf(after.filter((l) => !before.includes(l)));
-    const shared = [...copyNets].filter((x) => origNets.has(x));
-    check("the copy shares no net with the original but ground", shared.length === 0,
-      `shared nets: ${shared.join(", ")}`);
-    check("ground is still shared", after.some((l) => nodesOf(l).includes("0")),
-      "the copy must stay referenced to ground");
+    // The copy *does* join the original wherever the net names meet — that is
+    // LTSpice's behaviour and stays the default. What must not happen is that it
+    // happens silently: the paste reports the names it merged onto.
+    const notice = st().pasteNotice ?? [];
+    check("the paste reports which net names it joined",
+      notice.includes("UE") && notice.includes("UA1") && notice.includes("UA2"),
+      `reported: [${notice.join(", ")}]`);
   });
 
   return { total, passed: total - failures.length, failures };
