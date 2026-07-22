@@ -19,6 +19,7 @@ import { runAscExamplesTests } from "./ascExamples.test.js";
 import { runAscFidelityTests } from "./ascFidelity.test.js";
 import { runPinReseatTests } from "./pinReseat.test.js";
 import { runClipboardTests } from "./clipboard.test.js";
+import { runNetAnchorTests } from "./netAnchor.test.js";
 import { runPwlSourceTests } from "./pwlSource.test.js";
 import { runPulseSourceTests } from "./pulseSource.test.js";
 import { runLogicGateTests } from "./logicGate.test.js";
@@ -75,6 +76,8 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Pin re-seating on rotate", ...(await runPinReseatTests()) },
     // Cut/copy/paste of a selection as a .asc fragment, incl. across schematics.
     { name: "Clipboard fragments", ...(await runClipboardTests()) },
+    // Proves net anchors carry what the net-label nodes carry (Phase B).
+    { name: "Net anchors", ...(await runNetAnchorTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },

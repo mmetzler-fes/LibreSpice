@@ -9,6 +9,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
 import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 import type { AscRaw, DirectiveRaw } from "./ascPreserve.js";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { parseSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 
 
@@ -80,7 +81,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[] } {
+  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -102,6 +103,13 @@ export class LTSpiceParser {
     const directiveRaw: DirectiveRaw[] = [];
     /** The file's `Version` / `SHEET` lines, written back as-is. */
     const header: Record<string, string> = {};
+    /**
+     * Every `FLAG` as a coordinate-anchored name (see netAnchor). Collected
+     * alongside the net-label nodes, not instead of them — the differential test
+     * proves the two agree before anything is switched over. Ground is included:
+     * in the file it is simply a flag named `0`.
+     */
+    const anchors: NetAnchor[] = [];
 
     let currentSymbol: any = null;
     // Where the generated ids start. A paste parses its fragment into a store
@@ -161,6 +169,9 @@ export class LTSpiceParser {
         const flagKey = `${x},${y},${flagName}`;
         if (seenFlags.has(flagKey)) continue;
         seenFlags.add(flagKey);
+        if (!isNaN(x) && !isNaN(y) && flagName) {
+          anchors.push({ id: `anchor_${anchors.length + 1}`, x, y, name: flagName });
+        }
 
         if (flagName === "0") {
           const id = `ground_${compIdCounter++}`;
@@ -535,7 +546,15 @@ export class LTSpiceParser {
       }
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires };
+    // An `IOPIN` may precede or follow its `FLAG`, so the direction is attached
+    // once the whole file has been read — the same reason the connector nodes
+    // above are promoted at the end.
+    for (const a of anchors) {
+      const dir = iopinCoords.get(`${a.x},${a.y}`);
+      if (dir && dir !== "None") a.portType = dir;
+    }
+
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires, anchors };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
