@@ -412,8 +412,8 @@ export function parseAnalysisDirective(line: string): SimulationConfig | null {
     
     let stepTime = 1e-6;
     let stopTime = 1e-3;
-    let startTime = nums[2];
-    let maxStep = nums[3];
+    const startTime = nums[2];
+    const maxStep = nums[3];
 
     if (nums.length === 1 && nums[0] !== undefined) {
       stopTime = nums[0];

@@ -68,6 +68,14 @@ function parseDC(val: string): number {
   return m ? parseSI(m[0]) : 0;
 }
 
+/**
+ * `hasOwnProperty` through the prototype rather than off the object itself. The
+ * components tested here are built from file input, so calling the method on the
+ * instance would break on a schematic that happens to define an attribute of
+ * that name.
+ */
+const owns = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
+
 interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number }
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
@@ -672,14 +680,14 @@ export class LTSpiceParser {
       const cpar = spiceLine.match(/\bCpar\s*=\s*(\S+)/i);
       if (rser && c.seriesR !== undefined) c.seriesR = parseSI(rser[1]);
       if (cpar && c.parallelC !== undefined) c.parallelC = parseSI(cpar[1]);
-    } else if (valueStr && comp.hasOwnProperty("model")) {
+    } else if (valueStr && owns(comp, "model")) {
       // Semiconductors carry a model name (e.g. a diode's `1N4148`), not a value.
       (comp as any).model = valueStr;
     } else if (valueStr && valueStr.includes("{")) {
       // Parametric value (e.g. `{Cvar}`) — keep verbatim for the netlist so
       // .param/.step can drive it.
       comp.valueExpr = valueStr;
-    } else if (!valueStr && cType === "jumper" && comp.hasOwnProperty("resistance")) {
+    } else if (!valueStr && cType === "jumper" && owns(comp, "resistance")) {
       // A jumper carries no Value in the file: LTSpice fills it from the symbol
       // when placing, and a schematic drawn there simply has none. Take the
       // symbol's own default so it stays a link and does not become a 1 kOhm
@@ -687,10 +695,10 @@ export class LTSpiceParser {
       (comp as any).resistance = 1e-6;
     } else if (valueStr && !valueStr.includes("(")) {
       const num = parseSI(valueStr);
-      if (comp.hasOwnProperty("resistance")) (comp as any).resistance = num;
-      if (comp.hasOwnProperty("capacitance")) (comp as any).capacitance = num;
-      if (comp.hasOwnProperty("inductance")) (comp as any).inductance = num;
-      if (comp.hasOwnProperty("dcValue")) (comp as any).dcValue = num;
+      if (owns(comp, "resistance")) (comp as any).resistance = num;
+      if (owns(comp, "capacitance")) (comp as any).capacitance = num;
+      if (owns(comp, "inductance")) (comp as any).inductance = num;
+      if (owns(comp, "dcValue")) (comp as any).dcValue = num;
     }
 
     // Small-signal AC magnitude from `AC <mag>` in Value/Value2 (a bare `AC`
@@ -701,7 +709,7 @@ export class LTSpiceParser {
       if (acm) {
         (comp as any).acAmplitude = acm[1] != null ? parseSI(acm[1]) : 1;
         // An AC-only source (empty main Value) is DC 0, not the constructor default.
-        if (!valueStr && comp.hasOwnProperty("dcValue")) (comp as any).dcValue = 0;
+        if (!valueStr && owns(comp, "dcValue")) (comp as any).dcValue = 0;
       }
     }
 

@@ -45,7 +45,7 @@ for (const raw of readFileSync(scratchpad, "utf8").split("\n")) {
     section.items.push(entry);
     continue;
   }
-  const z = raw.match(/#z=([A-Za-z0-9_\-]+)/);
+  const z = raw.match(/#z=([A-Za-z0-9_-]+)/);
   if (z && entry) entry.z = z[1];   // last one under this entry wins
 }
 for (const s of sections) s.items = s.items.filter((it) => it.z);

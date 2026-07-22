@@ -428,7 +428,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroupOpen = (key: string) =>
-    setExpandedGroups((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    setExpandedGroups((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const toggleGroupAll = (members: { raw: string }[]) => {
     const raws = members.map((m) => m.raw);
     const allSel = raws.every((r) => selectedVariables.includes(r));
