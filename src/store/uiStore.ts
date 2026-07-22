@@ -52,6 +52,14 @@ interface UIState {
    * drag, the caption drags and the connector tap-to-rotate all read it.
    */
   canvasLocked: boolean;
+  /**
+   * Drag on empty canvas draws a selection rectangle instead of panning.
+   *
+   * Shift+drag already does this (React Flow's `selectionKeyCode` default), but
+   * that needs a keyboard — and the app is used on an iPad, where it is
+   * unreachable. This is the same gesture as a toggle.
+   */
+  areaSelect: boolean;
 }
 
 interface UIActions {
@@ -73,6 +81,7 @@ interface UIActions {
   setSymbolNorm: (norm: SymbolNorm) => void;
   toggleAutoProbeCurrent: () => void;
   toggleCanvasLocked: () => void;
+  toggleAreaSelect: () => void;
 }
 
 export const useUIStore = create<UIState & UIActions>((set) => ({
@@ -93,6 +102,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   symbolNorm: "en",
   autoProbeCurrent: true,
   canvasLocked: false,
+  areaSelect: false,
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null, pendingLibraryPlacement: null }),
@@ -113,4 +123,5 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
+  toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
 }));

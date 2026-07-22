@@ -14,6 +14,7 @@ import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
+import { fragmentOrigin, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { useLibraryStore } from "./libraryStore.js";
@@ -91,6 +92,8 @@ interface CircuitActions {
   removeTextBox: (id: string) => void;
   moveDataFlag: (id: string, x: number, y: number) => void;
   loadFromAsc: (ascContent: string) => void;
+  /** Insert a `.asc` fragment at `at` (flow coords); returns how many parts landed. */
+  pasteFragment: (text: string, at?: { x: number; y: number }) => number;
   clearCircuit: () => void;
   setFileHandle: (handle: any | null, name: string | null) => void;
   undo: () => void;
@@ -565,6 +568,70 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   setFileHandle: (handle, name) => set({ fileHandle: handle, fileName: name }),
+
+  /**
+   * Inserts a `.asc` fragment (see ascFragment) and leaves it selected, so the
+   * user can drag it straight into place.
+   *
+   * The fragment is parsed exactly like a file — same geometry, same attribute
+   * handling — and then reconciled with what is already on the sheet:
+   *   - ids start above the ones in use, so nothing collides,
+   *   - devices are renumbered on a designator clash (two `R1` would be one part
+   *     to SPICE), while net labels keep their name because that name *is* the
+   *     connection the user is pasting for,
+   *   - the whole block is shifted so its top-left lands on `at`.
+   *
+   * Returns the number of parts inserted, or 0 when the text was not a fragment.
+   */
+  pasteFragment: (text, at) => {
+    if (!isFragment(text)) return 0;
+    const { nodes: cur, edges: curEdges, circuit } = get();
+
+    // Start the generated ids above everything in play.
+    const usedNums = [...circuit.components.keys(), ...cur.map((n) => n.id)]
+      .map((id) => parseInt(String(id).split("_").pop() ?? "", 10))
+      .filter((n) => !isNaN(n));
+    const idStart = (usedNums.length ? Math.max(...usedNums) : 0) + 1;
+
+    const parsed = LTSpiceParser.parse(text, { idStart });
+    if (parsed.nodes.length === 0) return 0;
+
+    // Move the block so its top-left corner sits at the drop point.
+    const origin = fragmentOrigin(parsed.nodes);
+    const dx = at ? Math.round(at.x - origin.x) : 0;
+    const dy = at ? Math.round(at.y - origin.y) : 0;
+
+    const taken = new Set([...circuit.components.values()].map((c) => c.label));
+    const snap = { nodes: cur, edges: curEdges };
+
+    for (const comp of parsed.components) {
+      const node = parsed.nodes.find((n) => n.id === comp.id);
+      const type = (node?.data as { componentType?: ComponentType })?.componentType;
+      const label = pasteLabelFor(type, comp.label, taken);
+      if (label !== comp.label) comp.setProperty("label", label);
+      taken.add(label);
+      comp.position = { x: comp.position.x + dx, y: comp.position.y + dy };
+      circuit.addComponent(comp);
+    }
+
+    const added = parsed.nodes.map((n) => ({
+      ...n,
+      position: { x: n.position.x + dx, y: n.position.y + dy },
+      // Selected, so the paste can be dragged, rotated or deleted as one block
+      // without hunting for the parts that just appeared.
+      selected: true,
+      data: { ...n.data, label: circuit.components.get(n.id)?.label ?? (n.data as { label?: string }).label },
+    }));
+
+    set((state) => ({
+      nodes: [...state.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...added],
+      edges: [...state.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...parsed.edges],
+      _history: [...state._history, snap],
+      _future: [],
+    }));
+    setTimeout(() => get().rebuildConnections(), 0);
+    return added.length;
+  },
 
   clearCircuit: () => {
     const snap = { nodes: get().nodes, edges: get().edges };

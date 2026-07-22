@@ -80,7 +80,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[] } {
+  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -104,7 +104,11 @@ export class LTSpiceParser {
     const header: Record<string, string> = {};
 
     let currentSymbol: any = null;
-    let compIdCounter = 1;
+    // Where the generated ids start. A paste parses its fragment into a store
+    // that already holds `comp_1`…, so it passes a watermark above those to keep
+    // the new parts distinct. The `comp_`/`ground_`/`netlabel_` prefixes stay put
+    // — several places key behaviour off them (see isNetTerminalId).
+    let compIdCounter = opts.idStart ?? 1;
 
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);

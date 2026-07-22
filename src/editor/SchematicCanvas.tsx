@@ -48,6 +48,7 @@ import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
 import { netLabelPlacement, type LeadPin } from "./netLabelLead.js";
 import { forgetImportedRoutes } from "./importedRoutes.js";
+import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -56,6 +57,8 @@ let wireCounter = 1;
 function CanvasInner() {
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  /** Last pointer position (screen coords), so a paste lands under the cursor. */
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const dragDefRef = useRef<ComponentDefinition | null>(null);
   // Input kind of the last pointer that pressed the canvas. A touch/pen place is
   // committed on pointerup (below), so onPaneClick must not also place then and
@@ -83,7 +86,7 @@ function CanvasInner() {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
-    setDockTab, autoProbeCurrent,
+    setDockTab, autoProbeCurrent, areaSelect,
   } = useUIStore();
 
   const theme = useTheme();
@@ -355,6 +358,62 @@ function CanvasInner() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [cancelPlacing, canUndo, canRedo, undo, redo, rotateSelected, mirrorSelected, deleteSelected, startPlacing, setEditorMode, editorMode, rotatePlacement, toggleInsertComponent]);
+
+  /**
+   * Cut / copy / paste of the selection, carried as `.asc` text on the system
+   * clipboard (see ascFragment) so a block can be pasted into a *different*
+   * schematic, another tab, or after a reload.
+   *
+   * Driven by the clipboard *events* rather than `navigator.clipboard`: reading
+   * the clipboard directly is unavailable to web pages in Firefox and needs a
+   * permission prompt in Chrome, while `e.clipboardData` inside a real cut/copy/
+   * paste gesture works everywhere and asks nothing. The browser only fires these
+   * when the user actually pressed the keys, which is exactly the gate we want.
+   */
+  useEffect(() => {
+    const editingText = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      const tag = el?.tagName;
+      return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable === true;
+    };
+
+    const onCopy = (e: ClipboardEvent, cut: boolean) => {
+      // A dialog's text field owns its own clipboard behaviour.
+      if (editingText(e.target)) return;
+      const { nodes: ns, edges: es, circuit: c } = useCircuitStore.getState();
+      const fragment = buildFragment(ns, es, c);
+      if (!fragment) return;
+      e.clipboardData?.setData("text/plain", fragment);
+      e.preventDefault();
+      if (cut) deleteSelected();
+    };
+
+    const onPaste = (e: ClipboardEvent) => {
+      if (editingText(e.target)) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!text) return;
+      // Anything that isn't a schematic fragment is left to the browser — the
+      // user may be pasting into something else on the page.
+      if (!isFragment(text)) return;
+      e.preventDefault();
+      // Drop it under the pointer when we know where that is, so a paste lands
+      // where the user is looking rather than on top of the original.
+      const p = lastPointer.current;
+      const at = p ? reactFlowInstance.screenToFlowPosition(p) : undefined;
+      useCircuitStore.getState().pasteFragment(text, at);
+    };
+
+    const copy = (e: ClipboardEvent) => onCopy(e, false);
+    const cut = (e: ClipboardEvent) => onCopy(e, true);
+    window.addEventListener("copy", copy);
+    window.addEventListener("cut", cut);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("copy", copy);
+      window.removeEventListener("cut", cut);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [deleteSelected, reactFlowInstance]);
 
   const onCreateWire = useCallback(
     (connection: Connection, data: WireData) => {
@@ -778,6 +837,7 @@ function CanvasInner() {
 
         <div
           ref={wrapperRef}
+          onPointerMove={(e) => { lastPointer.current = { x: e.clientX, y: e.clientY }; }}
           style={{ flex: 1, position: "relative", cursor: cursorStyle }}
           onDragOver={onDragOver}
           onDrop={onDrop}
@@ -801,7 +861,11 @@ function CanvasInner() {
             fitViewOptions={{ padding: 0.3 }}
             defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             deleteKeyCode={null}
-            panOnDrag={!canvasLocked && editorMode !== "wire"}
+            // Area select turns the empty-canvas drag into a rubber band; Shift+drag
+            // does the same via React Flow's own selectionKeyCode and keeps working
+            // either way (see uiStore.areaSelect).
+            selectionOnDrag={areaSelect && editorMode === "select"}
+            panOnDrag={!canvasLocked && editorMode !== "wire" && !(areaSelect && editorMode === "select")}
             nodesDraggable={!canvasLocked && editorMode === "select"}
             // A connector is a grab point for the part, not the start of a wire:
             // in select mode a press on it drags the part like any other spot on

@@ -94,7 +94,7 @@ export function Toolbar() {
     circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
     showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect } = useUIStore();
   const theme = useTheme();
   const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
 
@@ -500,6 +500,18 @@ export function Toolbar() {
       <TBtn title="Select / Move (Esc)" active={editorMode === "select"} onClick={() => handleMode("select")}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M5 3l14 9-7 1-4 7z" />
+        </svg>
+      </TBtn>
+      {/* Shift+drag already draws a rubber band, but that needs a keyboard — this
+          is the same gesture for the iPad. */}
+      <TBtn
+        title="Select an area (or hold Shift and drag)"
+        active={areaSelect && editorMode === "select"}
+        disabled={editorMode !== "select"}
+        onClick={toggleAreaSelect}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="4 3" />
         </svg>
       </TBtn>
       <TBtn title="Draw Wire (W)" active={editorMode === "wire"} onClick={() => handleMode("wire")}>
