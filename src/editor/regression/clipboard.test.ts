@@ -5,6 +5,9 @@ import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { createSubcircuitComponent } from "@editor/componentFactory.js";
 import { useUIStore } from "@store/uiStore.js";
+import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
+import { ghostify } from "@editor/FragmentGhost.js";
+import { buildSchematicSvg } from "@editor/svgExport.js";
 
 /**
  * Cut / copy / paste of a selection, carried as a `.asc` fragment.
@@ -327,6 +330,42 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     check("and the cursor is empty afterwards", useUIStore.getState().pendingFragment === null);
     check("while the clipboard still holds it", st().fragmentClipboard === fragment,
       "a paste into another schematic must still be possible after putting the block down");
+  });
+
+  // ── The ghost's preview markup ────────────────────────────────────────────
+  // Both rewrites here were asserted and not checked the first time, and both
+  // silently did nothing: the backdrop pattern expected a self-closing `<rect/>`
+  // that React never emits, and the size pattern anchored at the start of a
+  // string that begins with `<?xml …?>`. The ghost drew a white card over the
+  // schematic and ignored the zoom. Checked against the real markup now.
+  await withSymbols(async () => {
+    const load = (m: string) => import(/* @vite-ignore */ m);
+    const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+    const file = path.resolve("examples", "05-2-3_Brummspannung1.asc");
+    if (!fs.existsSync(file)) return;
+
+    st().clearCircuit();
+    st().loadFromAsc(fs.readFileSync(file, "latin1"));
+    await tick(); await tick();
+    st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
+
+    const { nodes, edges } = LTSpiceParser.parse(buildFragment(st().nodes, st().edges, st().circuit));
+    const raw = buildSchematicSvg(nodes, edges, "en");
+    const ghost = ghostify(raw);
+
+    check("the export really does carry what has to be removed",
+      /fill="#ffffff"/.test(raw) && /<svg\b[^>]*width="\d/.test(raw),
+      "the fixture stopped exercising the rewrites — they would pass vacuously");
+    check("the ghost drops the white backdrop", !/fill="#ffffff"/.test(ghost),
+      `still present in: ${ghost.slice(0, 200)}`);
+    check("the ghost scales with its container",
+      /<svg\b[^>]*width="100%"[^>]*height="100%"/.test(ghost),
+      `root tag: ${ghost.slice(0, 200)}`);
+    check("the viewBox survives", /viewBox="/.test(ghost),
+      "without it the container cannot scale the drawing");
+    check("the drawing itself is untouched",
+      (ghost.match(/<polyline/g) ?? []).length === (raw.match(/<polyline/g) ?? []).length,
+      "the rewrite must only touch the root tag and the backdrop");
   });
 
   return { total, passed: total - failures.length, failures };

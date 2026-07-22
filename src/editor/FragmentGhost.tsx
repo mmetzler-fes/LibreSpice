@@ -13,6 +13,35 @@ interface FragmentGhostProps {
 }
 
 /**
+ * The export's SVG, turned into something usable as an overlay.
+ *
+ * Two things have to go, and both were asserted rather than checked the first
+ * time round — the markup does not look the way it reads in the source:
+ *
+ *  - The paper. `buildSchematicSvg` paints a white backdrop so an exported file
+ *    prints sensibly. React renders it as `<rect …></rect>`, not self-closing,
+ *    so a pattern expecting `/>` matched nothing and the ghost drew a white card
+ *    over the schematic it was supposed to hover above.
+ *  - The fixed pixel size. The root carries `width`/`height` in absolute units,
+ *    which the container's size cannot override, so the ghost ignored the zoom:
+ *    right at 1:1, towering over the schematic when zoomed out — and the block
+ *    then landed nowhere near where it appeared to hover. Handing the sizing to
+ *    the container lets the `viewBox` scale it with the canvas.
+ *
+ * Only the *first* `<svg>` tag is touched, and only its own attributes, so
+ * nothing inside the drawing is disturbed.
+ */
+export function ghostify(svg: string): string {
+  return svg
+    .replace(/<rect\b[^>]*fill="#ffffff"[^>]*>(?:<\/rect>)?/, "")
+    .replace(/<svg\b[^>]*>/, (tag) =>
+      tag
+        .replace(/\swidth="[^"]*"/, ' width="100%"')
+        .replace(/\sheight="[^"]*"/, ' height="100%"'),
+    );
+}
+
+/**
  * Semi-transparent preview of a cut/copied block, following the cursor until it
  * is put down — the way LTSpice carries a copied selection.
  *
@@ -37,9 +66,7 @@ export function FragmentGhost({ wrapperRef, fragment }: FragmentGhostProps) {
       const box = svg.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
       if (!box) return null;
       return {
-        // The export paints itself onto white paper; a ghost must not hide the
-        // schematic underneath, so that backdrop is dropped.
-        svg: svg.replace(/<rect[^>]*fill="#ffffff"[^>]*\/>/, ""),
+        svg: ghostify(svg),
         view: { x: +box[1], y: +box[2], w: +box[3], h: +box[4] },
         origin: fragmentOrigin(nodes),
       };
