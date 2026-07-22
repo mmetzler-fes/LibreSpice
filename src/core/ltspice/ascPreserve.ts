@@ -69,6 +69,20 @@ export interface AscPreserved {
   /** `WIRE` lines the pin-to-pin edge model cannot represent (stubs, spurs).
    *  Written back untouched — see LTSpiceParser for why that is safe. */
   orphanWires?: string[];
+  /**
+   * Also write the `FLAG`s that are *derived* rather than drawn: one for every
+   * named net that has no terminal of its own, and one for every wire showing
+   * its net's name. Default true, which is what saving a whole schematic needs —
+   * those names would otherwise be lost, the file having nowhere else to put
+   * them.
+   *
+   * A *fragment* sets it false. There the rule is the opposite: it must contain
+   * what the user selected and nothing else. Deriving flags from the nets the
+   * selected parts happen to sit on dragged names along that were never picked,
+   * and pasting turned each into a label with a fresh wire to the nearest pin —
+   * wires that appeared from nowhere.
+   */
+  derivedFlags?: boolean;
 }
 
 /**

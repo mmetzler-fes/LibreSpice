@@ -53,15 +53,22 @@ export function buildFragment(nodes: Node[], edges: Edge[], circuit: any): strin
     raw: `TEXT ${MODEL_TEXT_X} ${MODEL_TEXT_Y + i * 32} Left 0 !${raw.replace(/\r?\n/g, "\\n")}`,
   }));
 
-  // The full circuit goes in on purpose: the exporter only writes a net's flag
-  // when one of that net's pins is actually among the nodes it was given, so the
-  // extra nets fall away by themselves. Sheet state beyond the models is empty.
+  // `derivedFlags: false` is the rule that makes a fragment a *selection*: only
+  // the labels and connectors actually picked come along. Saving a whole
+  // schematic also writes a flag for every named net that has no terminal, since
+  // the file has nowhere else to keep that name — but in a fragment those are
+  // names nobody selected, and pasting turned each into a label with a fresh
+  // wire to the nearest pin. Copying four parts produced three flags and three
+  // wires out of nothing.
+  //
+  // The full circuit still goes in, because the values and models of the picked
+  // parts are read from it. Sheet state beyond the carried models is empty.
   //
   // No marker line of our own: `.asc` has no comment syntax outside a
   // `TEXT … ;…` (which would paste back as a stray text box), and an unknown
   // leading line is exactly the kind of thing that would stop LTSpice reading the
   // payload. A fragment is recognised by its shape instead — see isFragment.
-  return LTSpiceExporter.export(picked, inner, blocks.join("\n"), circuit, [], [], [], { directiveRaw }) + "\n";
+  return LTSpiceExporter.export(picked, inner, blocks.join("\n"), circuit, [], [], [], { directiveRaw, derivedFlags: false }) + "\n";
 }
 
 /** Where a carried `.subckt` block is parked on the fragment's sheet. */

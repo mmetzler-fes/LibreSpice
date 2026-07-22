@@ -147,7 +147,39 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     check("the netlist is not empty afterwards", /^[RCVL]/im.test(st().netlist),
       `netlist:\n${st().netlist}`);
 
+    // ── A fragment holds the selection and nothing else ─────────────────────
+    // Reported on a partial copy: parts appeared with wires nobody had drawn.
+    // Saving a whole schematic writes a `FLAG` for every named net that has no
+    // terminal, because the file has nowhere else to keep the name — in a
+    // fragment those are names nobody selected, and each pasted back as a label
+    // with a fresh wire to the nearest pin. Four parts produced three flags.
+    st().clearCircuit();
+    st().loadFromAsc(src);
+    await tick(); await tick();
+    {
+      const want = new Set(["R1", "C1"]);
+      st().setNodes(st().nodes.map((x) => ({ ...x, selected: want.has(String((x.data as { label?: string }).label)) })));
+      const partial = buildFragment(st().nodes, st().edges, st().circuit);
+
+      check("a partial copy carries only the parts picked",
+        (partial.match(/^SYMBOL /gm) ?? []).length === 2,
+        `fragment was:\n${partial}`);
+      check("and invents no flags for nets it merely touches",
+        !/^FLAG /m.test(partial),
+        `unpicked names came along:\n${partial}`);
+
+      const idsBeforePartial = new Set(st().nodes.map((x) => x.id));
+      st().pasteFragment(partial, { x: 100, y: 600 });
+      await tick(); await tick();
+      const invented = st().edges.filter((e) => !idsBeforePartial.has(e.source) || !idsBeforePartial.has(e.target));
+      check("so pasting it draws no wires of its own", invented.length === 0,
+        `${invented.length} wires appeared from nowhere`);
+    }
+
     // ── A partial selection drops the wires that leave it ───────────────────
+    st().clearCircuit();
+    st().loadFromAsc(src);
+    await tick(); await tick();
     st().clearCircuit();
     st().loadFromAsc(src);
     await tick(); await tick();

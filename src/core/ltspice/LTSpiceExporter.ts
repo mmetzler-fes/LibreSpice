@@ -555,6 +555,11 @@ export class LTSpiceExporter {
       wireLines.push(`WIRE ${fwd}`);
     }
 
+    // Both flag sources below are *derived*: nothing on the sheet was placed to
+    // make them, they exist so a saved file can carry a name the format has
+    // nowhere else to keep. A fragment must not have them (see AscPreserved).
+    const derivedFlags = preserved.derivedFlags !== false;
+
     // Wire-carried net *names* (the editor's `visible` label on a wire) → a
     // `FLAG` at the label's dock point. LTSpice has no notion of a label owned by
     // a wire, so this is its faithful representation: a flag sitting on the wire.
@@ -568,7 +573,7 @@ export class LTSpiceExporter {
       const netId = circuit?.components?.get(node.id)?.ports?.[0]?.netId;
       if (netId) labelledNets.add(netId);
     }
-    if (circuit?.nets) {
+    if (circuit?.nets && derivedFlags) {
       for (const edge of edges) {
         const d = edge.data as { showLabel?: boolean; labelT?: number; waypoints?: Pt[] } | undefined;
         if (!d?.showLabel) continue;
@@ -591,7 +596,7 @@ export class LTSpiceExporter {
     // Emitting one here as well gave every labelled net two flags, and each
     // save/load cycle stacked another label on the same spot — the file grew and
     // the schematic collected invisible duplicates.
-    if (circuit?.nets) {
+    if (circuit?.nets && derivedFlags) {
       for (const [netId, net] of circuit.nets as Map<string, { nodeLabel: string; connectedPortIds: Set<string> }>) {
         if (netId === "0" || net.nodeLabel === netId || labelledNets.has(netId)) continue;
         for (const portId of net.connectedPortIds) {
