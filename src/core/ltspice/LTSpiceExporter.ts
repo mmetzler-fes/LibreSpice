@@ -5,7 +5,8 @@ import type { PortType } from "@core/components/special/Special.js";
 import {
   CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
-import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
+import { outwardAxis, type Axis } from "@core/geometry/ortho.js";
+import { wireRoutes, routeOf, type PinLookup } from "@core/geometry/wireRoutes.js";
 import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 import { sameAttrValue, shiftWindowLine, formatEng, type AscRaw, type AscPreserved } from "./ascPreserve.js";
@@ -183,9 +184,7 @@ function dockPoint(verts: Pt[], t: number): Pt {
  * is the end of the wire stays an endpoint, exactly as in LTSpice, and moving it
  * is meant to move the wire.
  */
-function spliceAnnotations(
-  nodes: Node[], edges: Edge[], pinCoord: Map<string, Pt>, pinAxis: Map<string, Axis>,
-): Edge[] {
+function spliceAnnotations(nodes: Node[], edges: Edge[], pins: PinLookup): Edge[] {
   const annot = new Set(
     nodes
       .filter((n) => {
@@ -247,16 +246,10 @@ function spliceAnnotations(
     const marked = (nodes.find((n) => n.id === id)?.data as { ascPassThrough?: boolean })?.ascPassThrough;
     if (marked === false) continue;
     if (marked === undefined) {
-      const label = pinCoord.get(`${id}-t`);
-      const ca = pinCoord.get(`${A.node}-${A.handle}`), cb = pinCoord.get(`${B.node}-${B.handle}`);
+      const label = pins.at(id, "t");
+      const ca = pins.at(A.node, A.handle), cb = pins.at(B.node, B.handle);
       if (!label || !ca || !cb) continue;
-      const mw = (merged.data!.waypoints as Pt[]).map((w) => ({ x: Math.round(w.x), y: Math.round(w.y) }));
-      const verts = merged.data!.diagonal
-        ? [ca, ...mw, cb]
-        : orthoVertices([ca, ...mw, cb], {
-            startAxis: merged.data!.sourceTap ? undefined : pinAxis.get(`${A.node}-${A.handle}`),
-            endAxis: merged.data!.targetTap ? undefined : pinAxis.get(`${B.node}-${B.handle}`),
-          });
+      const verts = routeOf(merged, ca, cb, pins);
       if (!projectsInside(label, verts, 6)) continue;
     }
 
@@ -510,7 +503,14 @@ export class LTSpiceExporter {
     // a diagonal. Routing neighbour-to-neighbour and letting the flag land on the
     // result keeps the label free to move anywhere along (or near) the wire
     // without touching it.
-    const routes = spliceAnnotations(nodes, edges, pinCoord, pinAxis);
+    // Pins measured in LTSpice symbol space — *not* the canvas's `getNodePins`,
+    // which differs by a few pixels (see wireRoutes for why that matters).
+    const symbolPins: PinLookup = {
+      at: (nodeId, handle) => pinCoord.get(`${nodeId}-${handle}`),
+      axis: (nodeId, handle) => pinAxis.get(`${nodeId}-${handle}`),
+    };
+
+    const routes = spliceAnnotations(nodes, edges, symbolPins);
     // Flag coordinates written so far (grounds, net labels, connectors), used to
     // break wires the way LTSpice does. Wire *labels* are placed further down —
     // they are docked onto a wire that already exists, so they cannot split it.
@@ -522,19 +522,7 @@ export class LTSpiceExporter {
 
     const wireSeen = new Set<string>();
     const wireLines: string[] = [];
-    for (const edge of routes) {
-      const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
-      const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
-      if (!a || !b) continue;
-      const wps = ((edge.data?.waypoints as Pt[] | undefined) ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
-      // A wire imported along a diagonal LTSpice segment keeps its exact path:
-      // orthogonalising it would insert a right-angle leg that can overlap a
-      // neighbouring net's leg and merge the two on re-import (see LTSpiceParser).
-      const hints: RouteHints = {
-        startAxis: edge.data?.sourceTap ? undefined : pinAxis.get(`${edge.source}-${edge.sourceHandle}`),
-        endAxis: edge.data?.targetTap ? undefined : pinAxis.get(`${edge.target}-${edge.targetHandle}`),
-      };
-      const verts = edge.data?.diagonal ? [a, ...wps, b] : orthoVertices([a, ...wps, b], hints);
+    for (const { verts } of wireRoutes(routes, symbolPins)) {
       for (let i = 0; i < verts.length - 1; i++) {
         const p = verts[i], q = verts[i + 1];
         if (p.x === q.x && p.y === q.y) continue;
@@ -592,11 +580,7 @@ export class LTSpiceExporter {
         const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
         const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
         if (!a || !b) continue;
-        const wps = (d.waypoints ?? []).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
-        const dock = dockPoint(orthoVertices([a, ...wps, b], {
-          startAxis: pinAxis.get(`${edge.source}-${edge.sourceHandle}`),
-          endAxis: pinAxis.get(`${edge.target}-${edge.targetHandle}`),
-        }), typeof d.labelT === "number" ? d.labelT : 0.5);
+        const dock = dockPoint(routeOf(edge, a, b, symbolPins), typeof d.labelT === "number" ? d.labelT : 0.5);
         flagLines.push(`FLAG ${Math.round(dock.x)} ${Math.round(dock.y)} ${name}`);
         labelledNets.add(netId);
       }
