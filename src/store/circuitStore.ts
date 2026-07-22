@@ -14,7 +14,6 @@ import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
@@ -45,15 +44,6 @@ interface CircuitState {
   ascHeader: Record<string, string>;
   /** `WIRE` lines of the loaded file that no edge represents; preserved on save. */
   ascOrphanWires: string[];
-  /**
-   * The loaded file's `FLAG`s as coordinate-anchored names (see netAnchor).
-   *
-   * Held beside the net-label nodes rather than in place of them: this is the
-   * first half of moving labels out of the topology, and it earns the switch by
-   * being proved equivalent first (netAnchor.test.ts) instead of by assertion.
-   * Nothing reads it yet.
-   */
-  ascAnchors: NetAnchor[];
   /**
    * Last copied fragment, kept inside the app beside the system clipboard.
    *
@@ -224,7 +214,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   directiveRaw: [],
   ascHeader: {},
   ascOrphanWires: [],
-  ascAnchors: [],
   fragmentClipboard: "",
   pasteNotice: null,
   showDirectivesOnCanvas: false,
@@ -581,7 +570,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -614,7 +603,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       directiveRaw,
       ascHeader: header,
       ascOrphanWires: orphanWires,
-      ascAnchors: anchors,
       dataFlags,
       textBoxes,
       sheetShapes,
@@ -804,7 +792,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       directiveRaw: [],
       ascHeader: {},
       ascOrphanWires: [],
-      ascAnchors: [],
       simulationConfig: DEFAULT_CONFIG,
       showDirectivesOnCanvas: false,
       directivesPos: { x: 40, y: 40 },

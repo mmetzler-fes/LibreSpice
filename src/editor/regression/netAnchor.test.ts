@@ -1,6 +1,6 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
-import { formatAnchor, isGroundAnchor } from "@core/circuit/netAnchor.js";
+import { formatAnchor, isGroundAnchor, anchorsFromNodes } from "@core/circuit/netAnchor.js";
 import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
 import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
 import { getNodePins } from "@editor/pinGeometry.js";
@@ -65,7 +65,7 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
           s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
           { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
         ));
-        const fromAnchors = s.ascAnchors.flatMap(formatAnchor).sort();
+        const fromAnchors = anchorsFromNodes(s.nodes).flatMap(formatAnchor).sort();
 
         if (written.join("\n") !== fromAnchors.join("\n")) {
           const only = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
@@ -111,7 +111,7 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
           .filter((r) => r.netId !== "");
 
         const mismatches: string[] = [];
-        for (const a of s.ascAnchors) {
+        for (const a of anchorsFromNodes(s.nodes)) {
           if (isGroundAnchor(a)) continue; // ground stays a component for now
           // The label node the parser made for this same flag.
           const node = s.nodes.find((n) => {
@@ -134,6 +134,59 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       } catch (e) {
         fail(name, `threw: ${(e as Error).message}`);
       }
+    }
+
+    // ── The projection holds while the schematic is edited ──────────────────
+    // Anchors used to be a snapshot taken at load, which was fine for proving
+    // the idea and useless for building on: the moment a label moved, the list
+    // described where the name *had been*. Derived from the parts instead, it
+    // cannot drift — and that is what this checks, by editing and asking again.
+    total++;
+    try {
+      const file = path.resolve("examples", "05-2-3_Brummspannung1.asc");
+      st().clearCircuit();
+      st().loadFromAsc(fs.readFileSync(file, "latin1"));
+      await tick(); await tick();
+
+      const agrees = (what: string) => {
+        const s = st();
+        const written = flagLines(LTSpiceExporter.export(
+          s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
+          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
+        ));
+        const derived = anchorsFromNodes(s.nodes).flatMap(formatAnchor).sort();
+        if (written.join("\n") !== derived.join("\n")) {
+          fail("anchors keep up with edits", `after ${what}:\n    written: ${written.join(" | ")}\n    derived: ${derived.join(" | ")}`);
+          return false;
+        }
+        return true;
+      };
+
+      if (agrees("loading")) {
+        // Move a label: the anchor has to move with it, not stay where the file
+        // put it.
+        const label = st().nodes.find((n) => (n.data as { label?: string }).label === "UA1")!;
+        st().setNodes(st().nodes.map((n) =>
+          n.id === label.id ? { ...n, position: { x: n.position.x + 48, y: n.position.y - 16 } } : n));
+        await tick();
+        if (agrees("moving a label")) {
+          // Rename one: same again for the name itself.
+          st().updateComponentProperty(label.id, "label", "UAx");
+          await tick();
+          if (agrees("renaming a label")) {
+            // And a ground, whose flag sits at its pin rather than its centre.
+            const gnd = st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "ground");
+            if (gnd) {
+              st().setNodes(st().nodes.map((n) =>
+                n.id === gnd.id ? { ...n, position: { x: n.position.x - 32, y: n.position.y } } : n));
+              await tick();
+              agrees("moving a ground");
+            }
+          }
+        }
+      }
+    } catch (e) {
+      fail("anchors keep up with edits", `threw: ${(e as Error).message}`);
     }
 
     // ── The shape of an anchor ─────────────────────────────────────────────

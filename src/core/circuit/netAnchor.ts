@@ -1,4 +1,5 @@
 import type { PortType } from "@core/components/special/Special.js";
+import { CENTER, GROUND_PIN } from "@core/ltspice/ltspiceGeometry.js";
 
 /**
  * A name pinned to a coordinate, naming whatever net passes underneath.
@@ -33,6 +34,42 @@ export interface NetAnchor {
   name: string;
   /** Set only for a connector: the `IOPIN` direction it declares. */
   portType?: PortType;
+}
+
+/**
+ * The anchors a schematic currently has, read off its parts.
+ *
+ * Derived rather than stored, and that is the point: an anchor list kept as
+ * state would be a second copy of where the names sit, correct only until the
+ * user moved a label. Computing it means it cannot drift — and it is the
+ * projection the switch runs on, since the eventual model is this list with the
+ * nodes gone rather than the two side by side.
+ *
+ * The coordinate is the flag's, not the node's: a net terminal docks at its
+ * centre, a ground at its pin. Those two offsets are what the exporter uses to
+ * place `FLAG` lines, and using anything else here would put the name half a
+ * symbol away from where the file says it is.
+ */
+export function anchorsFromNodes(nodes: { id: string; position: { x: number; y: number }; data: unknown }[]): NetAnchor[] {
+  const out: NetAnchor[] = [];
+  for (const n of nodes) {
+    const d = n.data as { componentType?: string; label?: string; portType?: PortType };
+    const name = String(d.label ?? "").trim();
+    if (!name) continue;
+    if (d.componentType === "ground") {
+      out.push({ id: n.id, x: Math.round(n.position.x + GROUND_PIN.dx), y: Math.round(n.position.y + GROUND_PIN.dy), name: "0" });
+    } else if (d.componentType === "netlabel" || d.componentType === "netconnector") {
+      const portType = d.componentType === "netconnector" ? d.portType ?? "BiDir" : undefined;
+      out.push({
+        id: n.id,
+        x: Math.round(n.position.x + CENTER),
+        y: Math.round(n.position.y + CENTER),
+        name,
+        ...(portType && portType !== "None" ? { portType } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 /** `0` and `GND` name the ground net wherever they appear. */
