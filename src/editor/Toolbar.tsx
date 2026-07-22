@@ -95,7 +95,7 @@ export function Toolbar() {
     circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
     showDirectivesOnCanvas, directivesPos, setFragmentClipboard,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect } = useUIStore();
+  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect, setPendingFragment } = useUIStore();
   const theme = useTheme();
   const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
 
@@ -188,6 +188,9 @@ export function Toolbar() {
       // No system clipboard — the in-app copy above still carries this session.
     }
     if (cut) deleteSelected();
+    // The block now rides on the cursor until it is put down — on a touch device
+    // that is the whole gesture: select, press Copy, drag, lift.
+    setPendingFragment(fragment);
   };
 
   /**
@@ -670,13 +673,13 @@ export function Toolbar() {
       <TBtn title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo()}>
         <Ico d="M15 14l5-5-5-5 M20 9H9a4 4 0 0 0 0 8h1" />
       </TBtn>
-      <TBtn title="Copy selection (Ctrl+C)" onClick={() => copySelectionToClipboard(false)} disabled={!hasSelection}>
+      <TBtn title="Copy selection (Ctrl+C) — then click where it should land" onClick={() => copySelectionToClipboard(false)} disabled={!hasSelection}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <rect x="9" y="9" width="12" height="12" rx="2" />
           <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
         </svg>
       </TBtn>
-      <TBtn title="Cut selection (Ctrl+X)" onClick={() => copySelectionToClipboard(true)} disabled={!hasSelection}>
+      <TBtn title="Cut selection (Ctrl+X) — then click where it should land" onClick={() => copySelectionToClipboard(true)} disabled={!hasSelection}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" />
           <path d="M8.1 15.9 20 4M4 4l11.9 11.9" />

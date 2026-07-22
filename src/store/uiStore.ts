@@ -60,6 +60,14 @@ interface UIState {
    * unreachable. This is the same gesture as a toggle.
    */
   areaSelect: boolean;
+  /**
+   * A cut/copied block riding on the cursor until it is put down, as `.asc` text.
+   *
+   * Separate from the clipboard on purpose: the clipboard is what makes a paste
+   * into *another* schematic work, while this is the immediate "carry it and
+   * click" gesture LTSpice has. A copy fills both.
+   */
+  pendingFragment: string | null;
 }
 
 interface UIActions {
@@ -82,6 +90,7 @@ interface UIActions {
   toggleAutoProbeCurrent: () => void;
   toggleCanvasLocked: () => void;
   toggleAreaSelect: () => void;
+  setPendingFragment: (text: string | null) => void;
 }
 
 export const useUIStore = create<UIState & UIActions>((set) => ({
@@ -103,6 +112,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   autoProbeCurrent: true,
   canvasLocked: false,
   areaSelect: false,
+  pendingFragment: null,
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null, pendingLibraryPlacement: null }),
@@ -124,4 +134,5 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
   toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
+  setPendingFragment: (pendingFragment) => set({ pendingFragment }),
 }));

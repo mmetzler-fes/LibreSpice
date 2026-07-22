@@ -48,6 +48,7 @@ import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
 import { netLabelPlacement, type LeadPin } from "./netLabelLead.js";
 import { forgetImportedRoutes } from "./importedRoutes.js";
+import { FragmentGhost } from "./FragmentGhost.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 
 const NODE_TYPES = { component: ComponentNode };
@@ -86,7 +87,7 @@ function CanvasInner() {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
-    setDockTab, autoProbeCurrent, areaSelect,
+    setDockTab, autoProbeCurrent, areaSelect, pendingFragment,
   } = useUIStore();
 
   const theme = useTheme();
@@ -323,7 +324,12 @@ function CanvasInner() {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
-      if (e.key === "Escape") { cancelPlacing(); setEditorMode("select"); return; }
+      if (e.key === "Escape") {
+        // A carried block is dropped first: Escape means "not this", and the
+        // block is the most recent thing the user picked up.
+        if (useUIStore.getState().pendingFragment) { useUIStore.getState().setPendingFragment(null); return; }
+        cancelPlacing(); setEditorMode("select"); return;
+      }
       if (e.key === "F2") { e.preventDefault(); toggleInsertComponent(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); if (canUndo()) undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); if (canRedo()) redo(); return; }
@@ -386,6 +392,10 @@ function CanvasInner() {
       e.clipboardData?.setData("text/plain", fragment);
       e.preventDefault();
       if (cut) deleteSelected();
+      // The block now rides on the cursor until it is clicked down, as it does in
+      // LTSpice. The clipboard is filled too — that is what a paste into another
+      // schematic later uses.
+      useUIStore.getState().setPendingFragment(fragment);
     };
 
     const onPaste = (e: ClipboardEvent) => {
@@ -559,10 +569,38 @@ function CanvasInner() {
   );
 
   /** Touch/pen long-press stands in for the right-click there is no way to make. */
+  /**
+   * Put down a block that is riding on the cursor after a cut or copy.
+   *
+   * Takes precedence over everything else a click on the pane does: while a
+   * block is being carried, that is unambiguously what the click is for.
+   */
+  const dropPendingFragment = useCallback(
+    (clientX: number, clientY: number) => {
+      const text = useUIStore.getState().pendingFragment;
+      if (!text) return false;
+      const pos = clientToFlow(clientX, clientY);
+      useCircuitStore.getState().pasteFragment(text, { x: snapToGrid(pos.x), y: snapToGrid(pos.y) });
+      useUIStore.getState().setPendingFragment(null);
+      return true;
+    },
+    [clientToFlow],
+  );
+
   const onWrapperPointerDown = useCallback(
     (e: React.PointerEvent) => {
       lastPointerTypeRef.current = e.pointerType;
       if (!isLongPressPointer(e)) return;
+      // Carrying a cut/copied block: the ghost follows the finger and the block
+      // lands where it lifts. Without this a touch device could pick a block up
+      // and never put it down — ReactFlow delivers no pane click for touch.
+      if (useUIStore.getState().pendingFragment) {
+        trackPointerDrag(e, () => {}, (ev) => {
+          if (ev.type !== "pointerup") return;
+          dropPendingFragment(ev.clientX, ev.clientY);
+        });
+        return;
+      }
       // Placing a part: the ghost tracks the finger/stylus, so dropping it where
       // the pointer lifts is the natural gesture. ReactFlow never delivers a
       // pane click for touch, so without this the ghost could not be committed.
@@ -584,7 +622,7 @@ function CanvasInner() {
         else if (edge) openEdgeMenu(edge, x, y);
       });
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu, dropPendingFragment],
   );
 
   /** Add a component data-point (voltage across / current through). Placed just
@@ -679,6 +717,7 @@ function CanvasInner() {
 
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
+      if (dropPendingFragment(event.clientX, event.clientY)) return;
       setSelectedComponentId(null);
       // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
       // mouse commits its placement here, on the pane click.
@@ -691,7 +730,7 @@ function CanvasInner() {
         }
       }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, clientToFlow],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, clientToFlow, dropPendingFragment],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
@@ -960,6 +999,8 @@ function CanvasInner() {
               </button>
             </div>
           )}
+
+          {pendingFragment && <FragmentGhost wrapperRef={wrapperRef} fragment={pendingFragment} />}
 
           {editorMode === "wire" && (
             <WireOverlay wrapperRef={wrapperRef} nodes={nodes} edges={edges} onCreateWire={onCreateWire} />

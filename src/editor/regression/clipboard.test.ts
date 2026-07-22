@@ -4,6 +4,7 @@ import { withSymbols } from "./withSymbols.js";
 import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { createSubcircuitComponent } from "@editor/componentFactory.js";
+import { useUIStore } from "@store/uiStore.js";
 
 /**
  * Cut / copy / paste of a selection, carried as a `.asc` fragment.
@@ -287,6 +288,45 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     check("the paste reports which net names it joined",
       notice.includes("UE") && notice.includes("UA1") && notice.includes("UA2"),
       `reported: [${notice.join(", ")}]`);
+  });
+
+  // ── Carrying a block on the cursor ────────────────────────────────────────
+  // LTSpice hands a cut/copied block to the cursor and puts it down on the next
+  // click. The clipboard is filled at the same time, because that — not the
+  // ghost — is what a paste into another schematic uses later.
+  await withSymbols(async () => {
+    const load = (m: string) => import(/* @vite-ignore */ m);
+    const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+    const file = path.resolve("examples", "06-2-2_RC_HP1_orig.asc");
+    if (!fs.existsSync(file)) return;
+
+    st().clearCircuit();
+    st().loadFromAsc(fs.readFileSync(file, "latin1"));
+    await tick(); await tick();
+    const partsBefore = st().nodes.length;
+
+    st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
+    const fragment = buildFragment(st().nodes, st().edges, st().circuit);
+
+    // What a copy does: fill both, so the block can be put down now *and* pasted
+    // into another schematic later.
+    useUIStore.getState().setPendingFragment(fragment);
+    st().setFragmentClipboard(fragment);
+    check("a copy hands the block to the cursor", useUIStore.getState().pendingFragment === fragment);
+    check("and fills the clipboard as well", st().fragmentClipboard === fragment);
+
+    // Putting it down is what actually inserts it — nothing lands before that.
+    check("nothing is inserted while it is only being carried", st().nodes.length === partsBefore,
+      `${st().nodes.length} parts, expected ${partsBefore}`);
+
+    st().pasteFragment(useUIStore.getState().pendingFragment!, { x: 600, y: 400 });
+    useUIStore.getState().setPendingFragment(null);
+    await tick(); await tick();
+    check("putting it down inserts it", st().nodes.length > partsBefore,
+      `${st().nodes.length} parts, expected more than ${partsBefore}`);
+    check("and the cursor is empty afterwards", useUIStore.getState().pendingFragment === null);
+    check("while the clipboard still holds it", st().fragmentClipboard === fragment,
+      "a paste into another schematic must still be possible after putting the block down");
   });
 
   return { total, passed: total - failures.length, failures };
