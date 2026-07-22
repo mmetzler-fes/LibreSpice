@@ -91,7 +91,7 @@ export function Toolbar() {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
-    circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes,
+    circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
     showDirectivesOnCanvas, directivesPos,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm } = useUIStore();
@@ -176,7 +176,7 @@ export function Toolbar() {
   };
 
   const handleSave = async (saveAs: boolean = false) => {
-    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes);
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes, { directiveRaw, header: ascHeader, orphanWires: ascOrphanWires });
     if ("showSaveFilePicker" in window) {
       try {
         let handle = fileHandle;

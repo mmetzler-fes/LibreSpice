@@ -16,6 +16,8 @@ import { runKeyboardViewportTests } from "./keyboardViewport.test.js";
 import { runToolbarTests } from "./toolbar.test.js";
 import { runWireConnectorTests } from "./wireConnector.test.js";
 import { runAscExamplesTests } from "./ascExamples.test.js";
+import { runAscFidelityTests } from "./ascFidelity.test.js";
+import { runPinReseatTests } from "./pinReseat.test.js";
 import { runPwlSourceTests } from "./pwlSource.test.js";
 import { runPulseSourceTests } from "./pulseSource.test.js";
 import { runLogicGateTests } from "./logicGate.test.js";
@@ -66,6 +68,10 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Wire connector", ...runWireConnectorTests() },
     // Reads every examples/*.asc, saves it to a temp file and re-reads it.
     { name: "ASC examples round-trip", ...(await runAscExamplesTests()) },
+    // Compares the saved *text* against the source file, not just the circuit.
+    { name: "ASC file fidelity", ...(await runAscFidelityTests()) },
+    // Rotating a two-pin part re-seats its wires and reverses its node order.
+    { name: "Pin re-seating on rotate", ...(await runPinReseatTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },

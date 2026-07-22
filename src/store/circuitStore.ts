@@ -8,10 +8,12 @@ import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type S
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
 import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
+import { reseatTwoPinEdges } from "@editor/pinReseat.js";
 import { useUIStore } from "./uiStore.js";
 import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
+import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { useLibraryStore } from "./libraryStore.js";
@@ -32,6 +34,14 @@ interface CircuitState {
   netlist: string;
   simulationConfig: SimulationConfig;
   spiceDirectives: string;
+  /** The directive `TEXT` lines of the loaded `.asc`, verbatim. An unedited
+   *  directive is written back from here instead of being re-laid-out at a
+   *  hardcoded position (see ascPreserve.ts). */
+  directiveRaw: DirectiveRaw[];
+  /** The loaded file's `Version` / `SHEET` lines, written back verbatim. */
+  ascHeader: Record<string, string>;
+  /** `WIRE` lines of the loaded file that no edge represents; preserved on save. */
+  ascOrphanWires: string[];
   /** Show the SPICE directives as a text box on the schematic (LTSpice-style). */
   showDirectivesOnCanvas: boolean;
   /** Position (flow coords) of the on-canvas directive text box. */
@@ -134,6 +144,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   netlist: "",
   simulationConfig: DEFAULT_CONFIG,
   spiceDirectives: "",
+  directiveRaw: [],
+  ascHeader: {},
+  ascOrphanWires: [],
   showDirectivesOnCanvas: false,
   directivesPos: { x: 40, y: 40 },
   circuitName: "Untitled",
@@ -258,7 +271,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, label: component.label, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }), ...(gateType !== undefined && { gateType }), ...(inputs !== undefined && { inputs }), ...(edge !== undefined && { edge }), ...(asyncPolarity !== undefined && { asyncPolarity }), ...(kind !== undefined && { kind }) } }
+          // `ascRaw.attrs` records the attribute lines this part was loaded with,
+          // and the exporter hands them back verbatim while they still hold. An
+          // edit here is exactly the event that invalidates them, so drop them
+          // and let the exporter write what the component now says. The `windows`
+          // half survives: a value edit says nothing about caption placement.
+          ? { ...n, data: { ...n.data, label: component.label, ascRaw: { ...(n.data as { ascRaw?: { windows?: Record<number, string> } }).ascRaw, attrs: undefined }, ...(valueLabel !== undefined && { valueLabel }), ...(sourceType !== undefined && { sourceType }), ...(portType !== undefined && { portType }), ...(gateType !== undefined && { gateType }), ...(inputs !== undefined && { inputs }), ...(edge !== undefined && { edge }), ...(asyncPolarity !== undefined && { asyncPolarity }), ...(kind !== undefined && { kind }) } }
           : n,
       ),
       propertyVersion: state.propertyVersion + 1,
@@ -472,7 +490,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   updateTextBox: (id, patch) =>
-    set((state) => ({ textBoxes: state.textBoxes.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+    set((state) => ({
+      textBoxes: state.textBoxes.map((t) => {
+        if (t.id !== id) return t;
+        // A box the user has actually resized is no longer auto-sized, so its
+        // size must now be written to the file (see textBox.encodeTextBox).
+        const resized = patch.width !== undefined || patch.height !== undefined;
+        return { ...t, ...patch, ...(resized ? { autoSized: false } : {}) };
+      }),
+    })),
 
   removeTextBox: (id) => set((state) => ({ textBoxes: state.textBoxes.filter((t) => t.id !== id) })),
 
@@ -480,7 +506,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, netNames } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -510,6 +536,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       nodes,
       edges,
       spiceDirectives: directives,
+      directiveRaw,
+      ascHeader: header,
+      ascOrphanWires: orphanWires,
       dataFlags,
       textBoxes,
       sheetShapes,
@@ -556,6 +585,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       // (and the analysis they configured) would otherwise still drive the next
       // simulation — a `.step`/`.meas` over parts that no longer exist.
       spiceDirectives: "",
+      directiveRaw: [],
+      ascHeader: {},
+      ascOrphanWires: [],
       simulationConfig: DEFAULT_CONFIG,
       showDirectivesOnCanvas: false,
       directivesPos: { x: 40, y: 40 },
@@ -604,32 +636,40 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (!comp) return;
     const snap = { nodes: get().nodes, edges: get().edges };
     comp.rotate(270); // 270° CW == 90° counter-clockwise (rotate left)
-    set((state) => ({
-      nodes: state.nodes.map((n) =>
-        n.id === id
-          ? { ...n, data: { ...n.data, rotation: comp.rotation } }
-          : n,
-      ),
-      _history: [...state._history, snap],
-      _future: [],
-    }));
+    const nodes = get().nodes.map((n) =>
+      n.id === id ? { ...n, data: { ...n.data, rotation: comp.rotation } } : n,
+    );
+    // The turned part's pins have moved; let its wires meet whichever pin is now
+    // nearest instead of crossing the body. Half a turn therefore also reverses
+    // the part's SPICE node order — which is the point, not a side effect: the
+    // symbol's current arrow turned with it (see pinReseat).
+    const turned = nodes.find((n) => n.id === id)!;
+    const prevEdges = get().edges;
+    const edges = reseatTwoPinEdges(turned, nodes, prevEdges) ?? prevEdges;
+    // One `set`, one history entry: undo must put the orientation *and* the
+    // wires back together, or half an undo leaves the schematic crossed.
+    set((state) => ({ nodes, edges, _history: [...state._history, snap], _future: [] }));
+    // Re-seating moved ports between nets, so the netlist has to be rebuilt.
+    if (edges !== prevEdges) get().rebuildConnections();
   },
 
   mirrorSelected: () => {
     const { selectedComponentId } = get();
     if (!selectedComponentId) return;
-    // Mirror keeps pin *identity* (so the netlist is unchanged) but moves the
-    // pins, exactly like a rotation — hence it is undoable the same way.
+    // Mirroring moves the pins just as a rotation does — and a flip along the
+    // pin axis reverses their order, so the wires are re-seated by the same rule
+    // and the part's SPICE node order turns with its drawing (see pinReseat).
     const snap = { nodes: get().nodes, edges: get().edges };
-    set((state) => ({
-      nodes: state.nodes.map((n) =>
-        n.id === selectedComponentId
-          ? { ...n, data: { ...n.data, mirrored: !(n.data as { mirrored?: boolean }).mirrored } }
-          : n,
-      ),
-      _history: [...state._history, snap],
-      _future: [],
-    }));
+    const nodes = get().nodes.map((n) =>
+      n.id === selectedComponentId
+        ? { ...n, data: { ...n.data, mirrored: !(n.data as { mirrored?: boolean }).mirrored } }
+        : n,
+    );
+    const flipped = nodes.find((n) => n.id === selectedComponentId)!;
+    const prevEdges = get().edges;
+    const edges = reseatTwoPinEdges(flipped, nodes, prevEdges) ?? prevEdges;
+    set((state) => ({ nodes, edges, _history: [...state._history, snap], _future: [] }));
+    if (edges !== prevEdges) get().rebuildConnections();
     set((state) => ({ netVersion: state.netVersion + 1 }));
   },
 

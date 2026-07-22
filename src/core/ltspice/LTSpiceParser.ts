@@ -8,22 +8,41 @@ import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
 import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
+import type { AscRaw, DirectiveRaw } from "./ascPreserve.js";
 import { parseSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 
 
-/** Multiplier for an SI/SPICE suffix (`meg`=1e6, `m`=milli, `r`/unknown=1). */
-function siMult(suffix: string): number {
+/** Decimal exponent of an SI/SPICE suffix (`meg`=6, `m`=-3, `r`/unknown=0). */
+function siExp(suffix: string): number {
   const s = suffix.trim().toLowerCase();
-  if (s.startsWith("meg")) return 1e6;
-  if (s.startsWith("g")) return 1e9;
-  if (s.startsWith("t")) return 1e12;
-  if (s.startsWith("k")) return 1e3;
-  if (s.startsWith("m")) return 1e-3;
-  if (s.startsWith("u") || s.startsWith("µ")) return 1e-6;
-  if (s.startsWith("n")) return 1e-9;
-  if (s.startsWith("p")) return 1e-12;
-  if (s.startsWith("f")) return 1e-15;
-  return 1;
+  if (s.startsWith("meg")) return 6;
+  if (s.startsWith("g")) return 9;
+  if (s.startsWith("t")) return 12;
+  if (s.startsWith("k")) return 3;
+  if (s.startsWith("m")) return -3;
+  if (s.startsWith("u") || s.startsWith("µ")) return -6;
+  if (s.startsWith("n")) return -9;
+  if (s.startsWith("p")) return -12;
+  if (s.startsWith("f")) return -15;
+  return 0;
+}
+
+/**
+ * Apply an SI suffix by *composing the exponent into the literal* rather than
+ * multiplying by a power of ten. `100 * 1e-9` is 1.0000000000000001e-7 in
+ * binary floating point, so `100n` and `1e-7` — the same capacitance — parsed to
+ * different numbers, and a save/load cycle drifted the value it displayed.
+ * `Number("100e-9")` is exactly 1e-7.
+ */
+function applySI(mantissa: string, suffix: string): number {
+  const exp = siExp(suffix);
+  if (exp === 0) return Number(mantissa) || 0;
+  // A literal that already carries an exponent can't take a second one
+  // (`1e-7` + `n` would read as `1e-7e-9`), so that rare case still multiplies.
+  const n = /[eE]/.test(mantissa)
+    ? Number(mantissa) * Math.pow(10, exp)
+    : Number(`${mantissa}e${exp}`);
+  return isNaN(n) ? 0 : n;
 }
 
 function parseSI(val: string): number {
@@ -33,10 +52,11 @@ function parseSI(val: string): number {
   // 4R7 = 4.7Ω, 1k5 = 1500, 1k591 = 1591, 2m2 = 2.2m. ("e" is excluded so a
   // scientific literal like 1e3 is not mistaken for this form.)
   const infix = t.match(/^(\d+)(meg|[rpnuµmkgtf])(\d+)$/i);
-  if (infix) return parseFloat(`${infix[1]}.${infix[3]}`) * siMult(infix[2]);
-  const num = parseFloat(t);
-  if (isNaN(num)) return 0;
-  return num * siMult(t.replace(/^[-\d.]+/, ""));
+  if (infix) return applySI(`${infix[1]}.${infix[3]}`, infix[2]);
+  // The leading numeric literal, kept as text so the exponent can be folded in.
+  const m = t.match(/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/);
+  if (!m) return 0;
+  return applySI(m[0], t.slice(m[0].length));
 }
 
 /**
@@ -52,7 +72,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[] } {
+  static parse(content: string): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -69,7 +89,12 @@ export class LTSpiceParser {
     /** IOPIN coordinates ("x,y") → port type: a FLAG at one of these is a connector. */
     const iopinCoords = new Map<string, PortType>();
     let directives = "";
-    
+    /** Directive `TEXT` lines kept verbatim, so an unedited one is written back
+     *  at its original position and spelling (see ascPreserve.ts). */
+    const directiveRaw: DirectiveRaw[] = [];
+    /** The file's `Version` / `SHEET` lines, written back as-is. */
+    const header: Record<string, string> = {};
+
     let currentSymbol: any = null;
     let compIdCounter = 1;
 
@@ -88,6 +113,13 @@ export class LTSpiceParser {
           rot: parts[4] || "R0",
           attrs: {} as Record<string, string>,
           windows: {} as Record<number, { x: number; y: number }>,
+          // Verbatim `WINDOW` lines, keyed by window id. Kept as *text* rather
+          // than parsed numbers because that is exactly what we hand back on
+          // export: LTSpice's caption geometry (symbol-local frame, per-symbol
+          // defaults, justification that rotates with the part) is not our
+          // caption geometry, so anything we re-derive is a guess. See
+          // ascPreserve.ts for why passthrough beats re-generation here.
+          rawWindows: {} as Record<number, string>,
           id: `comp_${compIdCounter++}`
         };
       } else if (cmd === "WINDOW") {
@@ -95,7 +127,10 @@ export class LTSpiceParser {
           const pid = parseInt(parts[1], 10);
           const wx = parseInt(parts[2], 10);
           const wy = parseInt(parts[3], 10);
-          if (!isNaN(pid) && !isNaN(wx) && !isNaN(wy)) currentSymbol.windows[pid] = { x: wx, y: wy };
+          if (!isNaN(pid) && !isNaN(wx) && !isNaN(wy)) {
+            currentSymbol.windows[pid] = { x: wx, y: wy };
+            currentSymbol.rawWindows[pid] = line.trim();
+          }
         }
       } else if (cmd === "SYMATTR") {
         if (currentSymbol) {
@@ -167,8 +202,21 @@ export class LTSpiceParser {
           // LTSpice stores a multi-line directive TEXT as one physical line with
           // literal "\n" separators (e.g. three chained .meas). Turn them into
           // real newlines so each directive is its own line in the netlist.
-          directives += textMatch[1].replace(/\\n/g, "\n").trim() + "\n";
+          const body = textMatch[1].replace(/\\n/g, "\n").trim();
+          directives += body + "\n";
+          // Keep the whole `TEXT` line verbatim, keyed by the directive text it
+          // carries. The exporter used to lay every directive out at a hardcoded
+          // (10, 100 + 32i), which shoved a file's directives across the sheet on
+          // the first save; an unedited directive now goes back where it was, in
+          // the spelling it had (`.ac dec … 1MEGHz`, not `.ac DEC … 1MEG`).
+          directiveRaw.push({ text: body, raw: line.trim() });
         }
+      } else if (cmd === "Version" || cmd === "SHEET") {
+        // The file's own header. It used to be hardcoded to `Version 4` /
+        // `SHEET 1 880 680` on export, which downgraded every `Version 4.1` file
+        // and shrank the sheet of every schematic drawn larger than the default —
+        // parts outside 880x680 then sat off-sheet in LTSpice.
+        header[cmd] = line.trim();
       } else if (cmd === "DATAFLAG") {
         // DATAFLAG x y "expression" — a positioned data-point readout.
         const m = line.match(/DATAFLAG\s+(-?\d+)\s+(-?\d+)\s+"([^"]*)"/i);
@@ -363,6 +411,15 @@ export class LTSpiceParser {
       nets.get(p.netId)!.push(p);
     }
 
+    /** Graph links some pin-to-pin route runs along, keyed "a|b" (both ways). */
+    const usedLinks = new Set<string>();
+    const markPath = (path: string[]) => {
+      for (let i = 0; i < path.length - 1; i++) {
+        usedLinks.add(`${path[i]}|${path[i + 1]}`);
+        usedLinks.add(`${path[i + 1]}|${path[i]}`);
+      }
+    };
+
     for (const netPins of nets.values()) {
       if (netPins.length < 2) continue;
       const p1 = netPins[0];
@@ -374,6 +431,7 @@ export class LTSpiceParser {
         const v2 = vertexForPin(p2);
         if (v1 && v2) {
           const path = bfsPath(v1, v2);
+          if (path) markPath(path);
           if (path && path.length > 2) {
             const c2 = pinCenters.get(`${p2.compId}|${p2.handle}`);
             // Interior junctions only; drop any sitting on top of an endpoint
@@ -417,7 +475,55 @@ export class LTSpiceParser {
       }
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames };
+    // ── Which net labels sit *on* a wire rather than at its end ────────────
+    // The exporter needs this to know whether a label may be spliced out of a
+    // wire's route (see LTSpiceExporter.spliceAnnotations). It cannot be
+    // re-derived from geometry later: a label 16px off the route may be a
+    // terminal on a one-grid-step stub (`UA2` in OP-nicht_inv_Verstärker, whose
+    // stub splicing deleted) or a mid-wire label the user has nudged aside, and
+    // the two look identical. The source file distinguishes them — a pass-through
+    // flag has wire leaving it in two *opposing* directions — so record it here,
+    // once, while the file is still in front of us.
+    const passThrough = (px: number, py: number): boolean => {
+      const dirs: { dx: number; dy: number }[] = [];
+      for (const w of wires) {
+        if (distToSegment(px, py, w) > 0.5) continue;
+        const len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+        if (len === 0) continue;
+        const ux = (w.x2 - w.x1) / len, uy = (w.y2 - w.y1) / len;
+        // How far along the segment the flag sits decides which way(s) wire runs
+        // away from it; a flag strictly inside one segment already has both.
+        const t = ((px - w.x1) * (w.x2 - w.x1) + (py - w.y1) * (w.y2 - w.y1)) / (len * len);
+        if (t > 0.001) dirs.push({ dx: -ux, dy: -uy });
+        if (t < 0.999) dirs.push({ dx: ux, dy: uy });
+      }
+      return dirs.some((a) => dirs.some((b) => a.dx * b.dx + a.dy * b.dy < -0.001));
+    };
+    for (const node of nodes) {
+      const d = node.data as { componentType?: string; ascPassThrough?: boolean };
+      if (d.componentType !== "netlabel" && d.componentType !== "netconnector") continue;
+      d.ascPassThrough = passThrough(node.position.x + CENTER, node.position.y + CENTER);
+    }
+
+    // ── Wire segments the edge model cannot hold ───────────────────────────
+    // Every route above runs pin to pin, so a segment on no such path — a stub
+    // ending in mid-air, a spur left over from editing — has no edge to carry it
+    // and used to vanish on the first save. It is inert: with no edge and no pin
+    // the editor cannot select or delete it either, which is exactly why writing
+    // it back verbatim is safe. (A wire the user *can* delete has an edge, so it
+    // never reaches this list and stays deleted.)
+    const orphanWires: string[] = [];
+    const seenLink = new Set<string>();
+    for (const [a, nbs] of adj) {
+      for (const b of nbs) {
+        if (usedLinks.has(`${a}|${b}`) || seenLink.has(`${b}|${a}`)) continue;
+        seenLink.add(`${a}|${b}`);
+        const p = vCoord.get(a)!, q = vCoord.get(b)!;
+        orphanWires.push(`WIRE ${p.x} ${p.y} ${q.x} ${q.y}`);
+      }
+    }
+
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
@@ -608,6 +714,13 @@ export class LTSpiceParser {
     }
     if (keptSpec) (comp as any).rawSpec = keptSpec;
 
+    // Carry the imported orientation into the component, not just into the node
+    // data. `rotateComponent` turns the *component's* angle, so while this was
+    // left at 0 the first rotation after opening a file ignored the angle the
+    // file drew the part at and snapped it to an absolute 270° — an `R90`
+    // capacitor jumped a half turn instead of a quarter.
+    (comp as { rotation: number }).rotation = deg;
+
     components.push(comp);
 
     // On-canvas value caption: the same formatting the editor uses for a
@@ -659,7 +772,16 @@ export class LTSpiceParser {
         // Remember the symbol the file actually used (e.g. `Misc\EuropeanResistor`
         // for the IEC set), so saving writes it back instead of collapsing every
         // resistor to the US `res` symbol.
-        ...(known && { ascSymbol: sym.name }),
+        // Kept even when the symbol is *not* one we map (`known` is undefined and
+        // the part falls back to a resistor): rewriting `SYMBOL Ureg` as
+        // `SYMBOL res` on save replaced the user's part with a resistor in
+        // LTSpice too. Falling back for simulation is a guess we have to make;
+        // writing that guess into the file is not.
+        ascSymbol: sym.name,
+        // The lines this symbol was imported with. The exporter writes them back
+        // verbatim wherever the value they encode is still current, so opening
+        // and saving a file leaves it byte-identical (see ascPreserve.ts).
+        ascRaw: { windows: sym.rawWindows, attrs: { ...sym.attrs } } satisfies AscRaw,
       }
     });
   }

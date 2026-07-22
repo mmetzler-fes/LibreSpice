@@ -13,6 +13,13 @@ export interface TextBox {
   text: string;
   /** Render the text as Markdown instead of showing it verbatim. */
   markdown: boolean;
+  /**
+   * The size was estimated from the text, not chosen by the user — true for a
+   * plain LTSpice comment, which carries no size at all. Such a box writes no
+   * `[w= h=]` header, so opening and saving a foreign file doesn't graft our
+   * metadata onto every comment it has. Cleared as soon as the box is resized.
+   */
+  autoSized?: boolean;
 }
 
 export const TEXTBOX_MIN_W = 80;
@@ -35,9 +42,14 @@ const HEADER = /^\[w=(\d+)\s+h=(\d+)(\s+md)?\]\s?/;
 
 /** The comment body for an `.asc` TEXT line, header included. */
 export function encodeTextBox(box: TextBox): string {
-  const head = `[w=${Math.round(box.width)} h=${Math.round(box.height)}${box.markdown ? " md" : ""}]`;
   // LTSpice keeps a comment on one physical line and spells a break "\n".
-  return `${head} ${box.text.replace(/\r?\n/g, "\\n")}`;
+  const body = box.text.replace(/\r?\n/g, "\\n");
+  // A box whose size we only estimated has nothing worth recording: re-reading
+  // it re-estimates the same size. Omitting the header keeps a plain comment a
+  // plain comment.
+  if (box.autoSized && !box.markdown) return body;
+  const head = `[w=${Math.round(box.width)} h=${Math.round(box.height)}${box.markdown ? " md" : ""}]`;
+  return `${head} ${body}`;
 }
 
 /** Rendering metrics the size estimate is built on (see TextBoxLayer). */
@@ -88,5 +100,5 @@ export function decodeTextBox(body: string, id: string, x: number, y: number): T
   const size = m
     ? { width: Number(m[1]), height: Number(m[2]) }
     : estimateSize(text);
-  return { id, x, y, width: size.width, height: size.height, markdown: m ? !!m[3] : false, text };
+  return { id, x, y, width: size.width, height: size.height, markdown: m ? !!m[3] : false, text, ...(m ? {} : { autoSized: true }) };
 }

@@ -470,6 +470,14 @@ export function syncAnalysisDirective(text: string, config: SimulationConfig): s
   const lines = text.split("\n");
   const idx = lines.findIndex((l) => ANALYSIS_RE.test(l.trim()));
   if (idx < 0) return text;
+  // Leave a directive that already means this config exactly as the user (or the
+  // file) wrote it. Rewriting unconditionally normalised every imported
+  // schematic's analysis line on load — `.ac dec 100 1 1MEGHz` came back as
+  // `.ac DEC 100 1 1MEG` — so merely opening and saving a file changed it.
+  // Compared through the canonical rendering rather than field by field, so the
+  // check can't depend on key order or miss a field added later.
+  const current = parseAnalysisDirective(lines[idx]);
+  if (current && formatAnalysisDirective(current) === formatAnalysisDirective(config)) return text;
   lines[idx] = formatAnalysisDirective(config);
   return lines.join("\n");
 }
