@@ -75,6 +75,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     const idsBefore = new Set(st().circuit.components.keys());
     const deviceCount = [...st().circuit.components.keys()].filter((id) => id.startsWith("comp_")).length;
 
+    const pastedCountBefore = st().edges.length;
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
     const fragment = buildFragment(st().nodes, st().edges, st().circuit);
     check("a fragment is produced", fragment.length > 0 && isFragment(fragment));
@@ -86,6 +87,21 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     st().regenerateNetlist();
 
     check("the paste inserted something", n > 0, `pasteFragment returned ${n}`);
+
+    // Ids must stay unique across the whole sheet. React Flow keys its elements
+    // by id, so a duplicate is not a cosmetic detail: the parser numbers edges
+    // from `edge_1` on every run, and a fragment pasted with those ids made the
+    // *original* wires vanish from the canvas while the store still held them.
+    // Checking connectivity cannot see this — both edges are in the array, only
+    // the render collapses them — so it is asserted directly.
+    const edgeIds = st().edges.map((e) => e.id);
+    check("wire ids stay unique after pasting", new Set(edgeIds).size === edgeIds.length,
+      `${edgeIds.length} wires but ${new Set(edgeIds).size} distinct ids: ${edgeIds.join(", ")}`);
+    const nodeIds = st().nodes.map((x) => x.id);
+    check("part ids stay unique after pasting", new Set(nodeIds).size === nodeIds.length,
+      `${nodeIds.length} parts but ${new Set(nodeIds).size} distinct ids`);
+    check("the existing wires are still there", st().edges.length > pastedCountBefore,
+      `had ${pastedCountBefore} wires before the paste, ${st().edges.length} after`);
 
     // Designators must not clash — SPICE cannot tell two R1 apart.
     const labels = [...st().circuit.components.values()]

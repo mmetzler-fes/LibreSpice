@@ -653,6 +653,19 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuit.addComponent(comp);
     }
 
+    // Fresh ids for the pasted wires. The parser numbers edges from `edge_1` on
+    // every run, so a fragment arrives carrying exactly the ids the sheet already
+    // uses — and React Flow keys its elements by id, which made the *original*
+    // wires disappear behind the pasted ones. (`idStart` covers the nodes; edges
+    // are numbered separately and were missed.)
+    const usedEdgeIds = new Set(curEdges.map((e) => e.id));
+    const pastedEdges = parsed.edges.map((e) => {
+      let id = e.id;
+      for (let n = 1; usedEdgeIds.has(id); n++) id = `${e.id}_${n}`;
+      usedEdgeIds.add(id);
+      return id === e.id ? e : { ...e, id };
+    });
+
     const added = parsed.nodes.map((n) => ({
       ...n,
       position: { x: n.position.x + dx, y: n.position.y + dy },
@@ -664,7 +677,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     set((state) => ({
       nodes: [...state.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...added],
-      edges: [...state.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...parsed.edges],
+      edges: [...state.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...pastedEdges],
       _history: [...state._history, snap],
       _future: [],
     }));
