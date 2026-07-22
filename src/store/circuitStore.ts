@@ -14,10 +14,11 @@ import type { FlowPoint } from "@editor/WireTool.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
-import { fragmentOrigin, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
+import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { useLibraryStore } from "./libraryStore.js";
+import { ModelParser } from "@core/library/ModelParser.js";
 import { useSimulationStore } from "./simulationStore.js";
 import { usePlotStore, currentPlotSettings } from "@simulation/plotStore.js";
 import type { CircuitSnapshot } from "./persistence.js";
@@ -601,6 +602,22 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const dx = at ? Math.round(at.x - origin.x) : 0;
     const dy = at ? Math.round(at.y - origin.y) : 0;
 
+    // A `.subckt` the fragment brought along is taken into the library, so the
+    // pasted part resolves even in a circuit that has never seen that model.
+    // Scoped `temp`: it arrived with a paste rather than by a deliberate import,
+    // so it serves this session without settling into localStorage.
+    const carried = fragmentModels(parsed.directives);
+    if (carried.length) {
+      const lib = useLibraryStore.getState();
+      const fresh = carried.filter((m) => !lib.findByName(m.name));
+      if (fresh.length) {
+        lib.addEntries(
+          fresh.flatMap((m) => ModelParser.parse(m.raw).entries.filter((e) => e.kind === "subckt")),
+          "temp",
+        );
+      }
+    }
+
     const taken = new Set([...circuit.components.values()].map((c) => c.label));
     const snap = { nodes: cur, edges: curEdges };
 
@@ -611,6 +628,15 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       if (label !== comp.label) comp.setProperty("label", label);
       taken.add(label);
       comp.position = { x: comp.position.x + dx, y: comp.position.y + dy };
+      // Same re-link as loadFromAsc: the `.asc` names the subcircuit but does not
+      // define it, and `CustomSubcircuit.getNetlistLine` reads the name back out
+      // of `spiceModel` — left empty, the part netlists as `UNKNOWN`.
+      const sub = comp as unknown as { spiceModel?: string };
+      if (sub.spiceModel === "") {
+        const name = String((node?.data as { subName?: string })?.subName ?? "");
+        const entry = name ? useLibraryStore.getState().findByName(name)?.entry : undefined;
+        if (entry?.kind === "subckt") sub.spiceModel = entry.raw;
+      }
       circuit.addComponent(comp);
     }
 

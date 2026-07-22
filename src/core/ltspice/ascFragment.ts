@@ -34,15 +34,47 @@ export function buildFragment(nodes: Node[], edges: Edge[], circuit: any): strin
   const ids = new Set(picked.map((n) => n.id));
   const inner = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
 
+  // A library part references its `.subckt` by name only, so on its own it would
+  // paste into a circuit that has never heard of that model and netlist as
+  // `UNKNOWN`. The definition therefore travels *with* the fragment, written the
+  // way LTSpice writes an inline model itself — one directive `TEXT` holding the
+  // whole block (see the LM317 example). Handed over as `directiveRaw` so the
+  // exporter keeps each block on a single line instead of exploding it into one
+  // text box per SPICE line.
+  const models = new Map<string, string>();
+  for (const n of picked) {
+    const raw = String((circuit?.components?.get(n.id) as { spiceModel?: string } | undefined)?.spiceModel ?? "").trim();
+    const name = raw.match(/\.subckt\s+(\S+)/i)?.[1];
+    if (name && !models.has(name.toLowerCase())) models.set(name.toLowerCase(), raw);
+  }
+  const blocks = [...models.values()];
+  const directiveRaw = blocks.map((raw, i) => ({
+    text: raw,
+    raw: `TEXT ${MODEL_TEXT_X} ${MODEL_TEXT_Y + i * 32} Left 0 !${raw.replace(/\r?\n/g, "\\n")}`,
+  }));
+
   // The full circuit goes in on purpose: the exporter only writes a net's flag
   // when one of that net's pins is actually among the nodes it was given, so the
-  // extra nets fall away by themselves. Sheet-global state is passed empty.
-  // Written as a plain `.asc`, with no marker line of our own: the format has no
-  // comment syntax outside a `TEXT … ;…` (which would paste back as a stray text
-  // box), and an unknown leading line is exactly the kind of thing that would
-  // stop LTSpice reading the payload. A fragment is recognised by its shape
-  // instead — see isFragment.
-  return LTSpiceExporter.export(picked, inner, "", circuit, [], [], [], {}) + "\n";
+  // extra nets fall away by themselves. Sheet state beyond the models is empty.
+  //
+  // No marker line of our own: `.asc` has no comment syntax outside a
+  // `TEXT … ;…` (which would paste back as a stray text box), and an unknown
+  // leading line is exactly the kind of thing that would stop LTSpice reading the
+  // payload. A fragment is recognised by its shape instead — see isFragment.
+  return LTSpiceExporter.export(picked, inner, blocks.join("\n"), circuit, [], [], [], { directiveRaw }) + "\n";
+}
+
+/** Where a carried `.subckt` block is parked on the fragment's sheet. */
+const MODEL_TEXT_X = 0;
+const MODEL_TEXT_Y = 0;
+
+/** The `.subckt` definitions a fragment carries, keyed by subcircuit name. */
+export function fragmentModels(directives: string): { name: string; raw: string }[] {
+  const out: { name: string; raw: string }[] = [];
+  // `.subckt` … `.ends` blocks, however many lines each spans.
+  const re = /^[ \t]*\.subckt\s+(\S+)[\s\S]*?^[ \t]*\.ends\b.*$/gim;
+  for (const m of directives.matchAll(re)) out.push({ name: m[1], raw: m[0] });
+  return out;
 }
 
 /** Does this text look like a schematic fragment we can paste? */

@@ -1,6 +1,9 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { buildFragment, isFragment, freeLabel, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { withSymbols } from "./withSymbols.js";
+import { useLibraryStore } from "@store/libraryStore.js";
+import { ModelParser } from "@core/library/ModelParser.js";
+import { createSubcircuitComponent } from "@editor/componentFactory.js";
 
 /**
  * Cut / copy / paste of a selection, carried as a `.asc` fragment.
@@ -125,6 +128,53 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
       (single.match(/^SYMBOL /gm) ?? []).length === 1 && !/^WIRE /m.test(single),
       `fragment was:\n${single}`);
   });
+
+  // ── A library part carries its model along ────────────────────────────────
+  // A `.asc` names a subcircuit but never defines it, so a fragment on its own
+  // would paste into a circuit that has never heard of that model and netlist as
+  // `UNKNOWN`. The definition travels with it, as an inline directive.
+  {
+    const SUB = ".subckt MYAMP in out vcc\nR1 in out 10k\n.ends";
+    const lib = useLibraryStore.getState();
+
+    st().clearCircuit();
+    await tick();
+    lib.addEntries(ModelParser.parse(SUB).entries, "temp");
+
+    const id = "sub_test";
+    const comp = createSubcircuitComponent(id, "X1", 0, 0, SUB, ["in", "out", "vcc"]);
+    st().addComponent(comp, {
+      id, type: "component", position: { x: 0, y: 0 }, selected: true,
+      data: { componentType: "subcircuit", label: "X1", subName: "MYAMP", pins: ["in", "out", "vcc"] },
+    } as never);
+    await tick();
+
+    const frag = buildFragment(st().nodes, st().edges, st().circuit);
+    check("the fragment carries the .subckt", /\.subckt\s+MYAMP/i.test(frag),
+      `no model in:\n${frag}`);
+    check("the model stays on one TEXT line", (frag.match(/^TEXT .*\.subckt/gim) ?? []).length === 1,
+      "a multi-line block must not be exploded into one text box per line");
+
+    // Now forget the model entirely — this is the other machine / other session.
+    lib.removeEntry("MYAMP");
+    st().clearCircuit();
+    await tick();
+    check("the model is really gone", !useLibraryStore.getState().findByName("MYAMP"));
+
+    st().pasteFragment(frag, { x: 0, y: 0 });
+    await tick(); await tick();
+    st().regenerateNetlist();
+
+    check("pasting restores the model", !!useLibraryStore.getState().findByName("MYAMP"),
+      "the carried .subckt should have been taken into the library");
+    check("the pasted part netlists by name, not as UNKNOWN",
+      /\bMYAMP\b/.test(st().netlist) && !/UNKNOWN/.test(st().netlist),
+      `netlist:\n${st().netlist}`);
+    check("the definition lands in the netlist too", /\.subckt\s+MYAMP/i.test(st().netlist),
+      `netlist:\n${st().netlist}`);
+
+    useLibraryStore.getState().removeEntry("MYAMP");
+  }
 
   return { total, passed: total - failures.length, failures };
 }
