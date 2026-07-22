@@ -1,6 +1,13 @@
 node_modules
 library-archive
 
+# Der Vite-Build. Niemand liest die eingecheckte Fassung: das Dockerfile ruft
+# `npm run build` selbst auf und kopiert aus seinem Build-Stage, und die CI baut
+# nur dieses Image. Getrackt hat sie dafür jeden Build mit einem neuen, content-
+# gehashten 21-MB-Bundle in der Historie bezahlt — 93 Stück, .git auf 696 MB.
+# Lokal vor `npm run server` einmal `npm run build` laufen lassen.
+dist/
+
 # Host-specific container UID/GID — copy .env.example to .env and set your own
 .env
 
