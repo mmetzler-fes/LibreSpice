@@ -50,10 +50,18 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     `got ${freeLabel("R1", new Set(["R1", "R2"]))}`);
   check("the prefix survives renumbering", freeLabel("Rload1", new Set(["Rload1"])) === "Rload2",
     `got ${freeLabel("Rload1", new Set(["Rload1"]))}`);
-  // A net name is a *connection*, not an identity: pasting a block whose input is
-  // called UE next to a circuit that has UE is how the two get joined.
-  check("a net label keeps its name", pasteLabelFor("netlabel", "UE", new Set(["UE"])) === "UE");
-  check("a device does not", pasteLabelFor("resistor", "R1", new Set(["R1"])) === "R2");
+  // A designator with no trailing number must still move on — `RL` beside `RL`
+  // is one part declared twice as far as SPICE is concerned.
+  check("a designator without a number gets one", freeLabel("RL", new Set(["RL"])) === "RL2",
+    `got ${freeLabel("RL", new Set(["RL"]))}`);
+  // Net labels are renumbered like devices. Keeping the name merged a pasted
+  // block into the original — see pasteLabelFor for why that default moved.
+  check("a colliding net label is renumbered", pasteLabelFor("netlabel", "UE", new Set(["UE"])) === "UE2",
+    `got ${pasteLabelFor("netlabel", "UE", new Set(["UE"]))}`);
+  check("a device is too", pasteLabelFor("resistor", "R1", new Set(["R1"])) === "R2");
+  // …but ground names the ground net wherever it lands.
+  check("ground keeps its name", pasteLabelFor("ground", "0", new Set(["0"])) === "0");
+  check("a GND label keeps its name", pasteLabelFor("netlabel", "GND", new Set(["GND"])) === "GND");
 
   check("plain prose is not a fragment", !isFragment("Guten Morgen"));
   check("a schematic is", isFragment("Version 4\nSHEET 1 880 680\nSYMBOL res 0 0 R0"));
@@ -225,6 +233,61 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     st().regenerateNetlist();
     check("pasting from the in-app copy works", n > 0 && /^[RCVL]/im.test(st().netlist),
       `inserted ${n}, netlist:\n${st().netlist}`);
+  });
+
+  // ── Duplicating a whole block leaves two independent circuits ─────────────
+  // The case this was reported on: copying the Brummspannung rectifier and
+  // pasting it produced `V1 UE 0` and `V2 UE 0` on the *same* net, both bridges
+  // shorted together and `RL` declared twice, because net labels kept their
+  // names and a designator without a number was never renumbered. Nothing on
+  // screen showed it — only the netlist did.
+  await withSymbols(async () => {
+    const load = (m: string) => import(/* @vite-ignore */ m);
+    const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+    const file = path.resolve("examples", "05-2-3_Brummspannung1.asc");
+    if (!fs.existsSync(file)) return;
+
+    st().clearCircuit();
+    st().loadFromAsc(fs.readFileSync(file, "latin1"));
+    await tick(); await tick();
+    st().regenerateNetlist();
+    // The two nodes of a two-terminal device, i.e. the tokens right after the
+    // designator. Anything further along is the value or a waveform spec
+    // (`SIN(0V 17V 50Hz)`), which must not be mistaken for a net name.
+    const nodesOf = (line: string) => {
+      const t = line.trim().split(/\s+/);
+      return /^[RCLVID]/i.test(t[0]) ? t.slice(1, 3) : [];
+    };
+    const before = st().netlist.split("\n").filter((l) => /^[A-Z]/i.test(l) && !/^\./.test(l));
+
+    st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
+    st().pasteFragment(buildFragment(st().nodes, st().edges, st().circuit), { x: 100, y: 500 });
+    await tick(); await tick();
+    st().regenerateNetlist();
+    const after = st().netlist.split("\n").filter((l) => /^[A-Z]/i.test(l) && !/^\./.test(l));
+
+    const names = after.map((l) => l.trim().split(/\s+/)[0]);
+    check("duplicating a block renumbers every device", new Set(names).size === names.length,
+      `duplicate designators: ${names.filter((x, i) => names.indexOf(x) !== i).join(", ")}`);
+
+    // No device may sit with both ends on one net — that is the short the merged
+    // net names produced.
+    const shorted = after.filter((l) => {
+      const ns = nodesOf(l);
+      return ns.length === 2 && ns[0] === ns[1];
+    });
+    check("no device ends up shorted across itself", shorted.length === 0,
+      `shorted: ${shorted.join(" | ")}`);
+
+    // The two halves must share nothing but ground.
+    const netsOf = (ls: string[]) => new Set(ls.flatMap(nodesOf).filter((x) => x !== "0"));
+    const origNets = netsOf(before);
+    const copyNets = netsOf(after.filter((l) => !before.includes(l)));
+    const shared = [...copyNets].filter((x) => origNets.has(x));
+    check("the copy shares no net with the original but ground", shared.length === 0,
+      `shared nets: ${shared.join(", ")}`);
+    check("ground is still shared", after.some((l) => nodesOf(l).includes("0")),
+      "the copy must stay referenced to ground");
   });
 
   return { total, passed: total - failures.length, failures };

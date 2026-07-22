@@ -106,26 +106,46 @@ export function fragmentOrigin(nodes: Node[]): Pt {
  */
 export function freeLabel(label: string, taken: Set<string>): string {
   if (!taken.has(label)) return label;
+  // A designator without a trailing number still has to move on: `RL` pasted
+  // beside `RL` gave two identical devices, and SPICE reads them as one part
+  // declared twice. Numbering starts at 2, so the pair reads `RL`, `RL2`.
   const m = label.match(/^(.*?)(\d+)$/);
-  if (!m) return label;
-  const [, prefix] = m;
-  for (let n = parseInt(m[2], 10) + 1; n < 10000; n++) {
+  const prefix = m ? m[1] : label;
+  const from = m ? parseInt(m[2], 10) + 1 : 2;
+  for (let n = from; n < 10000; n++) {
     const candidate = `${prefix}${n}`;
     if (!taken.has(candidate)) return candidate;
   }
   return label;
 }
 
+/** `0` and `GND` name the ground net wherever they appear (see rebuildConnections). */
+function isGroundName(s: string): boolean {
+  return /^(0|gnd)$/i.test(s.trim());
+}
+
 /**
- * The label a pasted part should carry.
+ * The label a pasted part should carry — free of anything already on the sheet.
  *
- * Devices are renumbered on collision; **net labels and connectors are not**. A
- * net name is not an identity but a *connection*: pasting a block whose input is
- * called `UE` next to a circuit that already has `UE` is how the two get joined,
- * and that is what LTSpice does too. Renaming it to `UE1` would quietly break
- * the connection the user was reaching for.
+ * Net labels are renumbered like devices. That is a reversal: they used to keep
+ * their name, on the reasoning that a net name is a *connection*, so pasting a
+ * block whose input is `UE` beside a circuit that has `UE` is how the two get
+ * joined. LTSpice does behave that way. It was the wrong default here, and
+ * duplicating a block — the thing people actually reach for copy/paste to do —
+ * showed why: the copy silently merged into the original. Duplicating the
+ * Brummspannung rectifier produced `V1 UE 0` and `V2 UE 0` on one net, two
+ * bridges shorted together, and a diode with both ends on `UA2`. Nothing on
+ * screen said so; the user had to find it in the netlist and rename by hand.
+ *
+ * Joining by name is still one rename away, and it is the rarer intent. Silently
+ * shorting two circuits together is the more expensive mistake, so the default
+ * moved to the safe side.
+ *
+ * Ground is the exception in both directions: `0` and `GND` name the ground net
+ * wherever they are pasted, and renumbering one would cut the copy loose from
+ * ground instead of protecting it.
  */
 export function pasteLabelFor(componentType: string | undefined, label: string, taken: Set<string>): string {
-  if (componentType === "netlabel" || componentType === "netconnector" || componentType === "ground") return label;
+  if (componentType === "ground" || isGroundName(label)) return label;
   return freeLabel(label, taken);
 }
