@@ -3,7 +3,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { PORT_TYPES, type PortType } from "@core/components/special/Special.js";
-import { netRoutes, anchorNets } from "./anchorNets.js";
+import { resolveAnchors } from "./anchorNets.js";
 
 /**
  * Properties of the selected name: what it says, and whether it also declares an
@@ -23,6 +23,8 @@ export function NetAnchorPanel() {
   const nodes = useCircuitStore((s) => s.nodes);
   const edges = useCircuitStore((s) => s.edges);
   const circuit = useCircuitStore((s) => s.circuit);
+  const ascOrphanWires = useCircuitStore((s) => s.ascOrphanWires);
+  const symbolNorm = useUIStore((s) => s.symbolNorm);
   const update = useCircuitStore((s) => s.updateNetAnchor);
   const remove = useCircuitStore((s) => s.removeNetAnchor);
   const selectedId = useUIStore((s) => s.selectedAnchorId);
@@ -37,10 +39,7 @@ export function NetAnchorPanel() {
   // Which net this name is actually sitting on — the question a name raises and
   // the node model never had to answer, so it is worth showing rather than
   // leaving the user to guess from the drawing.
-  const netId = anchorNets(
-    [anchor],
-    netRoutes(nodes, edges, { netOf: (id) => portNet(circuit, id) }),
-  ).get(anchor.id);
+  const netId = resolveAnchors({ nodes, edges, netAnchors: [anchor], ascOrphanWires, circuit }, symbolNorm).get(anchor.id);
   const net = netId ? circuit.nets.get(netId) : undefined;
 
   const portType: PortType = anchor.portType ?? "None";
@@ -103,10 +102,4 @@ export function NetAnchorPanel() {
       </button>
     </div>
   );
-}
-
-/** The net a port is on, by the port id the circuit uses (`comp_1-a`). */
-function portNet(circuit: { components: Map<string, { ports: { id: string; netId?: string | null }[] }> }, portId: string): string | undefined {
-  const compId = portId.slice(0, portId.lastIndexOf("-"));
-  return circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
 }

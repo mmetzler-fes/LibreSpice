@@ -44,12 +44,14 @@ import type { PendingLibraryPlacement } from "@store/uiStore.js";
 import { getProbeCandidates, getCurrentProbeCandidates, getVoltageDiffExpression } from "@core/circuit/probeUtils.js";
 import { netVoltageExpr, netCurrentExpr, currentExprDevice, compVoltageExpr, compCurrentExpr } from "@core/circuit/dataExpr.js";
 import { usePlotStore } from "@simulation/plotStore.js";
-import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
+import type { ComponentType } from "./nodes/ComponentNode.js";
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
 import { forgetImportedRoutes } from "./importedRoutes.js";
 import { FragmentGhost } from "./FragmentGhost.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import { resolveAnchors } from "./anchorNets.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
@@ -73,6 +75,7 @@ function CanvasInner() {
     undo, redo, canUndo, canRedo,
     rotateSelected, rotateComponent, mirrorSelected, deleteSelected, rebuildConnections,
     circuit, addDataFlag, renameNet, viewFitNonce, pasteNotice, clearPasteNotice,
+    netAnchors, removeNetAnchor,
   } = useCircuitStore();
 
   // After a full load (import / snapshot) the content may sit off-screen (e.g.
@@ -102,7 +105,7 @@ function CanvasInner() {
   };
 
   /** Right-click menu on a component: probe current / voltage in the scope. */
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isNetlabel?: boolean; connector?: boolean; isGround?: boolean; netId?: string | null; vExpr?: string | null; iExpr?: string | null } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; label: string; x: number; y: number; fx: number; fy: number; isAnchor?: boolean; isGround?: boolean; netId?: string | null; vExpr?: string | null; iExpr?: string | null } | null>(null);
   /** Right-click menu on a wire: annotate the net's potential / current. */
   const [wireMenu, setWireMenu] = useState<{ edgeId: string; netId: string | null; vExpr: string | null; iExpr: string | null; x: number; y: number; fx: number; fy: number } | null>(null);
 
@@ -435,22 +438,8 @@ function CanvasInner() {
   const openNodeMenu = useCallback(
     (node: Node, clientX: number, clientY: number) => {
       const f = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY });
-      const data = node.data as ComponentNodeData;
       setWireMenu(null);
       setSelectedComponentId(node.id);
-      // Net labels get their own menu (net label ↔ connector), plus the options
-      // to plot the potential of the node they name and the current through it —
-      // the same probes a wire on that net offers, so a named net is reachable
-      // however you right-click it.
-      if (data?.componentType === "netlabel" || data?.componentType === "netconnector") {
-        const netId = circuit.components.get(node.id)?.ports[0]?.netId ?? null;
-        setNodeMenu({
-          id: node.id, label: data.label || "NET", x: clientX, y: clientY, fx: f.x, fy: f.y,
-          isNetlabel: true, connector: !!data.connector,
-          netId, vExpr: netVoltageExpr(circuit, netId), iExpr: netCurrentExpr(circuit, netId),
-        });
-        return;
-      }
       const comp = circuit.components.get(node.id);
       if (!comp) return;
       // Ground carries no probes, but it must still be deletable without a
@@ -459,6 +448,28 @@ function CanvasInner() {
       setNodeMenu({ id: node.id, label: comp.label, x: clientX, y: clientY, fx: f.x, fy: f.y, isGround });
     },
     [circuit, setSelectedComponentId, reactFlowInstance],
+  );
+
+  /**
+   * Right-click on a name. It offers the same probes a wire on that net offers,
+   * so a named net is reachable however you point at it — and the delete entry,
+   * which is the only way to remove a name without a keyboard.
+   *
+   * The net comes from the geometry, not from an edge: that is what a name is now
+   * (see anchorNets).
+   */
+  const openAnchorMenu = useCallback(
+    (a: NetAnchor, clientX: number, clientY: number) => {
+      setWireMenu(null);
+      const s = useCircuitStore.getState();
+      const netId = resolveAnchors({ ...s, netAnchors: [a] }, useUIStore.getState().symbolNorm).get(a.id) ?? null;
+      const f = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY });
+      setNodeMenu({
+        id: a.id, label: a.name, x: clientX, y: clientY, fx: f.x, fy: f.y,
+        isAnchor: true, netId, vExpr: netVoltageExpr(circuit, netId), iExpr: netCurrentExpr(circuit, netId),
+      });
+    },
+    [circuit, reactFlowInstance],
   );
 
   const openEdgeMenu = useCallback(
@@ -651,19 +662,13 @@ function CanvasInner() {
     setNodeMenu(null);
   };
 
-  // Pin a net probe (potential or current) as a data-point badge, next to the
-  // label terminal; U and I sit slightly apart so both stay readable.
+  // Pin a net probe (potential or current) as a data-point badge, beside the
+  // name; U and I sit slightly apart so both stay readable.
   const addNetlabelDataFlag = (kind: "V" | "I") => {
     const m = nodeMenu;
-    const node = m && nodes.find((n) => n.id === m.id);
+    const a = m && netAnchors.find((x) => x.id === m.id);
     const expr = kind === "V" ? m?.vExpr : m?.iExpr;
-    if (expr && node) {
-      addDataFlag(
-        node.position.x + NODE_SIZE + 6,
-        node.position.y + NODE_SIZE / 2 + (kind === "V" ? -11 : 11),
-        expr,
-      );
-    }
+    if (expr && a) addDataFlag(a.x + NODE_SIZE / 2 + 6, a.y + (kind === "V" ? -11 : 11), expr);
     setNodeMenu(null);
   };
 
@@ -831,10 +836,13 @@ function CanvasInner() {
   /** Delete the part the menu was opened on (its wires go with it). */
   const deleteMenuNode = useCallback(() => {
     if (!nodeMenu) return;
+    // A name and a part are deleted through different doors: a name owns no
+    // component, and removeComponent would find nothing to remove.
+    if (nodeMenu.isAnchor) { removeNetAnchor(nodeMenu.id); setSelectedAnchorId(null); setNodeMenu(null); return; }
     removeComponent(nodeMenu.id);
     setNodeMenu(null);
     setTimeout(() => rebuildConnections(), 0);
-  }, [nodeMenu, removeComponent, rebuildConnections]);
+  }, [nodeMenu, removeComponent, removeNetAnchor, setSelectedAnchorId, rebuildConnections]);
 
   /** Delete the wire the menu was opened on. */
   const deleteMenuEdge = useCallback(() => {
@@ -938,7 +946,7 @@ function CanvasInner() {
           </div>
 
           <SheetShapeLayer />
-          <NetAnchorLayer />
+          <NetAnchorLayer onMenu={openAnchorMenu} />
           <DataFlagLayer />
           <TextBoxLayer />
           <DirectiveBox />
@@ -1006,11 +1014,10 @@ function CanvasInner() {
       {nodeMenu && (
         <ContextMenu x={nodeMenu.x} y={nodeMenu.y} minWidth={170} onClose={() => setNodeMenu(null)}>
             <div style={{ padding: "3px 10px 5px", fontSize: 10, color: "#64748b", fontWeight: 600 }}>{nodeMenu.label}</div>
-            {nodeMenu.isNetlabel ? (
+            {nodeMenu.isAnchor ? (
               <>
-                {/* Label ↔ connector is no longer a toggle here: the two are
-                    separate parts (LTSpice stores them differently), and the
-                    connector's direction lives in its own properties panel. */}
+                {/* The port type is not a menu entry: it is the one property a
+                    name has, and it lives in its properties panel. */}
                 {nodeMenu.vExpr ? (
                   <>
                     <button style={nodeMenuItem} onClick={probeNetlabelVoltageInScope}>{nodeMenu.vExpr} im Oszi anzeigen</button>
@@ -1038,7 +1045,11 @@ function CanvasInner() {
               </>
             )}
             <div style={{ height: 1, background: "#334155", margin: "4px 6px" }} />
-            <button style={nodeMenuItem} onClick={() => { rotateComponent(nodeMenu.id); setNodeMenu(null); }}>↻ Drehen 90°</button>
+            {/* No rotate entry for a name: LTSpice stores no orientation for a
+                flag, and ours is recomputed from the wiring on every render. */}
+            {!nodeMenu.isAnchor && (
+              <button style={nodeMenuItem} onClick={() => { rotateComponent(nodeMenu.id); setNodeMenu(null); }}>↻ Drehen 90°</button>
+            )}
             <button style={dangerMenuItem} onClick={deleteMenuNode}>🗑 Löschen</button>
         </ContextMenu>
       )}

@@ -27,7 +27,7 @@ import type { FlowPoint } from "./WireTool.js";
  * every time it draws. So do we (see terminalDirection), which is why a file
  * saved here reopens there looking the same.
  */
-export function NetAnchorLayer() {
+export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: number, clientY: number) => void } = {}) {
   const vp = useViewport();
   const anchors = useCircuitStore((s) => s.netAnchors);
   const nodes = useCircuitStore((s) => s.nodes);
@@ -144,6 +144,7 @@ export function NetAnchorLayer() {
               <div
                 onPointerDown={(e) => startMove(e, a)}
                 onDoubleClick={(e) => { e.stopPropagation(); if (!canvasLocked) setEditing(a.id); }}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSelected(a.id); onMenu?.(a, e.clientX, e.clientY); }}
                 title={isConnector ? `Net Connector (${portType}) – ziehen, Doppelklick zum Umbenennen` : "Netzname – ziehen, Doppelklick zum Umbenennen"}
                 style={{
                   ...DRAG_TOUCH_ACTION,

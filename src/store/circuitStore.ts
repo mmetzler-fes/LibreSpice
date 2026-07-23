@@ -18,7 +18,8 @@ import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
-import { netRoutes, anchorNets } from "@editor/anchorNets.js";
+import { resolveAnchors, orphanGroups, touchesGroup } from "@editor/anchorNets.js";
+import { ANCHOR_TOLERANCE } from "@core/circuit/anchorResolve.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -258,6 +259,13 @@ function portNet(circuit: Circuit, portId: string): string | undefined {
   return circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
 }
 
+/** A net id nothing is using yet. */
+function freeNetId(circuit: Circuit): string {
+  let n = circuit.nets.size + 1;
+  while (circuit.nets.has(`net${n}`)) n++;
+  return `net${n}`;
+}
+
 /** Anchor ids ascend, and the order decides which of a net's names wins. */
 function nextAnchorId(anchors: NetAnchor[]): string {
   const max = anchors.reduce((m, a) => Math.max(m, Number(a.id.split("_").pop()) || 0), 0);
@@ -467,12 +475,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   regenerateNetlist: () => {
-    const { circuit, simulationConfig, spiceDirectives, netAnchors, nodes, edges } = get();
+    const { circuit, simulationConfig, spiceDirectives, netAnchors } = get();
     // Anchors name their net, so nets sharing a name collapse to one node (which
     // is how distant parts connect). Where several name one net, the same winner
     // is chosen as everywhere else — this used to impose each name in turn,
     // letting whichever came last win.
-    applyNetNames(circuit, netAnchors, anchorNets(netAnchors, netRoutes(nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm)));
+    applyNetNames(circuit, netAnchors, resolveAnchors(get(), useUIStore.getState().symbolNorm));
     const generator = new NetlistGenerator();
     const libraryBlocks = useLibraryStore.getState().getDefinitionBlocks();
     const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryBlocks);
@@ -516,7 +524,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // the one that currently names it (the oldest, the one applyNetNames picked)
     // and leaves the others alone — they are aliases the file records on purpose,
     // and rewriting them would turn `leitungstest.asc`'s `x2` into a second `x1`.
-    const byAnchor = anchorNets(netAnchors, netRoutes(nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm));
+    const byAnchor = resolveAnchors(get(), useUIStore.getState().symbolNorm);
     const mine = netAnchors.filter((a) => byAnchor.get(a.id) === netId);
     const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
     const winner = mine.slice().sort((a, b) => ordinal(a.id) - ordinal(b.id))[0];
@@ -1011,10 +1019,57 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // moving a wire out from under a name un-names its net, and that has to be
     // as true as moving the name out from under the wire.
     const anchors = get().netAnchors;
-    const byAnchor = anchorNets(
-      anchors,
-      netRoutes(get().nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm),
-    );
+    const norm = useUIStore.getState().symbolNorm;
+    let byAnchor = resolveAnchors(get(), norm);
+
+    // A name dropped on a bare pin *makes* that pin a net.
+    //
+    // Until a wire touches it, a pin is on no net at all — so a flag sitting on
+    // one had nothing to resolve to and named nothing. That is not what the
+    // format means: LTSpice ties a supply pin to its rail with a flag and no wire
+    // whatsoever, which is how `+UB`/`-UB` reach an op-amp in half our examples.
+    // Two nets that end up with the same name are one node in the netlist, and
+    // that is exactly how such a pin joins the rail.
+    const unresolved = anchors.filter((a) => !byAnchor.has(a.id) && a.name.trim());
+    if (unresolved.length > 0) {
+      const bare: { portId: string; x: number; y: number }[] = [];
+      for (const n of get().nodes) {
+        for (const p of getNodePins(n, norm)) {
+          const portId = `${n.id}-${p.handleId}`;
+          if (!portNet(circuit, portId)) bare.push({ portId, x: p.x, y: p.y });
+        }
+      }
+      // A name may reach its pin along a chain of stubs rather than sitting on
+      // it: LTSpice runs a supply rail out of an op-amp's V+ over two or three
+      // segments and parks the flag at the end. Neither the flag nor the pin is
+      // on a net, so only the chain connects them.
+      const groups = orphanGroups(get().ascOrphanWires);
+      let made = false;
+      for (const a of unresolved) {
+        const via = groups.find((g) => touchesGroup({ x: a.x, y: a.y }, g));
+        const reaches = (b: { x: number; y: number }) =>
+          Math.hypot(b.x - a.x, b.y - a.y) <= ANCHOR_TOLERANCE || (!!via && touchesGroup(b, via));
+        let best = Infinity, hit: typeof bare[number] | undefined;
+        for (const b of bare) {
+          if (!reaches(b)) continue;
+          const d = Math.hypot(b.x - a.x, b.y - a.y);
+          if (d < best) { best = d; hit = b; }
+        }
+        if (!hit) continue;
+        const comp = circuit.components.get(hit.portId.slice(0, hit.portId.lastIndexOf("-")));
+        const port = comp?.ports.find((p) => p.id === hit!.portId);
+        if (!port) continue;
+        const netId = freeNetId(circuit);
+        const net = new Net(netId, netId);
+        circuit.nets.set(netId, net);
+        port.connect(netId);
+        net.addPort(port.id);
+        made = true;
+      }
+      // Those pins are on nets now, so ask again — including for the names that
+      // only reach one *through* such a pin.
+      if (made) byAnchor = resolveAnchors(get(), norm);
+    }
 
     // A name reading "0" or "GND" *is* ground — merge its net into net "0",
     // exactly as LTSpice treats a "0" flag. Otherwise it became a SPICE node

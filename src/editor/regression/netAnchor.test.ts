@@ -1,7 +1,7 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { formatAnchor, isGroundAnchor, anchorsFromNodes, type NetAnchor } from "@core/circuit/netAnchor.js";
-import { netRoutes, anchorNets } from "@editor/anchorNets.js";
+import { resolveAnchors } from "@editor/anchorNets.js";
 import { withSymbols } from "./withSymbols.js";
 
 /**
@@ -41,12 +41,6 @@ const st = () => useCircuitStore.getState();
  */
 function allAnchors(s: ReturnType<typeof st>): NetAnchor[] {
   return [...anchorsFromNodes(s.nodes), ...s.netAnchors];
-}
-
-/** The net a port sits on, as the store keys them. */
-function portNetOf(circuit: any, portId: string): string | undefined {
-  const compId = portId.slice(0, portId.lastIndexOf("-"));
-  return circuit.components.get(compId)?.ports.find((p: { id: string }) => p.id === portId)?.netId ?? undefined;
 }
 
 /** Save the current store exactly as the Save button does. */
@@ -154,8 +148,7 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
         await tick(); await tick();
         const s = st();
 
-        const routes = netRoutes(s.nodes, s.edges, { netOf: (id) => portNetOf(s.circuit, id) });
-        const resolved = anchorNets(s.netAnchors, routes);
+        const resolved = resolveAnchors(s, "en");
         // Every name sitting on each net, so an alias counts as carried too.
         const namesOn = new Map<string, string[]>();
         for (const a of s.netAnchors) {

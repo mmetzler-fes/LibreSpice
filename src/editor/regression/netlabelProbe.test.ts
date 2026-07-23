@@ -2,13 +2,20 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { netVoltageExpr, netCurrentExpr, currentExprDevice } from "@core/circuit/dataExpr.js";
 import { getCurrentProbeCandidates } from "@core/circuit/probeUtils.js";
+import { resolveAnchors } from "@editor/anchorNets.js";
+import { withSymbols } from "./withSymbols.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
- * The net-label context menu must offer the potential of the node it names, the
- * same probe a wire on that net offers — so a named net is reachable however you
- * right-click it. The menu builds its expression exactly as the canvas does:
- * resolve the label terminal's port to a net, then `netVoltageExpr(circuit, netId)`.
+ * Right-clicking a name must offer the potential of the node it names, the same
+ * probe a wire on that net offers — so a named net is reachable however you point
+ * at it.
+ *
+ * The menu builds its expression exactly as the canvas does, and since names left
+ * the topology that means *resolving the name against the geometry* first: an
+ * anchor has no port to read a net off (see anchorNets). That extra step is the
+ * part worth guarding — a name that stops resolving would not fail loudly, it
+ * would just quietly offer nothing.
  */
 
 type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> | void };
@@ -31,27 +38,25 @@ SYMATTR InstName R2
 SYMATTR Value 2k
 `;
 
-const netLabelNode = () => st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "netlabel");
+/** The first name on the sheet, whatever it is called at the moment. */
+const anchor = () => st().netAnchors[0];
 
-/** The expression the net-label menu would show, or null. */
-const menuExpr = (nodeId: string): string | null => {
-  const netId = st().circuit.components.get(nodeId)?.ports[0]?.netId ?? null;
-  return netVoltageExpr(st().circuit, netId);
-};
+/** The net under a name — the step the canvas takes before building the menu. */
+const netOfAnchor = (id: string): string | null => resolveAnchors(st(), "en").get(id) ?? null;
 
-/** The current expression the net-label menu would show, or null. */
-const menuCurrentExpr = (nodeId: string): string | null => {
-  const netId = st().circuit.components.get(nodeId)?.ports[0]?.netId ?? null;
-  return netCurrentExpr(st().circuit, netId);
-};
+/** The expression the menu would show for a name, or null. */
+const menuExpr = (id: string): string | null => netVoltageExpr(st().circuit, netOfAnchor(id));
+
+/** The current expression the menu would show for a name, or null. */
+const menuCurrentExpr = (id: string): string | null => netCurrentExpr(st().circuit, netOfAnchor(id));
 
 const CASES: Case[] = [
-  { name: "a net label offers V(<name>) for the net it names", run: async (fail) => {
+  { name: "a name offers V(<name>) for the net it names", run: async (fail) => {
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
     const expr = menuExpr(label.id);
     if (expr !== "V(UB)") fail(`the menu would probe ${expr ?? "nothing"}, not V(UB)`);
   } },
@@ -60,10 +65,10 @@ const CASES: Case[] = [
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
-    const netId = st().circuit.components.get(label.id)?.ports[0]?.netId;
-    if (!netId) { fail("the label sits on no net"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
+    const netId = netOfAnchor(label.id);
+    if (!netId) { fail("the name sits on no net"); return; }
 
     st().renameNet(netId, "VCC");
     await tick();
@@ -71,16 +76,16 @@ const CASES: Case[] = [
     if (expr !== "V(VCC)") fail(`after the rename the menu still shows ${expr ?? "nothing"}, not V(VCC)`);
   } },
 
-  { name: "naming the net GND turns the label's probe into V(0) (the reference)", run: async (fail) => {
+  { name: "naming the net GND turns the probe into V(0) (the reference)", run: async (fail) => {
     // Renaming a net to GND grounds it (netId 0); its potential is the reference,
     // written V(0) — the menu must not offer a floating V(GND).
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
-    const netId = st().circuit.components.get(label.id)?.ports[0]?.netId;
-    if (!netId) { fail("the label sits on no net"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
+    const netId = netOfAnchor(label.id);
+    if (!netId) { fail("the name sits on no net"); return; }
 
     st().renameNet(netId, "GND");
     await tick();
@@ -88,14 +93,14 @@ const CASES: Case[] = [
     const expr = menuExpr(label.id);
     if (expr !== "V(0)") fail(`a grounded label offers ${expr ?? "nothing"}, not V(0)`);
   } },
-  { name: "a net label offers the series current, ignoring its own terminal", run: async (fail) => {
-    // The label sits on the node between R1 and R2. It emits no device line, so
-    // it must not count as a third terminal and hide the series current.
+  { name: "a name offers the series current; it is not a third terminal", run: async (fail) => {
+    // The name sits on the node between R1 and R2. It is not a part at all, so
+    // it cannot count as a third terminal and hide the series current.
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
     const expr = menuCurrentExpr(label.id);
     if (expr !== "I(R1)" && expr !== "I(R2)") {
       fail(`the menu offers ${expr ?? "no current"}, not the series current I(R1)/I(R2)`);
@@ -109,8 +114,8 @@ const CASES: Case[] = [
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
 
     const iExpr = menuCurrentExpr(label.id);
     const dev = currentExprDevice(iExpr);
@@ -128,14 +133,14 @@ const CASES: Case[] = [
     }
   } },
 
-  { name: "a grounded label offers no current", run: async (fail) => {
+  { name: "a grounded name offers no current", run: async (fail) => {
     st().loadFromAsc(ASC);
     await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
-    const netId = st().circuit.components.get(label.id)?.ports[0]?.netId;
-    if (!netId) { fail("the label sits on no net"); return; }
+    const label = anchor();
+    if (!label) { fail("no name imported"); return; }
+    const netId = netOfAnchor(label.id);
+    if (!netId) { fail("the name sits on no net"); return; }
 
     st().renameNet(netId, "GND");
     await tick();
@@ -146,12 +151,16 @@ const CASES: Case[] = [
 ];
 
 export async function runNetlabelProbeTests(): Promise<TestReport> {
-  const failures: { name: string; reason: string }[] = [];
-  let failed = 0;
-  for (const tc of CASES) {
-    let f = false;
-    await tc.run((reason) => { failures.push({ name: tc.name, reason }); f = true; });
-    if (f) failed++;
-  }
-  return { total: CASES.length, passed: CASES.length - failed, failures };
+  // With the real symbols loaded: a name finds its net by lying on a wire, and
+  // where the wires run depends on where the pins are.
+  return withSymbols(async () => {
+    const failures: { name: string; reason: string }[] = [];
+    let failed = 0;
+    for (const tc of CASES) {
+      let f = false;
+      await tc.run((reason) => { failures.push({ name: tc.name, reason }); f = true; });
+      if (f) failed++;
+    }
+    return { total: CASES.length, passed: CASES.length - failed, failures };
+  });
 }
