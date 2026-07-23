@@ -61,6 +61,8 @@ interface UIState {
    * sit near.
    */
   selectedAnchorId: string | null;
+  /** The text box whose settings the properties panel shows, or null. */
+  selectedTextBoxId: string | null;
   /**
    * Drag on empty canvas draws a selection rectangle instead of panning.
    *
@@ -99,6 +101,7 @@ interface UIActions {
   toggleAutoProbeCurrent: () => void;
   toggleCanvasLocked: () => void;
   setSelectedAnchorId: (id: string | null) => void;
+  setSelectedTextBoxId: (id: string | null) => void;
   toggleAreaSelect: () => void;
   setPendingFragment: (text: string | null) => void;
 }
@@ -122,6 +125,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   autoProbeCurrent: true,
   canvasLocked: false,
   selectedAnchorId: null,
+  selectedTextBoxId: null,
   areaSelect: false,
   pendingFragment: null,
 
@@ -144,7 +148,8 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
-  setSelectedAnchorId: (selectedAnchorId) => set({ selectedAnchorId }),
+  setSelectedAnchorId: (selectedAnchorId) => set({ selectedAnchorId, selectedTextBoxId: null }),
+  setSelectedTextBoxId: (selectedTextBoxId) => set({ selectedTextBoxId, selectedAnchorId: null }),
   toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
   setPendingFragment: (pendingFragment) => set({ pendingFragment }),
 }));

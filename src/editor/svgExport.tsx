@@ -170,43 +170,50 @@ function TextBoxShape({ box }: { box: TextBox }) {
   const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
   const flow = textFlow(box.justify ?? "Left");
   // Average glyph width of the sans-serif face at this size; good enough for a
-  // greedy wrap, and erring narrow keeps text inside the frame.
-  const charsPerLine = Math.max(4, Math.floor((box.width - 12) / (fontSize * 0.53)));
+  // greedy wrap, and erring narrow keeps the text inside the width.
+  const charsPerLine = Math.max(4, Math.floor(box.width / (fontSize * 0.53)));
   const lines = flattenForExport(box.text, box.markdown, charsPerLine);
   const lineHeight = fontSize * 1.45;
-  // Sideways text is drawn by turning the whole block a quarter turn about the
-  // box's centre — read bottom to top, as LTSpice sets it.
-  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  // No frame and no clipping, as on the canvas: a note is the text, and the
+  // height it needs is however many lines it has. The old fixed rectangle cut
+  // off the end of a long note and, at seven times the base size, most of a
+  // short one.
+  const height = Math.max(lineHeight, lines.length * lineHeight);
+  const cx = box.x + box.width / 2, cy = box.y + height / 2;
+  const align = flow.align === "center" ? "middle" : flow.align === "right" ? "end" : "start";
+  const anchorX = flow.align === "center" ? box.x + box.width / 2
+    : flow.align === "right" ? box.x + box.width
+    : box.x;
   return (
-    <g>
-      <rect
-        x={box.x} y={box.y} width={box.width} height={box.height}
-        rx={4} fill="#ffffff" stroke="#94a3b8" strokeWidth={1}
-      />
-      <g transform={flow.vertical ? `rotate(-90 ${cx} ${cy})` : undefined}>
-      {lines.map((l, i) => {
-        const y = box.y + 6 + lineHeight * (i + 0.8);
-        // Clip at the frame rather than spilling past it, matching the canvas,
-        // which scrolls the overflow out of sight.
-        if (y > box.y + box.height - 2) return null;
-        return (
-          <text
-            key={i}
-            x={box.x + 6 + l.indent * fontSize * 0.9}
-            y={y}
-            fontSize={fontSize * l.scale}
-            fontWeight={l.bold ? 600 : 400}
-            fontFamily="sans-serif"
-            fill="#0f172a"
-            xmlSpace="preserve"
-          >
-            {l.text}
-          </text>
-        );
-      })}
-      </g>
+    <g transform={flow.vertical ? `rotate(-90 ${cx} ${cy})` : undefined}>
+      {lines.map((l, i) => (
+        <text
+          key={i}
+          x={anchorX + l.indent * fontSize * 0.9}
+          y={box.y + lineHeight * (i + 0.8)}
+          fontSize={fontSize * l.scale}
+          fontWeight={l.bold ? 600 : 400}
+          fontFamily="sans-serif"
+          textAnchor={align}
+          fill="#0f172a"
+          xmlSpace="preserve"
+        >
+          {l.text}
+        </text>
+      ))}
     </g>
   );
+}
+
+/**
+ * How tall a text box comes out, for the bounding box. Mirrors TextBoxShape: the
+ * height follows the content, so a long note is not cropped at the sheet edge.
+ */
+function textBoxHeight(box: TextBox): number {
+  const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
+  const charsPerLine = Math.max(4, Math.floor(box.width / (fontSize * 0.53)));
+  const lines = flattenForExport(box.text, box.markdown, charsPerLine);
+  return Math.max(fontSize * 1.45, lines.length * fontSize * 1.45);
 }
 
 /** The on-canvas directive box, when the user enabled "Display in circuit". */
@@ -330,7 +337,7 @@ export function buildSchematicSvg(
   // as much as the parts do.
   for (const t of textBoxes) {
     grow(t.x, t.y);
-    grow(t.x + t.width, t.y + t.height);
+    grow(t.x + t.width, t.y + textBoxHeight(t));
   }
   for (const s of sheetShapes) { grow(s.x1, s.y1); grow(s.x2, s.y2); }
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_SIZE; maxY = NODE_SIZE; }

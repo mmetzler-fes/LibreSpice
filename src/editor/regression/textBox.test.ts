@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
+import { buildSchematicSvg } from "@editor/svgExport.js";
 import { encodeTextBox, decodeTextBox, estimateSize, TEXT_SIZES, TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
 import { renderMarkdown, flattenForExport } from "../markdown.js";
 import { parseSheetShape, formatSheetShape, dashArray } from "@core/circuit/sheetShape.js";
@@ -30,6 +31,41 @@ const html = (src: string, markdown = true) =>
   renderToStaticMarkup(markdown ? renderMarkdown(src) as never : (src as never));
 
 const CASES: Case[] = [
+  {
+    // The box used to be a fixed rectangle with the overflow scrolled out of
+    // sight on the canvas and dropped outright in the export. That quietly hid
+    // the end of a long note — and once a text could be set at seven times the
+    // base size, most of a short one.
+    name: "a long note is exported whole, not cut off at the box height",
+    run: (fail) => {
+      const lines = Array.from({ length: 30 }, (_, i) => `Zeile ${i + 1}`);
+      // A height far too small for the text: it must not decide what is drawn.
+      const b = box({ text: lines.join("\n"), height: 40, width: 240 });
+      const svg = buildSchematicSvg([], [], "default", undefined, undefined, [b]);
+      const drawn = (svg.match(/<text /g) ?? []).length;
+      if (drawn < lines.length) fail(`${drawn} of ${lines.length} lines reached the export`);
+      if (!svg.includes("Zeile 30")) fail("the last line is missing from the export");
+      // …and the sheet grew to hold them.
+      const m = /viewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"/.exec(svg);
+      if (!m) { fail("no viewBox"); return; }
+      const [, , minY, , h] = m.map(Number);
+      if (minY + h < b.y + lines.length * 11 * 1.45) fail(`viewBox height ${h} cannot hold ${lines.length} lines`);
+    },
+  },
+  {
+    name: "a bigger size makes the exported sheet taller",
+    run: (fail) => {
+      const text = "eins\nzwei\ndrei";
+      const height = (size: number) => {
+        const svg = buildSchematicSvg([], [], "default", undefined, undefined, [box({ text, size })]);
+        const m = /viewBox="[-\d.]+ [-\d.]+ [\d.]+ ([\d.]+)"/.exec(svg);
+        return m ? Number(m[1]) : 0;
+      };
+      // Index 2 is 1.5 (the default), index 7 is 7.0 — the sheet has to follow.
+      if (!(height(7) > height(2))) fail(`size 7 gave ${height(7)}, size 2 gave ${height(2)}`);
+    },
+  },
+
   {
     // LTSpice keeps two things on a `TEXT` line that we used to throw away and
     // overwrite with `Left 2`: how the text is set, and how big it is. Opening

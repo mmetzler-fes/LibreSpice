@@ -32,6 +32,7 @@ import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
 import { NetLabelsPanel } from "./NetLabelsPanel.js";
 import { NetAnchorPanel } from "./NetAnchorPanel.js";
+import { TextBoxPanel } from "./TextBoxPanel.js";
 import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
@@ -90,7 +91,7 @@ function CanvasInner() {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
-    setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorId, setSelectedAnchorId,
+    setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorId, setSelectedAnchorId, selectedTextBoxId, setSelectedTextBoxId,
   } = useUIStore();
 
   const theme = useTheme();
@@ -409,10 +410,11 @@ function CanvasInner() {
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       setSelectedComponentId(node.id);
-      // A name and a part are two different selections in two different layers;
-      // picking one lets go of the other, so the properties panel is never
-      // showing something the user is no longer pointing at.
+      // A part, a name and a note are three selections in three layers; picking
+      // one lets go of the others, so the properties panel never shows something
+      // the user is no longer pointing at.
       setSelectedAnchorId(null);
+      setSelectedTextBoxId(null);
       if (!autoProbeCurrent) return;
       const comp = circuit.components.get(node.id);
       if (!comp || comp.id.startsWith("ground")) return;
@@ -420,7 +422,7 @@ function CanvasInner() {
       addProbeCandidates(getCurrentProbeCandidates(comp.label));
       if (result) setDockTab("waveform");
     },
-    [setSelectedComponentId, setSelectedAnchorId, autoProbeCurrent, circuit, addProbeCandidates, result, setDockTab],
+    [setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId, autoProbeCurrent, circuit, addProbeCandidates, result, setDockTab],
   );
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -692,6 +694,7 @@ function CanvasInner() {
       if (dropPendingFragment(event.clientX, event.clientY)) return;
       setSelectedComponentId(null);
       setSelectedAnchorId(null);
+      setSelectedTextBoxId(null);
       // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
       // mouse commits its placement here, on the pane click.
       if (editorMode === "place" && lastPointerTypeRef.current === "mouse") {
@@ -703,7 +706,7 @@ function CanvasInner() {
         }
       }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, setSelectedAnchorId, clientToFlow, dropPendingFragment],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId, clientToFlow, dropPendingFragment],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
@@ -1003,7 +1006,9 @@ function CanvasInner() {
             {/* A selected *name* shows its own properties; a selected wire shows
                 none, because a wire has none the file can hold — its name is a
                 flag at a point, which is the panel above. */}
-            {selectedAnchorId ? <NetAnchorPanel /> : <PropertiesPanel />}
+            {selectedAnchorId ? <NetAnchorPanel />
+              : selectedTextBoxId ? <TextBoxPanel />
+              : <PropertiesPanel />}
             <NetLabelsPanel />
           </aside>
         )}
