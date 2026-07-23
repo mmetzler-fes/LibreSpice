@@ -259,100 +259,86 @@ export function Toolbar() {
   };
 
   const handleOpen = async () => {
-    let loadedText = "";
-    let loadedHandle: any = null;
-    let loadedName = "";
-
     if ("showOpenFilePicker" in window) {
       try {
         const [handle] = await (window as any).showOpenFilePicker({
           types: [{
-            description: "LTSpice Schematic",
+            description: "Schaltplan (.asc, .msjs)",
             accept: {
-              "application/octet-stream": [".asc"],
+              "application/octet-stream": [".asc", ".msjs"],
               "text/plain": [".asc"],
-              "application/x-asc": [".asc"]
-            }
+              "application/json": [".msjs"],
+            },
           }],
           multiple: false,
         });
         const file = await handle.getFile();
-        // LTSpice writes .asc files in Windows-1252 (byte 0xB5 = µ).
-        // Decoding as UTF-8 (the default) replaces 0xB5 with U+FFFD, which
-        // breaks SI-suffix parsing (e.g. "14µF" → "14F" = 14 Farads).
-        loadedText = new TextDecoder("windows-1252").decode(await file.arrayBuffer());
-        loadedHandle = handle;
-        loadedName = file.name;
+        await openFile(file, handle);
+        return;
       } catch (err: any) {
         if (err.name === "AbortError") return;
         console.error("showOpenFilePicker failed, falling back", err);
       }
     }
 
-    if (!loadedText) {
-      // Fallback
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".asc";
-      input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) {
-          const text = new TextDecoder("windows-1252").decode(await file.arrayBuffer());
-          loadFromAsc(text);
-          setFileHandle(null, file.name);
-          setCircuitName(file.name.replace(/\.asc$/i, ""));
-        }
-      };
-      input.click();
+    // Fallback for browsers without the file-system picker.
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".asc,.msjs";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) await openFile(file, null);
+    };
+    input.click();
+  };
+
+
+
+  /**
+   * Open a schematic, whichever of the two shapes it has.
+   *
+   * `.asc` is loaded as it is. A Multisim Live `.msjs` is converted first and
+   * then handed to the same loader — Multisim Live was retired, so its files are
+   * turned into an LTSpice schematic rather than drawn a second way, and what
+   * opens behaves exactly like an opened `.asc`.
+   *
+   * There is one Open for both because that is what the user has: a file. Which
+   * of the two it is, is the file's business, not a second button's.
+   */
+  const openFile = async (file: File, handle: any) => {
+    const isMultisim = /\.msjs$/i.test(file.name);
+    const baseName = file.name.replace(/\.(asc|msjs)$/i, "");
+    const bytes = await file.arrayBuffer();
+
+    if (!isMultisim) {
+      // LTSpice writes .asc files in Windows-1252 (byte 0xB5 = µ). Decoding as
+      // UTF-8 (the default) replaces 0xB5 with U+FFFD, which breaks SI-suffix
+      // parsing (e.g. "14µF" → "14F" = 14 Farads).
+      loadFromAsc(new TextDecoder("windows-1252").decode(bytes));
+      setFileHandle(handle, file.name);
+      setCircuitName(baseName);
       return;
     }
 
-    loadFromAsc(loadedText);
-    setFileHandle(loadedHandle, loadedName);
-    setCircuitName(loadedName.replace(/\.asc$/i, ""));
-  };
+    try {
+      const { asc, skipped, substituted, shorts } = convert(readMsjs(bytes));
+      loadFromAsc(asc);
+      // No handle: saving must write a new `.asc`, not back over the `.msjs` it
+      // was converted from.
+      setFileHandle(null, `${baseName}.asc`);
+      setCircuitName(baseName);
 
-  /**
-   * Import a Multisim Live export.
-   *
-   * Multisim Live was retired, so its `.msjs` files are converted to an LTSpice
-   * schematic and handed to the normal loader — the schematic then renders and
-   * behaves exactly like an opened `.asc`, with no second drawing path to keep
-   * in step.
-   *
-   * What could not be carried over is reported rather than passed over in
-   * silence: a schematic missing a part still opens, and looks plausible, so
-   * the gaps have to be stated.
-   */
-  const handleImportMultisim = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".msjs";
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      try {
-        const { asc, skipped, substituted, shorts } = convert(readMsjs(await file.arrayBuffer()));
-        loadFromAsc(asc);
-        setFileHandle(null, file.name);
-        setCircuitName(file.name.replace(/\.msjs$/i, ""));
-
-        const notes: string[] = [];
-        if (skipped.length) {
-          notes.push(`Nicht abbildbare Bauteile (fehlen in der Schaltung):\n  ${skipped.join(", ")}`);
-        }
-        if (substituted.length) {
-          notes.push(`Als Ersatzmodell konvertiert:\n  ${substituted.join(", ")}`);
-        }
-        if (shorts.length) {
-          notes.push(`Achtung — kurzgeschlossene Netze: ${shorts.join(", ")}\nDiese Schaltung vor Gebrauch prüfen.`);
-        }
-        if (notes.length) alert(`${file.name}\n\n${notes.join("\n\n")}`);
-      } catch (err) {
-        alert(`Import fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    };
-    input.click();
+      // What could not be carried over is reported rather than passed over in
+      // silence: a schematic missing a part still opens, and looks plausible, so
+      // the gaps have to be stated.
+      const notes: string[] = [];
+      if (skipped.length) notes.push(`Nicht abbildbare Bauteile (fehlen in der Schaltung):\n  ${skipped.join(", ")}`);
+      if (substituted.length) notes.push(`Als Ersatzmodell konvertiert:\n  ${substituted.join(", ")}`);
+      if (shorts.length) notes.push(`Achtung — kurzgeschlossene Netze: ${shorts.join(", ")}\nDiese Schaltung vor Gebrauch prüfen.`);
+      if (notes.length) alert(`${file.name}\n\n${notes.join("\n\n")}`);
+    } catch (err) {
+      alert(`Konvertierung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // Load one .asc from an opened folder, plus its sibling <name>.plt if present.
@@ -445,18 +431,8 @@ export function Toolbar() {
       <TBtn title="New circuit (Ctrl+N)" onClick={clearCircuit}>
         <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
       </TBtn>
-      <TBtn title="Open (Ctrl+O)" onClick={handleOpen}>
+      <TBtn title="Öffnen (Strg+O) — .asc oder Multisim Live .msjs" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-      </TBtn>
-      {/* Deliberately not a folder glyph: this sits between two folder buttons,
-          and a third folder was indistinguishable from them. An arrow dropping
-          into a tray is the conventional "import" mark. */}
-      <TBtn title="Multisim Live (.msjs) importieren" onClick={handleImportMultisim}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 3v10" />
-          <path d="M8 9l4 4 4-4" />
-          <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4" />
-        </svg>
       </TBtn>
       <TBtn title="Open folder — loads the .asc and its matching .plt plot settings" onClick={handleOpenFolder}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
