@@ -1,16 +1,21 @@
 import { useCircuitStore } from "@store/circuitStore.js";
-import { createSpiceComponent, nextComponentId } from "@editor/componentFactory.js";
 import type { TestReport } from "./svgExport.test.js";
+import { withSymbols } from "./withSymbols.js";
 
 /**
- * Net-label consistency. A net's name exists in two places — the `NetLabel`
- * terminal placed on the schematic, and `Net.nodeLabel` — and they must never
- * disagree: `regenerateNetlist` re-imposes a terminal's label on its net, so a
- * rename that only touched `nodeLabel` was silently reverted on the next rebuild.
+ * Where a net's name lives, and that it lives in exactly one place.
  *
- * Deleting a terminal must also not shred the net it sat on: an imported net is
- * routed as a star from its first pin, so when that pin is the label, *every*
- * wire of the net hangs off it and used to disappear with it.
+ * A name is an anchor: a string at a coordinate, naming whatever net passes
+ * underneath. `Net.nodeLabel` is derived from that on every rebuild, never the
+ * other way round — which is what makes "the two disagree" impossible rather
+ * than merely tested for. Under the old model the name existed twice, as a
+ * terminal component *and* as `nodeLabel`, and a rename that touched only one of
+ * them was silently reverted by the next rebuild.
+ *
+ * What still has to be checked is the rest of it: that naming a net puts a flag
+ * where the file can keep it, that clearing the name takes the flag away, that
+ * ground is grounded by name, and that a name is not a part — deleting parts
+ * around it must not shred the net it sits on.
  */
 
 type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> | void };
@@ -43,7 +48,8 @@ const netOf = (label: string) => {
   return netId ? st().circuit.nets.get(netId) : undefined;
 };
 
-const netLabelNode = () => st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "netlabel");
+/** The first name on the sheet. */
+const anchorByName = (name: string) => st().netAnchors.find((a) => a.name === name);
 
 // V1 in series with R1, the bottom rail grounded (the flag sits on V1's − pin).
 const ASC_GND = `Version 4
@@ -77,30 +83,24 @@ const devices = () => {
 };
 
 const CASES: Case[] = [
-  { name: "a net label on the ground net (named GND) changes nothing, and deletes cleanly", run: async (fail) => {
+  { name: "a name reading GND on the ground net changes nothing, and deletes cleanly", run: async (fail) => {
     st().loadFromAsc(ASC_GND);
-    await tick();
+    await tick(); await tick();
     st().rebuildConnections();
     const before = devices();
 
-    // Hang a label named GND straight onto the ground terminal.
-    const gnd = [...st().circuit.components.values()].find((c) => c.id.startsWith("ground_"));
+    // Put a name reading GND straight on the ground symbol's pin.
+    const gnd = st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "ground");
     if (!gnd) { fail("no ground imported"); return; }
-    const id = nextComponentId("netlabel", st().nodes.map((n) => n.id));
-    st().addComponent(createSpiceComponent("netlabel", id, "GND", 0, 0), {
-      id, type: "component", position: { x: 0, y: 0 }, data: { componentType: "netlabel", label: "GND" },
-    });
-    st().setEdges([...st().edges, {
-      id: `w_${id}`, source: id, sourceHandle: "t", target: gnd.id, targetHandle: "gnd", type: "wire", data: {},
-    }]);
+    const id = st().addNetAnchor(16, 96, "GND");
     st().rebuildConnections();
     if (devices() !== before) fail(`the netlist changed:\n    before: ${before}\n    after:  ${devices()}`);
 
     // …and removing it again leaves the circuit exactly as it was.
-    st().removeComponent(id);
+    st().removeNetAnchor(id);
     await tick();
     st().rebuildConnections();
-    if (devices() !== before) fail(`deleting the GND label changed the netlist: ${devices()}`);
+    if (devices() !== before) fail(`deleting the GND name changed the netlist: ${devices()}`);
   } },
 
   { name: "naming a net GND grounds it (no second node called GND)", run: async (fail) => {
@@ -136,10 +136,9 @@ const CASES: Case[] = [
     st().rebuildConnections();
     if (r1()?.ports[0]?.netId !== "0") { fail("the net did not become ground"); return; }
 
-    // The label placed by the rename is what grounds it, so clearing the name
-    // must drop that label and let the net float again.
-    const gnd = st().nodes.find((n) => (n.data as { label?: string }).label === "GND");
-    if (!gnd) { fail("no label carries the GND name"); return; }
+    // The flag placed by the rename is what grounds it, so clearing the name
+    // must take that flag away and let the net float again.
+    if (!anchorByName("GND")) { fail("no flag carries the GND name"); return; }
     st().renameNet("0", "0");           // clearing ground's own name is a no-op…
     const netNow = r1()?.ports[0]?.netId;
     st().renameNet(netNow!, netNow!);   // …so clear it back to the auto id
@@ -150,80 +149,83 @@ const CASES: Case[] = [
     if (!a || a === b) fail(`R1 is shorted (both pins on ${a})`);
   } },
 
-  { name: "deleting a net label keeps the wires it sat on", run: async (fail) => {
+  { name: "deleting a name keeps the wires it sat on", run: async (fail) => {
+    // The old failure this guards: a label was a node with a pin, an imported net
+    // is routed as a star from its first pin, and when that pin was the label
+    // *every* wire of the net hung off it and vanished with it. A name owns no
+    // wire at all now, so deleting one cannot take anything with it.
     st().loadFromAsc(ASC);
-    await tick();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
+    await tick(); await tick();
+    st().rebuildConnections();
+    const label = anchorByName("UB");
+    if (!label) { fail("no name imported"); return; }
     const edgesBefore = st().edges.length;
-    // The two resistors are on one net through the label — that must survive.
     const netBefore = netOf("R1")?.id;
     if (!netBefore || netOf("R2")?.id !== netBefore) { fail("R1/R2 not on one net before the delete"); return; }
 
-    st().removeComponent(label.id);
+    st().removeNetAnchor(label.id);
     await tick();
     st().rebuildConnections();
 
-    if (st().edges.length === 0) fail(`all ${edgesBefore} wires were deleted with the label`);
+    if (st().edges.length !== edgesBefore) fail(`${edgesBefore} wires before, ${st().edges.length} after`);
     const a = netOf("R1")?.id, b = netOf("R2")?.id;
-    if (!a || a !== b) fail(`R1 (${a}) and R2 (${b}) fell apart when the label was deleted`);
+    if (!a || a !== b) fail(`R1 (${a}) and R2 (${b}) fell apart when the name was deleted`);
   } },
 
-  { name: "renaming the net renames its label terminal (no double bookkeeping)", run: async (fail) => {
+  { name: "renaming the net rewrites its flag (there is nowhere else to put it)", run: async (fail) => {
     st().loadFromAsc(ASC);
-    await tick();
+    await tick(); await tick();
     st().rebuildConnections();
     const net = netOf("R1");
     if (!net) { fail("R1 has no net"); return; }
 
     st().renameNet(net.id, "VCC");
-    // The terminal carries the name, so it has to follow — otherwise the next
-    // netlist rebuild imposes the *old* label again and the rename is lost.
-    const comp = [...st().circuit.components.values()].find((c) => c.getNetLabel() !== null);
-    if (comp?.label !== "VCC") fail(`the label terminal still reads "${comp?.label}", not VCC`);
-    const node = netLabelNode();
-    if ((node?.data as { label?: string })?.label !== "VCC") fail("the label on the canvas did not follow the rename");
+    await tick();
+    st().rebuildConnections();
+    // The flag carries the name, so it has to follow — the net's own nodeLabel is
+    // re-derived from it on every rebuild and would otherwise revert.
+    if (!anchorByName("VCC")) fail(`no flag reads VCC; names are [${st().netAnchors.map((a) => a.name).join(", ")}]`);
+    if (anchorByName("UB")) fail("the old name UB is still on the sheet");
 
-    // And the rename must still be there after a rebuild.
     st().regenerateNetlist();
     if (netOf("R1")?.nodeLabel !== "VCC") fail(`the rename was reverted to "${netOf("R1")?.nodeLabel}" by the rebuild`);
     if (!st().netlist.includes("VCC")) fail("the netlist does not use the new name");
   } },
 
-  { name: "renaming the terminal renames the net (the other direction)", run: async (fail) => {
+  { name: "renaming the flag renames the net (the other direction)", run: async (fail) => {
     st().loadFromAsc(ASC);
-    await tick();
+    await tick(); await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
+    const label = anchorByName("UB");
+    if (!label) { fail("no name imported"); return; }
 
-    st().updateComponentProperty(label.id, "label", "OUT");
+    st().updateNetAnchor(label.id, { name: "OUT" });
+    await tick();
     if (netOf("R1")?.nodeLabel !== "OUT") fail(`the net is called "${netOf("R1")?.nodeLabel}", not OUT`);
   } },
 
-  { name: "naming a net places a net label on it", run: async (fail) => {
+  { name: "naming a net puts a flag on it", run: async (fail) => {
     // A name that lived only on a wire was never written to the `.asc` and so
-    // vanished on the first save. Naming a net therefore places a label — the
+    // vanished on the first save. Naming a net therefore places a flag — the
     // file's own way of naming a net — and the two acts become one.
     st().loadFromAsc(ASC);
-    await tick();
+    await tick(); await tick();
     st().rebuildConnections();
     // R1's *lower* pin is a plain, unnamed net (a wire to R2's lower pin).
     const r1 = [...st().circuit.components.values()].find((c) => c.label === "R1");
     const netId = r1?.ports[1]?.netId;
     if (!netId) { fail("R1 has no second net"); return; }
-    const before = st().nodes.filter((n) => (n.data as { componentType?: string }).componentType === "netlabel").length;
+    const before = st().netAnchors.length;
 
     st().renameNet(netId, "MID");
+    await tick();
 
-    const after = st().nodes.filter((n) => (n.data as { componentType?: string }).componentType === "netlabel").length;
-    if (after !== before + 1) fail(`naming the net did not place a label (${before} → ${after})`);
-    const placed = st().nodes.find((n) => (n.data as { label?: string; componentType?: string }).componentType === "netlabel"
-      && (n.data as { label?: string }).label === "MID");
-    if (!placed) { fail("no label carries the name MID"); return; }
+    if (st().netAnchors.length !== before + 1) fail(`naming the net placed no flag (${before} → ${st().netAnchors.length})`);
+    const placed = anchorByName("MID");
+    if (!placed) { fail("no flag carries the name MID"); return; }
     // A plain label, not a connector: typing a name is not a claim about
     // direction, and a connector would write an IOPIN the user never asked for.
-    if ((placed.data as { portType?: string }).portType) fail("naming the net declared a port direction");
+    if (placed.portType) fail("naming the net declared a port direction");
     st().regenerateNetlist();
     if (st().circuit.nets.get(netId)?.nodeLabel !== "MID") fail("the name did not survive a netlist rebuild");
     // …and it survives a *full* rebuild (net ids get renumbered).
@@ -231,62 +233,48 @@ const CASES: Case[] = [
     if (![...st().circuit.nets.values()].some((n) => n.nodeLabel === "MID")) fail("the name was lost on a full rebuild");
   } },
 
-  { name: "deleting a net-connector keeps the wire's name", run: async (fail) => {
-    // The name belongs to the wire, not to the connector symbol: deleting the
-    // connector must leave the net named (and shown on the bridging wire).
+  { name: "two names on one net are both kept (they are aliases)", run: async (fail) => {
+    // A net may carry several names and LTSpice files do. One wins for the
+    // netlist; the others must stay on the sheet, or opening and saving the file
+    // would quietly destroy a name the author put there.
     st().loadFromAsc(ASC);
-    await tick();
+    await tick(); await tick();
     st().rebuildConnections();
-    const label = netLabelNode();
-    if (!label) { fail("no net label imported"); return; }
-    if (netOf("R1")?.nodeLabel !== "UB") fail(`the net is not called UB but ${netOf("R1")?.nodeLabel}`);
+    const netId = netOf("R1")?.id;
+    if (!netId) { fail("R1 has no net"); return; }
 
-    st().removeComponent(label.id);
-    await tick();
+    // A second name on the same run of wire.
+    st().addNetAnchor(200, 16, "UB_ALT");
     st().rebuildConnections();
 
-    // The name stays, and no net-label node remains.
-    if (netOf("R1")?.nodeLabel !== "UB") fail(`the net lost its name UB (now ${netOf("R1")?.nodeLabel})`);
-    if (netLabelNode()) fail("a net-label node is still on the canvas");
-    if (!st().edges.some((e) => (e.data as { netName?: string }).netName === "UB")) fail("no wire carries the name UB after the delete");
-    st().regenerateNetlist();
-    if (!st().netlist.includes("UB")) fail("the netlist no longer uses the name UB");
+    if (!anchorByName("UB") || !anchorByName("UB_ALT")) fail("one of the two names was dropped");
+    // The older one wins the netlist; both survive on the sheet.
+    if (netOf("R1")?.nodeLabel !== "UB") fail(`the net is called ${netOf("R1")?.nodeLabel}, not UB`);
   } },
 
-  { name: "delete a label, place a new one, name it — it stays its own component", run: async (fail) => {
-    // The reported bug: the placement counter started at 1 while the import had
-    // already handed out `netlabel_2`, so a newly placed label got an id that was
-    // in use. It *replaced* the imported component in the circuit map while both
-    // nodes stayed on the canvas — renaming the new one edited the old one, and
-    // the name appeared elsewhere in the schematic.
+  { name: "a name moved onto another net renames that one instead", run: async (fail) => {
+    // The behaviour that only a coordinate model can have: what a name names is
+    // decided by where it lies, so moving it is a rename of two nets at once.
     st().loadFromAsc(ASC);
+    await tick(); await tick();
+    st().rebuildConnections();
+    const label = anchorByName("UB");
+    if (!label) { fail("no name imported"); return; }
+    // The lower net, looked up *after* the move: a rebuild renumbers net ids, so
+    // an id captured beforehand names a net that no longer exists.
+    const lowerNet = () => {
+      const r1 = [...st().circuit.components.values()].find((c) => c.label === "R1");
+      const id = r1?.ports[1]?.netId;
+      return id ? st().circuit.nets.get(id) : undefined;
+    };
+
+    // Onto the lower run of wire (y = 96), which is R1/R2's other net.
+    st().moveNetAnchor(label.id, 180, 96);
     await tick();
     st().rebuildConnections();
 
-    const first = netLabelNode();
-    if (!first) { fail("no net label imported"); return; }
-    st().removeComponent(first.id);
-    await tick();
-
-    // Place a fresh label exactly as the canvas does.
-    const id = nextComponentId("netlabel", st().nodes.map((n) => n.id));
-    if (st().nodes.some((n) => n.id === id)) { fail(`the new label reuses the id ${id}`); return; }
-    const comp = createSpiceComponent("netlabel", id, "NET", 0, 0);
-    st().addComponent(comp, { id, type: "component", position: { x: 0, y: 0 }, data: { componentType: "netlabel", label: "NET" } });
-
-    // Ids stay unique, and every node has its own component behind it.
-    const ids = st().nodes.map((n) => n.id);
-    if (new Set(ids).size !== ids.length) fail(`duplicate node ids: ${ids.join(", ")}`);
-    if (st().circuit.components.size !== ids.length) {
-      fail(`${ids.length} nodes but ${st().circuit.components.size} components — one overwrote another`);
-    }
-
-    // Naming it must rename *this* label and no other.
-    st().updateComponentProperty(id, "label", "U2");
-    const named = st().nodes.filter((n) => (n.data as { label?: string }).label === "U2");
-    if (named.length !== 1 || named[0].id !== id) {
-      fail(`"U2" ended up on ${named.map((n) => n.id).join(", ") || "nothing"} instead of ${id}`);
-    }
+    if (lowerNet()?.nodeLabel !== "UB") fail(`the lower net is called ${lowerNet()?.nodeLabel}, not UB`);
+    if (netOf("R1")?.nodeLabel === "UB") fail("the upper net kept the name it no longer carries");
   } },
 
   { name: "a wire's net resolves to exactly one net (what the panel shows)", run: async (fail) => {
@@ -304,12 +292,16 @@ const CASES: Case[] = [
 ];
 
 export async function runNetLabelTests(): Promise<TestReport> {
-  const failures: { name: string; reason: string }[] = [];
-  let failed = 0;
-  for (const tc of CASES) {
-    let f = false;
-    await tc.run((reason) => { failures.push({ name: tc.name, reason }); f = true; });
-    if (f) failed++;
-  }
-  return { total: CASES.length, passed: CASES.length - failed, failures };
+  // With the real symbols: a name finds its net by lying on a wire, and where the
+  // wires run depends on where the pins are.
+  return withSymbols(async () => {
+    const failures: { name: string; reason: string }[] = [];
+    let failed = 0;
+    for (const tc of CASES) {
+      let f = false;
+      await tc.run((reason) => { failures.push({ name: tc.name, reason }); f = true; });
+      if (f) failed++;
+    }
+    return { total: CASES.length, passed: CASES.length - failed, failures };
+  });
 }

@@ -1,4 +1,4 @@
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { pointAtT, projectToPolyline, type FlowPoint } from "../WireTool.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
@@ -64,12 +64,9 @@ const CASES: Case[] = [
   } },
 ];
 
-/** One net-connector node at a fixed point, with the given port type. */
-function connectorNodes(label: string, portType: PortType): Node[] {
-  return [
-    { id: "netconnector_0", type: "component", position: { x: 100, y: 100 },
-      data: { componentType: "netconnector", label, portType } },
-  ];
+/** One name at a fixed point, with the given port type. */
+function connector(label: string, portType: PortType) {
+  return [{ id: "anchor_1", x: 140, y: 140, name: label, ...(portType === "None" ? {} : { portType }) }];
 }
 
 const emptyCircuit = { components: new Map(), nets: new Map() };
@@ -79,22 +76,22 @@ CASES.push(
     // LTSpice writes the direction verbatim (In / Out / BiDir), so the exported
     // keyword and the re-imported port type must both survive unchanged.
     for (const pt of ["In", "Out", "BiDir"] as PortType[]) {
-      const asc = LTSpiceExporter.export(connectorNodes("A", pt), [], "", emptyCircuit, []);
+      const asc = LTSpiceExporter.export([], [], "", emptyCircuit, [], [], [], { anchors: connector("A", pt) });
       if (!new RegExp(`^FLAG\\s+-?\\d+\\s+-?\\d+\\s+A$`, "m").test(asc)) fail(`${pt}: no FLAG A:\n${asc}`);
       if (!new RegExp(`^IOPIN\\s+-?\\d+\\s+-?\\d+\\s+${pt}$`, "m").test(asc)) fail(`${pt}: no "IOPIN … ${pt}":\n${asc}`);
 
       const back = LTSpiceParser.parse(asc);
-      const n = back.nodes.find((x) => (x.data as { label?: string }).label === "A");
-      if (!n) { fail(`${pt}: connector A did not re-import`); continue; }
-      const d = n.data as { componentType?: string; portType?: string };
-      if (d.componentType !== "netconnector") fail(`${pt}: came back as ${d.componentType}, not a netconnector`);
-      if (d.portType !== pt) fail(`${pt}: port type came back as ${d.portType}`);
+      const a = back.anchors.find((x) => x.name === "A");
+      if (!a) { fail(`${pt}: connector A did not re-import`); continue; }
+      if (a.portType !== pt) fail(`${pt}: port type came back as ${a.portType}`);
+      // …and as a name, not as a part: a connector owns no node and no edge.
+      if (back.nodes.length > 0) fail(`${pt}: the connector came back as ${back.nodes.length} node(s)`);
     }
   } },
 
   { name: "the FLAG and its IOPIN sit on the same point", run: (fail) => {
     // LTSpice pairs the two by coordinate — a mismatch silently drops the port.
-    const asc = LTSpiceExporter.export(connectorNodes("A", "In"), [], "", emptyCircuit, []);
+    const asc = LTSpiceExporter.export([], [], "", emptyCircuit, [], [], [], { anchors: connector("A", "In") });
     const flag = asc.match(/^FLAG\s+(-?\d+\s+-?\d+)\s+A$/m)?.[1];
     const iopin = asc.match(/^IOPIN\s+(-?\d+\s+-?\d+)\s+In$/m)?.[1];
     if (!flag || !iopin) { fail(`missing FLAG/IOPIN:\n${asc}`); return; }
@@ -103,22 +100,17 @@ CASES.push(
 
   { name: "port type None writes a bare FLAG and returns as a net label", run: (fail) => {
     // LTSpice's "Port Type: None" has no IOPIN at all, so it is exactly a label.
-    const asc = LTSpiceExporter.export(connectorNodes("SIG", "None"), [], "", emptyCircuit, []);
+    const asc = LTSpiceExporter.export([], [], "", emptyCircuit, [], [], [], { anchors: connector("SIG", "None") });
     if (!/^FLAG\s+-?\d+\s+-?\d+\s+SIG$/m.test(asc)) fail(`no FLAG SIG:\n${asc}`);
     if (/IOPIN/.test(asc)) fail(`port type None must not write an IOPIN:\n${asc}`);
     const back = LTSpiceParser.parse(asc);
-    const n = back.nodes.find((x) => (x.data as { label?: string }).label === "SIG");
-    if ((n?.data as { componentType?: string })?.componentType !== "netlabel") {
-      fail(`a bare FLAG must import as a netlabel, got ${(n?.data as { componentType?: string })?.componentType}`);
-    }
+    const a = back.anchors.find((x) => x.name === "SIG");
+    if (!a) { fail("a bare FLAG did not re-import"); return; }
+    if (a.portType) fail(`a bare FLAG must come back with no direction, got ${a.portType}`);
   } },
 
   { name: "a plain net label exports a FLAG but no IOPIN", run: (fail) => {
-    const nodes: Node[] = [
-      { id: "netlabel_0", type: "component", position: { x: 100, y: 100 },
-        data: { componentType: "netlabel", label: "SIG" } },
-    ];
-    const asc = LTSpiceExporter.export(nodes, [], "", emptyCircuit, []);
+    const asc = LTSpiceExporter.export([], [], "", emptyCircuit, [], [], [], { anchors: connector("SIG", "None") });
     if (!/FLAG\s+-?\d+\s+-?\d+\s+SIG/.test(asc)) fail(`no FLAG SIG:\n${asc}`);
     if (/IOPIN/.test(asc)) fail(`plain label must not write IOPIN:\n${asc}`);
   } },
@@ -191,11 +183,8 @@ CASES.push(
     // The circle marks an interface point. A plain label just gives the net a
     // name and its tag already marks the spot, so a circle there was a second
     // mark for the same place; a connector's port is worth showing.
-    const svg = (portType: PortType) => {
-      const node = { id: "n1", position: { x: 0, y: 0 },
-        data: { componentType: portType === "None" ? "netlabel" : "netconnector", label: "X", portType } };
-      return buildSchematicSvg([node as never], [], "default");
-    };
+    const svg = (portType: PortType) =>
+      buildSchematicSvg([], [], "default", undefined, undefined, [], [], connector("X", portType));
     if (/<circle/.test(svg("None"))) fail("a plain net label drew a circle");
     for (const pt of ["In", "Out", "BiDir"] as PortType[]) {
       if (!/<circle/.test(svg(pt))) fail(`a ${pt} connector drew no circle`);

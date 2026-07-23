@@ -189,10 +189,14 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
 
     // ── A fragment holds the selection and nothing else ─────────────────────
     // Reported on a partial copy: parts appeared with wires nobody had drawn.
-    // Saving a whole schematic writes a `FLAG` for every named net that has no
-    // terminal, because the file has nowhere else to keep the name — in a
+    // Saving a whole schematic wrote a `FLAG` for every named net that had no
+    // terminal, because the file had nowhere else to keep the name — in a
     // fragment those are names nobody selected, and each pasted back as a label
     // with a fresh wire to the nearest pin. Four parts produced three flags.
+    //
+    // A name cannot do that any more: it is not a part, so it can neither be
+    // pasted as one nor bring a wire with it. What a fragment must still not do
+    // is carry names off nets the selection merely touches.
     st().clearCircuit();
     st().loadFromAsc(src);
     await tick(); await tick();
@@ -209,11 +213,24 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
         `unpicked names came along:\n${partial}`);
 
       const idsBeforePartial = new Set(st().nodes.map((x) => x.id));
+      const edgesBefore = st().edges.length;
       st().pasteFragment(partial, { x: 100, y: 600 });
       await tick(); await tick();
-      const invented = st().edges.filter((e) => !idsBeforePartial.has(e.source) || !idsBeforePartial.has(e.target));
-      check("so pasting it draws no wires of its own", invented.length === 0,
-        `${invented.length} wires appeared from nowhere`);
+
+      // Exactly the wires the fragment held, and no more. (A wire between the two
+      // picked parts is one the user drew, so it comes along by right — what must
+      // not appear is a wire the paste invented.)
+      const wanted = (partial.match(/^WIRE /gm) ?? []).length;
+      const drawn = st().edges.length - edgesBefore;
+      check("so pasting it draws no wires of its own", drawn <= wanted,
+        `${drawn} wires appeared for ${wanted} in the fragment`);
+      // …and none of them reaches back into the circuit it was copied from.
+      const reachesBack = st().edges.filter((e) => {
+        const a = idsBeforePartial.has(e.source), b = idsBeforePartial.has(e.target);
+        return a !== b;
+      });
+      check("and none of them reaches back into the original", reachesBack.length === 0,
+        `${reachesBack.length} wire(s) join the paste to the original`);
     }
 
     // ── A partial selection drops the wires that leave it ───────────────────

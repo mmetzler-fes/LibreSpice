@@ -757,10 +757,20 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // what LTSpice does and how a pasted block is meant to join an existing one —
     // but it is also invisible: the two circuits become one net without anything
     // on screen saying so. Collected here so the paste can report it.
-    const existingNetNames = new Set(
-      [...circuit.components.values()].filter((c) => c.getNetLabel() !== null).map((c) => c.label),
-    );
+    const existingNetNames = new Set(get().netAnchors.map((a) => a.name));
     const merged = new Set<string>();
+
+    // The names inside the fragment come along, shifted like everything else. A
+    // name whose text is already on the sheet joins that net — which is the point
+    // of pasting one, and is what gets reported.
+    let anchorSeed = get().netAnchors;
+    const pastedAnchors = parsed.anchors.map((a) => {
+      const id = nextAnchorId(anchorSeed);
+      const shifted = { ...a, id, x: Math.round(a.x + dx), y: Math.round(a.y + dy) };
+      anchorSeed = [...anchorSeed, shifted];
+      if (!isGroundName(a.name) && existingNetNames.has(a.name)) merged.add(a.name);
+      return shifted;
+    });
 
     for (const comp of parsed.components) {
       const node = parsed.nodes.find((n) => n.id === comp.id);
@@ -768,8 +778,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       const label = pasteLabelFor(type, comp.label, taken);
       if (label !== comp.label) comp.setProperty("label", label);
       taken.add(label);
-      // A net terminal whose name is already on the sheet joins that net.
-      if (comp.getNetLabel() !== null && !isGroundName(label) && existingNetNames.has(label)) merged.add(label);
       comp.position = { x: comp.position.x + dx, y: comp.position.y + dy };
       // Same re-link as loadFromAsc: the `.asc` names the subcircuit but does not
       // define it, and `CustomSubcircuit.getNetlistLine` reads the name back out
@@ -825,6 +833,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({
       nodes: [...state.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...added],
       edges: [...state.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...pastedEdges],
+      netAnchors: [...state.netAnchors, ...pastedAnchors],
       _history: [...state._history, snap],
       _future: [],
     }));
