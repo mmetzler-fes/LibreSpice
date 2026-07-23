@@ -3,7 +3,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { PortType } from "@core/components/special/Special.js";
 import {
-  TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
+  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
 import { outwardAxis, type Axis } from "@core/geometry/ortho.js";
 import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
@@ -206,6 +206,17 @@ export class LTSpiceExporter {
         ascRaw?: AscRaw;
       };
 
+      // A junction is a place where wires meet, not a part: it writes no line at
+      // all. It exists so a wire whose end is on no pin is still an ordinary
+      // edge (see Junction), and the wire itself carries the coordinate into the
+      // file — which is exactly the `WIRE` line the junction was made from.
+      if (data.componentType === "junction") {
+        const jx = Math.round(node.position.x + CENTER);
+        const jy = Math.round(node.position.y + CENTER);
+        pinCoord.set(`${node.id}-j`, { x: jx, y: jy });
+        continue;
+      }
+
       // Ground is the one name that is also a part, so its flag comes from the
       // node. Every other name is an anchor and was written above.
       if (data.componentType === "ground") {
@@ -372,20 +383,6 @@ export class LTSpiceExporter {
           wireLines.push(`WIRE ${fwd}`);
         }
       }
-    }
-
-    // Segments the edge model never held (see LTSpiceParser.orphanWires): a stub
-    // ending in mid-air, a spur. They go back out exactly as they came in, and
-    // through the same dedupe, so one that a re-route has since covered isn't
-    // written twice.
-    for (const raw of preserved.orphanWires ?? []) {
-      const m = raw.trim().match(/^WIRE\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/i);
-      if (!m) continue;
-      const [x1, y1, x2, y2] = m.slice(1, 5);
-      const fwd = `${x1} ${y1} ${x2} ${y2}`, rev = `${x2} ${y2} ${x1} ${y1}`;
-      if (wireSeen.has(fwd) || wireSeen.has(rev)) continue;
-      wireSeen.add(fwd);
-      wireLines.push(`WIRE ${fwd}`);
     }
 
     // Bus taps sit with the flags: both are marks at a place, and LTSpice writes

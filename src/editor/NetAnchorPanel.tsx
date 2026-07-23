@@ -23,7 +23,6 @@ export function NetAnchorPanel() {
   const nodes = useCircuitStore((s) => s.nodes);
   const edges = useCircuitStore((s) => s.edges);
   const circuit = useCircuitStore((s) => s.circuit);
-  const ascOrphanWires = useCircuitStore((s) => s.ascOrphanWires);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const update = useCircuitStore((s) => s.updateNetAnchor);
   const remove = useCircuitStore((s) => s.removeNetAnchor);
@@ -39,7 +38,7 @@ export function NetAnchorPanel() {
   // Which net this name is actually sitting on — the question a name raises and
   // the node model never had to answer, so it is worth showing rather than
   // leaving the user to guess from the drawing.
-  const netId = resolveAnchors({ nodes, edges, netAnchors: [anchor], ascOrphanWires, circuit }, symbolNorm).get(anchor.id);
+  const netId = resolveAnchors({ nodes, edges, netAnchors: [anchor], circuit }, symbolNorm).get(anchor.id);
   const net = netId ? circuit.nets.get(netId) : undefined;
 
   const portType: PortType = anchor.portType ?? "None";

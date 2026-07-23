@@ -45,7 +45,13 @@ async function nodeApi(): Promise<any> {
 
 /** True for a real device (a placed symbol), excluding net-label terminals which
  *  are re-materialised from FLAGs and legitimately shift identity on a round-trip. */
-const isDevice = (id: string) => !id.startsWith("netlabel_");
+/**
+ * A junction is a place where wires meet, not a device (see Junction) — and the
+ * count legitimately changes across a round trip: a file that draws a run twice
+ * comes back with the redundancy written once, so one joint fewer. What must not
+ * change is the *devices*.
+ */
+const isDevice = (id: string) => !id.startsWith("netlabel_") && !id.startsWith("junction_");
 
 /** Sorted InstNames of the real devices. */
 function deviceLabels(): string[] {

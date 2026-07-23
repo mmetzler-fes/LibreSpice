@@ -36,11 +36,17 @@ const st = () => useCircuitStore.getState();
  * pixels. The two that mean something:
  *   - `TGM-Abi2025_A2-2-9`: a source valued `{USt1}` loses the parameter
  *     expression at *import* and comes back as `DC 1`.
+ *
+ * `InvSummierverstaerker` and `OP-inv_Verstärker` grew by 1 and 3 when wire ends
+ * gained junctions (see Junction). Both files draw a run twice — a long `WIRE`
+ * on top of the pieces it covers — and where that redundancy used to come back
+ * verbatim as unrepresentable geometry, it is now an edge like any other and is
+ * written once. Same pixels, fewer lines.
  */
 const FIDELITY_BUDGET: Record<string, number> = {
   "06-2-3_RC_BP1.asc": 2,
-  "InvSummierverstaerker.asc": 4,
-  "OP-inv_Verstärker.asc": 4,
+  "InvSummierverstaerker.asc": 5,
+  "OP-inv_Verstärker.asc": 7,
   "RL-Parallelkompensation4b.asc": 2,
   "RLC_Reihenschwingkreis.asc": 2,
   "Spannungsteiler_unbelastet.asc": 2,
@@ -62,7 +68,7 @@ function exportCurrent(): string {
   const s = st();
   return LTSpiceExporter.export(
     s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors, busTaps: s.busTaps },
+    { directiveRaw: s.directiveRaw, header: s.ascHeader, anchors: s.netAnchors, busTaps: s.busTaps },
   );
 }
 

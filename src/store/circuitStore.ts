@@ -18,9 +18,8 @@ import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
-import { resolveAnchors, anchorRoutes, orphanGroups, touchesGroup, distToGroup } from "@editor/anchorNets.js";
+import { resolveAnchors, anchorRoutes } from "@editor/anchorNets.js";
 import { ANCHOR_TOLERANCE, distToRoutes } from "@core/circuit/anchorResolve.js";
-import type { RoutePoint } from "@core/geometry/wireRoutes.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -47,8 +46,6 @@ interface CircuitState {
   directiveRaw: DirectiveRaw[];
   /** The loaded file's `Version` / `SHEET` lines, written back verbatim. */
   ascHeader: Record<string, string>;
-  /** `WIRE` lines of the loaded file that no edge represents; preserved on save. */
-  ascOrphanWires: string[];
   /**
    * Last copied fragment, kept inside the app beside the system clipboard.
    *
@@ -301,7 +298,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   spiceDirectives: "",
   directiveRaw: [],
   ascHeader: {},
-  ascOrphanWires: [],
   fragmentClipboard: "",
   pasteNotice: null,
   showDirectivesOnCanvas: false,
@@ -642,7 +638,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors, busTaps } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, anchors, busTaps } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -674,7 +670,6 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: directives,
       directiveRaw,
       ascHeader: header,
-      ascOrphanWires: orphanWires,
       dataFlags,
       netAnchors: anchors,
       busTaps,
@@ -876,8 +871,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: "",
       directiveRaw: [],
       ascHeader: {},
-      ascOrphanWires: [],
-      simulationConfig: DEFAULT_CONFIG,
+          simulationConfig: DEFAULT_CONFIG,
       showDirectivesOnCanvas: false,
       directivesPos: { x: 40, y: 40 },
       fileHandle: null,
@@ -1041,21 +1035,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     // A name dropped on a bare pin *makes* that pin a net.
     //
-    // Until a wire touches it, a pin is on no net at all — so a flag sitting on
-    // one had nothing to resolve to and named nothing. That is not what the
+    // Until something touches it, a pin is on no net at all — so a flag sitting
+    // on one has nothing to resolve to and names nothing. That is not what the
     // format means: LTSpice ties a supply pin to its rail with a flag and no wire
     // whatsoever, which is how `+UB`/`-UB` reach an op-amp in half our examples.
     // Two nets that end up with the same name are one node in the netlist, and
     // that is exactly how such a pin joins the rail.
     //
-    // This runs on *every* name, not only the ones that resolved to nothing, and
-    // that is the whole subtlety. A stub hanging off a bare pin is invisible
-    // during resolution — it belongs to no net yet, so it is in none of the
-    // routes. A name sitting exactly on such a stub could therefore be claimed by
-    // an unrelated wire passing a few pixels away, which is what put `Ut` on the
-    // op-amp's inverting input in the PT100 schematics: its own stub was 0 px
-    // away and invisible, the neighbouring run 4 px away and not. So the two
-    // distances are compared, and the nearer one wins.
+    // Only a pin with no wire on it can be in this state: a wire always has a pin
+    // at either end now (a junction where there was none), so anything wired is
+    // already on a net.
     {
       const bare: { portId: string; x: number; y: number }[] = [];
       for (const n of get().nodes) {
@@ -1064,37 +1053,21 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           if (!portNet(circuit, portId)) bare.push({ portId, x: p.x, y: p.y });
         }
       }
-      // A name may reach its pin along a chain of stubs rather than sitting on
-      // it: LTSpice runs a supply rail out of an op-amp's V+ over two or three
-      // segments and parks the flag at the end. Neither the flag nor the pin is
-      // on a net, so only the chain connects them.
-      const groups = orphanGroups(get().ascOrphanWires);
       const routes = anchorRoutes(get(), norm);
       let made = false;
       for (const a of anchors) {
         if (!a.name.trim()) continue;
         const at = { x: a.x, y: a.y };
-        // How far the name is from the nets that already exist…
-        const dNet = distToRoutes(at, routes);
-        // …and from the nearest stub that ends on a pin with no net yet.
-        let dStub = Infinity, via: RoutePoint[][] | undefined;
-        for (const g of groups) {
-          const d = distToGroup(at, g);
-          if (d < dStub && bare.some((b) => touchesGroup(b, g))) { dStub = d; via = g; }
-        }
-        const direct = bare.reduce((m, b) => Math.min(m, Math.hypot(b.x - a.x, b.y - a.y)), Infinity);
-        if (Math.min(dStub, direct) > ANCHOR_TOLERANCE) continue;
-        if (dNet <= Math.min(dStub, direct)) continue;   // a real net is nearer
-
-        const reaches = (b: { x: number; y: number }) =>
-          Math.hypot(b.x - a.x, b.y - a.y) <= ANCHOR_TOLERANCE || (!!via && touchesGroup(b, via));
-        let best = Infinity, hit: typeof bare[number] | undefined;
+        let best = ANCHOR_TOLERANCE, hit: typeof bare[number] | undefined;
         for (const b of bare) {
-          if (!reaches(b)) continue;
           const d = Math.hypot(b.x - a.x, b.y - a.y);
-          if (d < best) { best = d; hit = b; }
+          if (d <= best) { best = d; hit = b; }
         }
         if (!hit) continue;
+        // A net that is nearer than the pin keeps the name — the pin is only the
+        // answer when nothing else is closer.
+        if (distToRoutes(at, routes) <= best) continue;
+
         const comp = circuit.components.get(hit.portId.slice(0, hit.portId.lastIndexOf("-")));
         const port = comp?.ports.find((p) => p.id === hit!.portId);
         if (!port) continue;
@@ -1107,8 +1080,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         bare.splice(bare.indexOf(hit), 1);
         made = true;
       }
-      // Those pins are on nets now, so ask again — including for the names that
-      // only reach one *through* such a pin.
+      // Those pins are on nets now, so ask again.
       if (made) byAnchor = resolveAnchors(get(), norm);
     }
 

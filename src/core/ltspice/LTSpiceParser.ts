@@ -81,7 +81,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[]; busTaps: BusTap[] } {
+  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; anchors: NetAnchor[]; busTaps: BusTap[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -272,10 +272,12 @@ export class LTSpiceParser {
       if (portType) a.portType = portType;
     }
 
-    // Assign Nets using simple distance-based Union-Find
-    let nextNetId = 1;
+    /** How close a pin has to be to a wire to count as sitting on it. Tight: a
+     *  loose one lets a pin latch onto an adjacent wire one grid step away and
+     *  short unrelated nodes. */
+    const PIN_TOL = 8;
 
-    // Helper: Distance from point px,py to line segment w
+    /** Distance from a point to a wire segment. */
     const distToSegment = (px: number, py: number, w: Wire) => {
       const l2 = (w.x2 - w.x1) ** 2 + (w.y2 - w.y1) ** 2;
       if (l2 === 0) return Math.sqrt((px - w.x1) ** 2 + (py - w.y1) ** 2);
@@ -285,6 +287,53 @@ export class LTSpiceParser {
       const projY = w.y1 + t * (w.y2 - w.y1);
       return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
     };
+
+    // ── A pin for every wire end that has none ─────────────────────────────
+    // Our wires are edges between two pins, which is what makes them follow the
+    // parts they are drawn to: an edge references the pin, not a coordinate. A
+    // `.asc` wire has no such notion — it is four numbers, and it may end
+    // somewhere that is no pin at all. The stub between a part and a net name is
+    // exactly that, and there are hundreds of them.
+    //
+    // Those segments used to be set aside as raw geometry that nothing could
+    // draw, select or move. A junction is the missing pin: put one at each free
+    // end and every wire is an ordinary edge again, so there is one kind of wire
+    // instead of two with two implementations of everything a wire can do.
+    //
+    // Only true *ends* get one. A corner or a T-junction is already carried by a
+    // route's waypoints; turning those into junctions too would chop every bent
+    // wire into a chain of edges and change what the file round-trips to.
+    {
+      const key = (x: number, y: number) => `${x},${y}`;
+      /** How many wire ends land on each point. */
+      const endCount = new Map<string, number>();
+      for (const w of wires) {
+        for (const k of [key(w.x1, w.y1), key(w.x2, w.y2)]) endCount.set(k, (endCount.get(k) ?? 0) + 1);
+      }
+      /** Does another wire *run through* this point rather than end on it? */
+      const passedThrough = (x: number, y: number) => wires.some((w) => {
+        if ((w.x1 === x && w.y1 === y) || (w.x2 === x && w.y2 === y)) return false;
+        return distToSegment(x, y, w) <= 0.5;
+      });
+
+      for (const [k, n] of endCount) {
+        if (n !== 1) continue;                       // several ends meet: a joint, not a free end
+        const [x, y] = k.split(",").map(Number);
+        if (passedThrough(x, y)) continue;           // sits on another wire: a tap
+        // A pin already there is the binding we were looking for.
+        if (pins.some((p) => Math.hypot(p.x - x, p.y - y) <= PIN_TOL)) continue;
+
+        const id = `junction_${compIdCounter++}`;
+        const jx = x - CENTER, jy = y - CENTER;
+        components.push(createSpiceComponent("junction", id, "", jx, jy));
+        nodes.push({ id, type: "component", position: { x: jx, y: jy }, data: { componentType: "junction", label: "" } });
+        pins.push({ compId: id, handle: "j", x, y });
+      }
+    }
+
+    // Assign Nets using simple distance-based Union-Find
+    let nextNetId = 1;
+
 
     const isPointOnWire = (px: number, py: number, w: Wire, tolerance: number = 0) => {
       return distToSegment(px, py, w) <= tolerance;
@@ -316,7 +365,6 @@ export class LTSpiceParser {
     // Assign pins to nets. Pins now sit exactly on wire endpoints (distance 0),
     // so a tight tolerance is enough — a loose one lets a pin latch onto an
     // adjacent wire one grid step away and short unrelated nodes.
-    const PIN_TOL = 8;
     for (const p of pins) {
       let bestDist = Infinity;
       let bestNetId: number | undefined;
@@ -509,21 +557,51 @@ export class LTSpiceParser {
       d.ascPassThrough = passThrough(node.position.x + CENTER, node.position.y + CENTER);
     }
 
-    // ── Wire segments the edge model cannot hold ───────────────────────────
-    // Every route above runs pin to pin, so a segment on no such path — a stub
-    // ending in mid-air, a spur left over from editing — has no edge to carry it
-    // and used to vanish on the first save. It is inert: with no edge and no pin
-    // the editor cannot select or delete it either, which is exactly why writing
-    // it back verbatim is safe. (A wire the user *can* delete has an edge, so it
-    // never reaches this list and stays deleted.)
-    const orphanWires: string[] = [];
+    // ── The links no route ran along ───────────────────────────────────────
+    // Every route above runs from the net's first pin to each of its others, so
+    // a link the search never took — a loop, a second path to the same place, a
+    // spur — is left over. Electrically it is part of its net already; what it
+    // lacks is an edge to be drawn, selected and moved by.
+    //
+    // It gets one, with a junction at either end that is not already a pin. That
+    // is the same answer as for a free end, applied to the last case, and it is
+    // what empties this category instead of leaving a rest that behaves
+    // differently from every other wire.
     const seenLink = new Set<string>();
+    const junctionAt = new Map<string, string>();
+    for (const [id, comp] of components.entries()) {
+      void id;
+      if (comp.id.startsWith("junction_")) junctionAt.set(`${Math.round(comp.position.x + CENTER)},${Math.round(comp.position.y + CENTER)}`, comp.id);
+    }
+    /** The port at a point: an existing pin, else a junction made for it. */
+    const portAt = (x: number, y: number): { compId: string; handle: string } => {
+      const pin = pins.find((p) => Math.hypot(p.x - x, p.y - y) <= PIN_TOL);
+      if (pin) return { compId: pin.compId, handle: pin.handle };
+      const existing = junctionAt.get(`${x},${y}`);
+      if (existing) return { compId: existing, handle: "j" };
+      const jid = `junction_${compIdCounter++}`;
+      const jx = x - CENTER, jy = y - CENTER;
+      components.push(createSpiceComponent("junction", jid, "", jx, jy));
+      nodes.push({ id: jid, type: "component", position: { x: jx, y: jy }, data: { componentType: "junction", label: "" } });
+      pins.push({ compId: jid, handle: "j", x, y });
+      junctionAt.set(`${x},${y}`, jid);
+      return { compId: jid, handle: "j" };
+    };
+
     for (const [a, nbs] of adj) {
       for (const b of nbs) {
         if (usedLinks.has(`${a}|${b}`) || seenLink.has(`${b}|${a}`)) continue;
         seenLink.add(`${a}|${b}`);
         const p = vCoord.get(a)!, q = vCoord.get(b)!;
-        orphanWires.push(`WIRE ${p.x} ${p.y} ${q.x} ${q.y}`);
+        const from = portAt(p.x, p.y), to = portAt(q.x, q.y);
+        if (from.compId === to.compId && from.handle === to.handle) continue;
+        edges.push({
+          id: `edge_${edgeCounter++}`,
+          source: from.compId, sourceHandle: from.handle,
+          target: to.compId, targetHandle: to.handle,
+          type: "wire",
+          data: { waypoints: [] },
+        });
       }
     }
 
@@ -535,7 +613,7 @@ export class LTSpiceParser {
       if (dir && dir !== "None") a.portType = dir;
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors, busTaps };
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, anchors, busTaps };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {

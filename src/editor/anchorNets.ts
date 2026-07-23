@@ -1,6 +1,6 @@
 import type { Node, Edge } from "@xyflow/react";
 import { wireRoutes, type PinLookup, type RoutePoint } from "@core/geometry/wireRoutes.js";
-import { resolveAnchor, ANCHOR_TOLERANCE, type RoutedNet } from "@core/circuit/anchorResolve.js";
+import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { getNodePins, pinOutwardAxis, NODE_SIZE } from "./pinGeometry.js";
 import type { SymbolNorm } from "@sym/asyParser.js";
@@ -63,7 +63,7 @@ export interface PortNets {
  * be impossible (the lead pushed it aside) and is now the LTSpice idiom.
  */
 export function netRoutes(
-  nodes: Node[], edges: Edge[], nets: PortNets, norm: SymbolNorm = "default", orphanWires: string[] = [],
+  nodes: Node[], edges: Edge[], nets: PortNets, norm: SymbolNorm = "default",
 ): RoutedNet[] {
   const pins = flowPins(nodes, norm);
   const out: RoutedNet[] = [];
@@ -80,21 +80,20 @@ export function netRoutes(
     }
   }
 
-  return [...out, ...attachedOrphans(orphanWires, out)];
+  return out;
 }
 
 /**
  * Everything on the sheet that decides which net a name lies on.
  *
- * Bundled into one argument because leaving a piece out is silent: forget the
- * orphan wires and a third of the names in the bundled examples stop resolving,
- * with nothing to show for it but net names quietly reverting to `net7`.
+ * One argument rather than four loose ones: this is asked from the store, the
+ * properties panel, the context menu and the tests, and each of them getting the
+ * pieces right separately is how they drift apart.
  */
 export interface AnchorSheet {
   nodes: Node[];
   edges: Edge[];
   netAnchors: NetAnchor[];
-  ascOrphanWires: string[];
   circuit: { components: Map<string, { ports: { id: string; netId?: string | null }[] }> };
 }
 
@@ -106,7 +105,7 @@ export function anchorRoutes(sheet: AnchorSheet, norm: SymbolNorm = "default"): 
       return sheet.circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
     },
   };
-  return netRoutes(sheet.nodes, sheet.edges, nets, norm, sheet.ascOrphanWires);
+  return netRoutes(sheet.nodes, sheet.edges, nets, norm);
 }
 
 /** The net under each name, by anchor id — the one way to ask this question. */
@@ -126,113 +125,4 @@ export function anchorNets(anchors: NetAnchor[], routes: RoutedNet[]): Map<strin
     if (netId) out.set(a.id, netId);
   }
   return out;
-}
-
-/**
- * Orphan wires as connected groups of segments.
- *
- * A wire our edge model cannot hold — a stub, a spur, a segment whose far end is
- * on no pin — is kept verbatim so a saved file stays faithful (see
- * LTSpiceParser.orphanWires). It used to be *only* that: inert scenery. It is not
- * inert any more, because names moved out of the topology.
- *
- * Grouped rather than taken one at a time, because these stubs chain: LTSpice
- * files run a supply rail out of an op-amp pin over two or three segments and
- * park the flag at the end. Only the whole chain touches both the pin and the
- * name, so only the whole chain can join them.
- */
-export function orphanGroups(orphanWires: string[]): RoutePoint[][][] {
-  const segments: RoutePoint[][] = [];
-  for (const line of orphanWires) {
-    const m = /^WIRE\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)/i.exec(line.trim());
-    if (m) segments.push([{ x: +m[1], y: +m[2] }, { x: +m[3], y: +m[4] }]);
-  }
-
-  // Union by shared endpoint, then by proximity — the ends of two segments that
-  // meet are written as the same integer pair, so exact keys are enough.
-  const key = (p: RoutePoint) => `${p.x},${p.y}`;
-  const parent = new Map<string, string>();
-  const find = (k: string): string => {
-    let r = k;
-    while (parent.get(r) !== r) r = parent.get(r) ?? r;
-    return r;
-  };
-  const union = (a: string, b: string) => {
-    const ra = find(a), rb = find(b);
-    if (ra !== rb) parent.set(ra, rb);
-  };
-  for (const seg of segments) {
-    for (const p of seg) if (!parent.has(key(p))) parent.set(key(p), key(p));
-    union(key(seg[0]), key(seg[1]));
-  }
-  // A segment ending *on* another one (a T-junction, not a shared endpoint) is
-  // connected too, which is how a rail taps a run rather than meeting its end.
-  for (const a of segments) {
-    for (const b of segments) {
-      if (a === b) continue;
-      for (const p of a) {
-        if (distToSeg(p, b[0], b[1]) <= 1) union(key(p), key(b[0]));
-      }
-    }
-  }
-
-  const groups = new Map<string, RoutePoint[][]>();
-  for (const seg of segments) {
-    const root = find(key(seg[0]));
-    groups.set(root, [...(groups.get(root) ?? []), seg]);
-  }
-  return [...groups.values()];
-}
-
-/** Distance from a point to a segment. */
-function distToSeg(p: RoutePoint, a: RoutePoint, b: RoutePoint): number {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-  return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y);
-}
-
-/** Distance from a point to the nearest segment of a group. */
-export function distToGroup(p: RoutePoint, group: RoutePoint[][]): number {
-  let best = Infinity;
-  for (const seg of group) best = Math.min(best, distToSeg(p, seg[0], seg[1]));
-  return best;
-}
-
-/** Does `p` lie on any segment of this group? */
-export function touchesGroup(p: RoutePoint, group: RoutePoint[][], tolerance = ANCHOR_TOLERANCE): boolean {
-  return group.some((seg) => distToSeg(p, seg[0], seg[1]) <= tolerance);
-}
-
-/** Orphan groups that reach a known net, each carrying that net. */
-function attachedOrphans(orphanWires: string[], routes: RoutedNet[]): RoutedNet[] {
-  const groups = orphanGroups(orphanWires);
-  if (groups.length === 0) return [];
-
-  const known = [...routes];
-  const attached: RoutedNet[] = [];
-  const pending = groups.map((segs) => ({ segs, done: false }));
-  // Repeated because a group may only reach a net *through* another group.
-  for (let pass = 0; pass < pending.length; pass++) {
-    let progress = false;
-    for (const g of pending) {
-      if (g.done) continue;
-      let netId: string | null = null;
-      for (const seg of g.segs) {
-        netId = resolveAnchor(seg[0], known) ?? resolveAnchor(seg[1], known);
-        if (netId) break;
-      }
-      if (!netId) continue;
-      g.done = true;
-      progress = true;
-      for (const seg of g.segs) {
-        const r = { netId, verts: seg };
-        known.push(r);
-        attached.push(r);
-      }
-    }
-    if (!progress) break;
-  }
-  return attached;
 }

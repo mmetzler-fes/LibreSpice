@@ -234,3 +234,50 @@ export class CustomSubcircuit extends SpiceComponent {
     return c;
   }
 }
+
+/**
+ * A point where wires meet that is not a part's pin.
+ *
+ * Our wires are edges between two pins, which is what makes them follow the
+ * parts they are drawn to — an edge references the pin, not a coordinate, so
+ * moving a part takes its wires along. A `.asc` wire has no such notion: it is
+ * four numbers, and it may perfectly well end somewhere that is not a pin at
+ * all. The stub between a part and a net name is exactly that shape.
+ *
+ * Such a segment used to be set aside as raw geometry, drawn by nobody and
+ * editable by no one, under the name "orphan wire". The name was wrong twice
+ * over: of the 176 in the bundled examples only two were actually alone, and the
+ * rest were ordinary wires in the middle of a network — set apart purely because
+ * our data structure could not hold them.
+ *
+ * A junction is the missing pin. It sits where the wire ends, carries one port
+ * and nothing else: no symbol, no netlist line, no properties. With it every
+ * wire is an ordinary edge again, and the category disappears rather than being
+ * given a second implementation of everything a wire can do.
+ */
+export class Junction extends SpiceComponent {
+  constructor(id: string, position?: Point) {
+    super(id, "", position);
+  }
+
+  protected createPorts(): Port[] {
+    return [new Port(`${this.id}-j`, "j", { x: 0, y: 0 })];
+  }
+
+  /** Nothing: a junction is a place, not a device. */
+  getNetlistLine(): string {
+    return "";
+  }
+
+  getProperties(): Property[] {
+    return [];
+  }
+
+  setProperty(): void { /* nothing to set */ }
+
+  clone(): Junction {
+    const j = new Junction(this.id, { ...this.position });
+    j.rotation = this.rotation;
+    return j;
+  }
+}

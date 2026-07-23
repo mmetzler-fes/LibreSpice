@@ -22,7 +22,6 @@ import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, 
 import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { NetAnchorLayer } from "./NetAnchorLayer.js";
-import { OrphanWireLayer } from "./OrphanWireLayer.js";
 import { TextBoxLayer } from "./TextBoxLayer.js";
 import { SheetShapeLayer } from "./SheetShapeLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
@@ -947,7 +946,6 @@ function CanvasInner() {
           </div>
 
           <SheetShapeLayer />
-          <OrphanWireLayer />
           <NetAnchorLayer onMenu={openAnchorMenu} />
           <DataFlagLayer />
           <TextBoxLayer />

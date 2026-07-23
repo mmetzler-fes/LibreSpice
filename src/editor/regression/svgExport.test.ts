@@ -52,34 +52,6 @@ type Case = { name: string; run: (fail: (r: string) => void) => void };
 
 const CASES: Case[] = [
   {
-    // A segment with an end on no pin has no edge to carry it, and used to be
-    // invisible because of that. Names leaving the topology made the case
-    // common: the stub between a part and a connector is exactly this shape, so
-    // a schematic could appear to have lost a connection it still had.
-    name: "wire segments no edge carries are still drawn",
-    run: (fail) => {
-      const a = vsource("V1", 0, 0);
-      const orphans = ["WIRE 176 176 160 176", "WIRE 304 288 320 288"];
-      const svg = buildSchematicSvg([a], [], "default", undefined, undefined, [], [], [], [], orphans);
-      for (const [x1, y1, x2, y2] of [[176, 176, 160, 176], [304, 288, 320, 288]]) {
-        const re = new RegExp(`x1="${x1}"[^>]*y1="${y1}"[^>]*x2="${x2}"[^>]*y2="${y2}"`);
-        if (!re.test(svg)) fail(`no line for WIRE ${x1} ${y1} ${x2} ${y2}:\n${svg}`);
-      }
-    },
-  },
-  {
-    name: "and they widen the sheet so nothing is clipped",
-    run: (fail) => {
-      const a = vsource("V1", 0, 0);
-      const svg = buildSchematicSvg([a], [], "default", undefined, undefined, [], [], [], [], ["WIRE 600 600 640 600"]);
-      const vb = viewBoxOf(svg);
-      if (!vb) { fail("no viewBox"); return; }
-      const [minX, minY, w, h] = vb;
-      if (minX + w < 640 || minY + h < 600) fail(`viewBox ${vb.join(" ")} cuts off the segment at 640,600`);
-    },
-  },
-
-  {
     // Pure routing helper: a diagonal step must expand to a right-angle corner,
     // never a slanted segment (which is what "verzieht die Linien" looked like).
     name: "orthoVertices inserts a right-angle corner",

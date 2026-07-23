@@ -3,7 +3,7 @@ import { Capacitor } from "@core/components/passives/Capacitor.js";
 import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, LED, Zener, Schottky, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
-import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector } from "@core/components/special/Special.js";
+import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector, Junction } from "@core/components/special/Special.js";
 import { LogicGate, GATE_LABELS } from "@core/components/digital/LogicGate.js";
 import { DFlipFlop, KIND_LABELS } from "@core/components/digital/DFlipFlop.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -42,6 +42,7 @@ export function createSpiceComponent(
     case "sinesource":  return new SineSource(id, label, pos);
     case "pulsesource": return new PulseSource(id, label, pos);
     case "ground":      return new Ground(id, pos);
+    case "junction":    return new Junction(id, pos);
     case "netlabel":    return new NetLabel(id, label, pos);
     case "netconnector": return new NetConnector(id, label, pos);
     case "subcircuit":  return new CustomSubcircuit(id, label, pos);
@@ -71,7 +72,7 @@ const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
   zener: "D", schottky: "D", opamp: "U", jumper: "R",
   bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
-  netlabel: "NET", netconnector: "PORT", subcircuit: "X",
+  netlabel: "NET", netconnector: "PORT", subcircuit: "X", junction: "J",
 };
 
 /**

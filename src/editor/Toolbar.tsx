@@ -92,7 +92,7 @@ export function Toolbar() {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
-    circuitName, setCircuitName, dataFlags, netAnchors, busTaps, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
+    circuitName, setCircuitName, dataFlags, netAnchors, busTaps, textBoxes, sheetShapes, directiveRaw, ascHeader,
     showDirectivesOnCanvas, directivesPos, setFragmentClipboard,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect, setPendingFragment } = useUIStore();
@@ -228,11 +228,11 @@ export function Toolbar() {
     const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
     // `circuit` resolves the wires' net names — a wire stores only *whether* to
     // show a label, never the text (see NetNameLookup).
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes, netAnchors, busTaps, ascOrphanWires), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes, netAnchors, busTaps), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {
-    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes, { directiveRaw, header: ascHeader, orphanWires: ascOrphanWires, anchors: netAnchors, busTaps });
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes, { directiveRaw, header: ascHeader, anchors: netAnchors, busTaps });
     if ("showSaveFilePicker" in window) {
       try {
         let handle = fileHandle;

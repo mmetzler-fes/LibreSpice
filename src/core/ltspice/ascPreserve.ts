@@ -67,9 +67,6 @@ export interface AscPreserved {
   directiveRaw?: DirectiveRaw[];
   /** The `Version` / `SHEET` lines, keyed by keyword. */
   header?: Record<string, string>;
-  /** `WIRE` lines the pin-to-pin edge model cannot represent (stubs, spurs).
-   *  Written back untouched — see LTSpiceParser for why that is safe. */
-  orphanWires?: string[];
   /**
    * The names on the sheet (see NetAnchor). These *are* the file's `FLAG` and
    * `IOPIN` lines — there is no longer a second, derived source that has to be

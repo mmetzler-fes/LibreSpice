@@ -81,6 +81,7 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   mosfet_p: ["d", "g", "s"],
   opamp: ["inp", "inn", "vcc", "vee", "out"],
   ground: ["gnd"],
+  junction: ["j"],
   netlabel: ["t"],
   netconnector: ["t"],
   // The flip-flop's ids match DFlipFlop.createPorts; the logic gate's input
@@ -115,6 +116,8 @@ const SOURCE_PINS: LocalPin[] = [
 
 const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
   ground: [{ handleId: "gnd", order: 1, px: NODE_SIZE / 2, py: GROUND_PIN_Y }],
+  // A junction is nothing but its connection point, so the pin is the centre.
+  junction: [{ handleId: "j", order: 1, px: NODE_SIZE / 2, py: NODE_SIZE / 2 }],
   // Both net terminals dock at the node centre, so the connection point does not
   // move when the symbol's arrow turns.
   netlabel: [{ handleId: "t", order: 1, px: NODE_SIZE / 2, py: NODE_SIZE / 2 }],

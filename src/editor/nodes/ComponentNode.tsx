@@ -54,6 +54,7 @@ export type ComponentType =
   | "sinesource"
   | "pulsesource"
   | "ground"
+  | "junction"
   | "netlabel"
   | "netconnector"
   | "subcircuit";
@@ -216,6 +217,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   ground: GroundSymbol,
   logicgate: GroundSymbol, // unused: bound with its gate props at the call site
   dff: GroundSymbol, // unused: bound with its flip-flop props at the call site
+  junction: GroundSymbol, // unused: a junction draws its own dot (see JunctionNode)
   netlabel: GroundSymbol, // unused: net-label nodes render their own tag
   netconnector: GroundSymbol, // unused: net-connector nodes render their own symbol
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box

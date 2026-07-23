@@ -119,10 +119,13 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     check("the existing wires are still there", st().edges.length > pastedCountBefore,
       `had ${pastedCountBefore} wires before the paste, ${st().edges.length} after`);
 
-    // Designators must not clash — SPICE cannot tell two R1 apart.
+    // Designators must not clash — SPICE cannot tell two R1 apart. Only parts
+    // that *have* a designator count: ground and a junction are places, not
+    // devices, and neither carries one.
     const labels = [...st().circuit.components.values()]
-      .filter((c) => !c.id.startsWith("netlabel_") && !c.id.startsWith("netconnector_") && !c.id.startsWith("ground_"))
-      .map((c) => c.label);
+      .filter((c) => !c.id.startsWith("ground_") && !c.id.startsWith("junction_"))
+      .map((c) => c.label)
+      .filter((l) => l.trim() !== "");
     check("no duplicate designators after pasting", new Set(labels).size === labels.length,
       `duplicates in: ${labels.sort().join(", ")}`);
 
