@@ -52,6 +52,28 @@ type Case = { name: string; run: (fail: (r: string) => void) => void };
 
 const CASES: Case[] = [
   {
+    // A junction is a place where wires meet, not a part. It was drawn as a
+    // *ground symbol*: the symbol table needs an entry per component type, the
+    // entry was filled in with ground as a placeholder, and the renderer that
+    // was supposed to make it unnecessary never got written. A schematic with 13
+    // junctions grew 13 phantom grounds — which reads as a circuit shorted all
+    // over rather than as a drawing mistake.
+    name: "a junction draws nothing at all",
+    run: (fail) => {
+      const junction: Node = {
+        id: "junction_1", type: "component", position: { x: 100, y: 100 },
+        data: { componentType: "junction", label: "" },
+      } as Node;
+      const svg = buildSchematicSvg([junction], [], "default");
+      // The ground symbol's giveaway is its stack of shrinking bars; any drawing
+      // at all here is wrong, so the check is simply that nothing was emitted.
+      if (/<(line|circle|polygon|rect|text|path)\b/.test(svg.replace(/<rect[^>]*fill="#ffffff"[^>]*>/, ""))) {
+        fail(`a junction drew something:\n${svg}`);
+      }
+    },
+  },
+
+  {
     // Pure routing helper: a diagonal step must expand to a right-angle corner,
     // never a slanted segment (which is what "verzieht die Linien" looked like).
     name: "orthoVertices inserts a right-angle corner",

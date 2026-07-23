@@ -57,6 +57,10 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   const mirrored = !!data.mirrored;
   const { x, y } = node.position;
 
+  // A junction is a place where wires meet, not a part (see Junction): the wires
+  // running into it already show the connection, so it draws nothing.
+  if (type === "junction") return null;
+
   if (type === "subcircuit") {
     return (
       <g transform={`translate(${x} ${y})`} color="#334155">

@@ -217,7 +217,7 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   ground: GroundSymbol,
   logicgate: GroundSymbol, // unused: bound with its gate props at the call site
   dff: GroundSymbol, // unused: bound with its flip-flop props at the call site
-  junction: GroundSymbol, // unused: a junction draws its own dot (see JunctionNode)
+  junction: GroundSymbol, // unused: a junction is drawn by JunctionNode, which draws nothing
   netlabel: GroundSymbol, // unused: net-label nodes render their own tag
   netconnector: GroundSymbol, // unused: net-connector nodes render their own symbol
   subcircuit: ResistorSymbol, // unused: subcircuit nodes render their own box
@@ -704,10 +704,43 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
   );
 }
 
+/**
+ * A point where wires meet that is not a part's pin (see Junction).
+ *
+ * It draws nothing. The wires running into it already show the connection, and
+ * that is exactly how the same spot looked before junctions existed — the
+ * segments were plain lines with no node behind them. Only its handle is here,
+ * because that is what the wires attach to; it is transparent rather than
+ * absent, so React Flow still measures it where the wiring expects.
+ *
+ * Selected, it shows a small ring — otherwise a junction picked with the pointer
+ * would give no sign of having been picked.
+ */
+function JunctionNode({ selected }: { selected?: boolean }) {
+  const c = NODE_SIZE / 2;
+  return (
+    <div style={{ ...NO_NATIVE_DRAG, position: "relative", width: NODE_SIZE, height: NODE_SIZE }}>
+      <Handle
+        type="source" position={Position.Top} id="j"
+        isConnectable={false} isConnectableStart={false} isConnectableEnd={false}
+        style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)", opacity: 0 }}
+      />
+      {selected && (
+        <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", position: "absolute", inset: 0 }}>
+          <circle cx={c} cy={c} r={4} fill="none" stroke="#2563eb" strokeWidth={2} />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const pal = useTheme();
   const nodeData = data as ComponentNodeData;
+  if (nodeData.componentType === "junction") {
+    return <JunctionNode selected={selected} />;
+  }
   if (nodeData.componentType === "netlabel" || nodeData.componentType === "netconnector") {
     return <NetTerminalNode nodeId={id} data={nodeData} selected={selected} />;
   }
