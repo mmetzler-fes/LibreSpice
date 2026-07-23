@@ -98,15 +98,20 @@ export interface AnchorSheet {
   circuit: { components: Map<string, { ports: { id: string; netId?: string | null }[] }> };
 }
 
-/** The net under each name, by anchor id — the one way to ask this question. */
-export function resolveAnchors(sheet: AnchorSheet, norm: SymbolNorm = "default"): Map<string, string> {
+/** Every net on the sheet as the polylines it occupies (see netRoutes). */
+export function anchorRoutes(sheet: AnchorSheet, norm: SymbolNorm = "default"): RoutedNet[] {
   const nets: PortNets = {
     netOf: (portId) => {
       const compId = portId.slice(0, portId.lastIndexOf("-"));
       return sheet.circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
     },
   };
-  return anchorNets(sheet.netAnchors, netRoutes(sheet.nodes, sheet.edges, nets, norm, sheet.ascOrphanWires));
+  return netRoutes(sheet.nodes, sheet.edges, nets, norm, sheet.ascOrphanWires);
+}
+
+/** The net under each name, by anchor id — the one way to ask this question. */
+export function resolveAnchors(sheet: AnchorSheet, norm: SymbolNorm = "default"): Map<string, string> {
+  return anchorNets(sheet.netAnchors, anchorRoutes(sheet, norm));
 }
 
 /**
@@ -186,6 +191,13 @@ function distToSeg(p: RoutePoint, a: RoutePoint, b: RoutePoint): number {
   if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
   return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y);
+}
+
+/** Distance from a point to the nearest segment of a group. */
+export function distToGroup(p: RoutePoint, group: RoutePoint[][]): number {
+  let best = Infinity;
+  for (const seg of group) best = Math.min(best, distToSeg(p, seg[0], seg[1]));
+  return best;
 }
 
 /** Does `p` lie on any segment of this group? */

@@ -43,6 +43,13 @@ export function distToRoute(p: RoutePoint, verts: RoutePoint[]): number {
   return best;
 }
 
+/** Distance from a point to the nearest of several routed nets. */
+export function distToRoutes(p: RoutePoint, routes: RoutedNet[]): number {
+  let best = Infinity;
+  for (const r of routes) best = Math.min(best, distToRoute(p, r.verts));
+  return best;
+}
+
 /**
  * The net under `p`, or `null` when nothing is close enough.
  *

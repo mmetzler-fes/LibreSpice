@@ -18,8 +18,9 @@ import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
-import { resolveAnchors, orphanGroups, touchesGroup } from "@editor/anchorNets.js";
-import { ANCHOR_TOLERANCE } from "@core/circuit/anchorResolve.js";
+import { resolveAnchors, anchorRoutes, orphanGroups, touchesGroup, distToGroup } from "@editor/anchorNets.js";
+import { ANCHOR_TOLERANCE, distToRoutes } from "@core/circuit/anchorResolve.js";
+import type { RoutePoint } from "@core/geometry/wireRoutes.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -1046,8 +1047,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // whatsoever, which is how `+UB`/`-UB` reach an op-amp in half our examples.
     // Two nets that end up with the same name are one node in the netlist, and
     // that is exactly how such a pin joins the rail.
-    const unresolved = anchors.filter((a) => !byAnchor.has(a.id) && a.name.trim());
-    if (unresolved.length > 0) {
+    //
+    // This runs on *every* name, not only the ones that resolved to nothing, and
+    // that is the whole subtlety. A stub hanging off a bare pin is invisible
+    // during resolution — it belongs to no net yet, so it is in none of the
+    // routes. A name sitting exactly on such a stub could therefore be claimed by
+    // an unrelated wire passing a few pixels away, which is what put `Ut` on the
+    // op-amp's inverting input in the PT100 schematics: its own stub was 0 px
+    // away and invisible, the neighbouring run 4 px away and not. So the two
+    // distances are compared, and the nearer one wins.
+    {
       const bare: { portId: string; x: number; y: number }[] = [];
       for (const n of get().nodes) {
         for (const p of getNodePins(n, norm)) {
@@ -1060,9 +1069,23 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       // segments and parks the flag at the end. Neither the flag nor the pin is
       // on a net, so only the chain connects them.
       const groups = orphanGroups(get().ascOrphanWires);
+      const routes = anchorRoutes(get(), norm);
       let made = false;
-      for (const a of unresolved) {
-        const via = groups.find((g) => touchesGroup({ x: a.x, y: a.y }, g));
+      for (const a of anchors) {
+        if (!a.name.trim()) continue;
+        const at = { x: a.x, y: a.y };
+        // How far the name is from the nets that already exist…
+        const dNet = distToRoutes(at, routes);
+        // …and from the nearest stub that ends on a pin with no net yet.
+        let dStub = Infinity, via: RoutePoint[][] | undefined;
+        for (const g of groups) {
+          const d = distToGroup(at, g);
+          if (d < dStub && bare.some((b) => touchesGroup(b, g))) { dStub = d; via = g; }
+        }
+        const direct = bare.reduce((m, b) => Math.min(m, Math.hypot(b.x - a.x, b.y - a.y)), Infinity);
+        if (Math.min(dStub, direct) > ANCHOR_TOLERANCE) continue;
+        if (dNet <= Math.min(dStub, direct)) continue;   // a real net is nearer
+
         const reaches = (b: { x: number; y: number }) =>
           Math.hypot(b.x - a.x, b.y - a.y) <= ANCHOR_TOLERANCE || (!!via && touchesGroup(b, via));
         let best = Infinity, hit: typeof bare[number] | undefined;
@@ -1080,6 +1103,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         circuit.nets.set(netId, net);
         port.connect(netId);
         net.addPort(port.id);
+        // Taken: a second name must not claim the same pin.
+        bare.splice(bare.indexOf(hit), 1);
         made = true;
       }
       // Those pins are on nets now, so ask again — including for the names that

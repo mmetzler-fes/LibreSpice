@@ -238,6 +238,40 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       fail("moving a name leaves the wires alone", `threw: ${(e as Error).message}`);
     }
 
+    // ── A name on a stub belongs to that stub's pin ────────────────────────
+    // A stub hanging off a pin that has no net yet is invisible while the names
+    // are resolved: it belongs to nothing, so it is in none of the routes. A name
+    // sitting exactly on such a stub can therefore be claimed by an unrelated
+    // wire passing a few pixels away — which is what put `Ut` on the op-amp's
+    // *inverting* input in the PT100 schematics, its own stub 0 px away and
+    // invisible, the neighbouring run 4 px away and not.
+    total++;
+    try {
+      const file = path.resolve("examples/Multisim_converted/1_4_2_PT100-Sensor_Bruecke_mit_INA333.asc");
+      if (fs.existsSync(file)) {
+        st().clearCircuit();
+        st().loadFromAsc(fs.readFileSync(file, "latin1"));
+        await tick(); await tick();
+        st().rebuildConnections();
+
+        const s = st();
+        const op = s.nodes.find((n) => (n.data as { componentType?: string }).componentType === "opamp");
+        if (!op) throw new Error("no op-amp in the fixture");
+        const nameOf = (handle: string) => {
+          const netId = s.circuit.components.get(op.id)?.ports.find((p) => p.id === `${op.id}-${handle}`)?.netId;
+          return netId ? s.circuit.nets.get(netId)?.nodeLabel : undefined;
+        };
+        // `Ut` sits 12 px from In+ on its own stub; `N3` sits 20 px from In- on
+        // another. Each must name the pin its stub ends on.
+        if (nameOf("inp") !== "Ut" || nameOf("inn") !== "N3") {
+          fail("a name on a stub names that stub's pin",
+            `In+ = ${nameOf("inp")} (soll Ut), In- = ${nameOf("inn")} (soll N3)`);
+        }
+      }
+    } catch (e) {
+      fail("a name on a stub names that stub's pin", `threw: ${(e as Error).message}`);
+    }
+
     // ── The shape of an anchor ─────────────────────────────────────────────
     // Ground is a flag named `0`, not a separate kind of thing — that is what
     // lets the anchor set cover every FLAG line rather than most of them.
