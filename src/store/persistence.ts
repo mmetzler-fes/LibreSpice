@@ -4,6 +4,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { TextBox } from "@core/circuit/textBox.js";
 import type { SheetShape } from "@core/circuit/sheetShape.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import type { PlotSettings } from "@simulation/plotStore.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
@@ -47,6 +48,15 @@ export interface CircuitSnapshot {
   netLabelPorts?: Record<string, string>;
   /** Positioned data-point annotations (LTSpice DATAFLAGs). */
   dataFlags?: DataFlag[];
+  /**
+   * The names on the sheet (see NetAnchor).
+   *
+   * Absent in anything written before names became coordinates. Such a snapshot
+   * carries them as `netlabel` / `netconnector` *nodes* instead, and is converted
+   * on load (see loadFromSnapshot) — so every share link ever handed out still
+   * opens, and opens with its names intact.
+   */
+  netAnchors?: NetAnchor[];
   /** Free text annotations (see textBox). Optional: older snapshots carry none. */
   textBoxes?: TextBox[];
   /** Sheet drawings (see sheetShape). Optional: older snapshots carry none. */

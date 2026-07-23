@@ -53,6 +53,15 @@ interface UIState {
    */
   canvasLocked: boolean;
   /**
+   * The name (net anchor) the user has hold of, or null.
+   *
+   * Kept here rather than on the anchor itself: a name is not a React Flow node,
+   * so it is outside the selection React Flow manages — and it must not join it,
+   * or "delete selection" would take a name along with the parts it happens to
+   * sit near.
+   */
+  selectedAnchorId: string | null;
+  /**
    * Drag on empty canvas draws a selection rectangle instead of panning.
    *
    * Shift+drag already does this (React Flow's `selectionKeyCode` default), but
@@ -89,6 +98,7 @@ interface UIActions {
   setSymbolNorm: (norm: SymbolNorm) => void;
   toggleAutoProbeCurrent: () => void;
   toggleCanvasLocked: () => void;
+  setSelectedAnchorId: (id: string | null) => void;
   toggleAreaSelect: () => void;
   setPendingFragment: (text: string | null) => void;
 }
@@ -111,6 +121,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   symbolNorm: "en",
   autoProbeCurrent: true,
   canvasLocked: false,
+  selectedAnchorId: null,
   areaSelect: false,
   pendingFragment: null,
 
@@ -133,6 +144,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
+  setSelectedAnchorId: (selectedAnchorId) => set({ selectedAnchorId }),
   toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
   setPendingFragment: (pendingFragment) => set({ pendingFragment }),
 }));

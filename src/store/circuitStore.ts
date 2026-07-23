@@ -206,6 +206,52 @@ function isGroundName(s: string): boolean {
   return /^(0|gnd)$/i.test(s.trim());
 }
 
+/**
+ * The name-carrying nodes of a snapshot written before the switch, each with the
+ * anchor that replaces it.
+ *
+ * The coordinate is the flag's, not the node's: a net terminal docked at its
+ * centre, which is where the `.asc` put the `FLAG` and where the name was drawn.
+ * Reading it as the node's top-left would shift every converted name by half a
+ * symbol — far enough to land it on the wrong wire.
+ */
+function legacyNameNodes(nodes: Node[]): { id: string; anchor: NetAnchor }[] {
+  const out: { id: string; anchor: NetAnchor }[] = [];
+  for (const n of nodes) {
+    const d = n.data as { componentType?: string; label?: string; portType?: PortType };
+    if (d.componentType !== "netlabel" && d.componentType !== "netconnector") continue;
+    const name = String(d.label ?? "").trim();
+    if (!name) continue;
+    const portType = d.componentType === "netconnector" ? d.portType ?? "BiDir" : undefined;
+    out.push({
+      id: n.id,
+      anchor: {
+        id: `anchor_${out.length + 1}`,
+        x: Math.round(n.position.x + NODE_SIZE / 2),
+        y: Math.round(n.position.y + NODE_SIZE / 2),
+        name,
+        ...(portType && portType !== "None" ? { portType } : {}),
+      },
+    });
+  }
+  return out;
+}
+
+/** Where a pin of `netId` sits on the sheet, or null when the net has none drawn. */
+function pinOfNet(circuit: Circuit, nodes: Node[], netId: string): FlowPoint | null {
+  for (const comp of circuit.components.values()) {
+    for (const port of comp.ports) {
+      if (port.netId !== netId) continue;
+      const node = nodes.find((n) => n.id === comp.id);
+      if (!node) continue;
+      const handle = port.id.slice(port.id.lastIndexOf("-") + 1);
+      const p = getNodePins(node, useUIStore.getState().symbolNorm).find((q) => q.handleId === handle);
+      if (p) return { x: Math.round(p.x), y: Math.round(p.y) };
+    }
+  }
+  return null;
+}
+
 /** The net a port is on, by the port id the circuit uses (`comp_1-a`). */
 function portNet(circuit: Circuit, portId: string): string | undefined {
   const compId = portId.slice(0, portId.lastIndexOf("-"));
@@ -277,14 +323,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const node = get().nodes.find((n) => n.id === id);
     const doomed = get().edges.filter((e) => e.source === id || e.target === id);
 
-    // Deleting a net terminal (a net label or a net connector) must *keep* the
-    // net's name: the name belongs to the wire, not to the symbol. So we remember
-    // it and re-show it on the wire that bridges the gap the terminal left
-    // (below), instead of dropping it as the old behaviour did.
-    const removed = get().circuit.components.get(id);
-    const namedNetId = removed?.getNetLabel() !== null ? removed?.ports[0]?.netId : undefined;
-    // The name a deleted terminal carried moves onto the bridging wire below.
-    const keptName = namedNetId && namedNetId !== "0" ? removed!.getNetLabel() : null;
+    // Nothing here has to rescue a net's name any more. A name is an anchor, and
+    // deleting a part cannot delete one — it sits on the wire, and the wire is
+    // bridged below.
 
     get().circuit.removeComponent(id);
 
@@ -332,7 +373,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
           // Route the replacement through the two original paths and the point the
           // removed pin sat on, so the wire keeps the shape it was drawn with. A
           // deleted net terminal leaves its name on this bridging wire (visible).
-          data: { waypoints: [...[...first.path].reverse(), ...(via ? [via] : []), ...other.path], ...(keptName ? { netName: keptName, showLabel: true } : {}) },
+          data: { waypoints: [...[...first.path].reverse(), ...(via ? [via] : []), ...other.path] },
         });
       }
     }
@@ -496,7 +537,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       const onNetEdge = (e: Edge) =>
         portNet(circuit, `${e.source}-${e.sourceHandle}`) === netId || portNet(circuit, `${e.target}-${e.targetHandle}`) === netId;
       const host = edges.find((e) => e.selected && onNetEdge(e)) ?? edges.find(onNetEdge);
-      const at = host ? labelAnchor(host, nodes) : null;
+      // No wire at all — a net that is a single pin, or two pins docked directly
+      // together. The name goes on the pin itself, which an anchor may now do:
+      // with the lead gone a pin is just another place a name can sit, and it is
+      // the only place this net has.
+      const at = (host ? labelAnchor(host, nodes) : null) ?? pinOfNet(circuit, nodes, netId);
       next = at ? [...netAnchors, { id: nextAnchorId(netAnchors), x: at.x, y: at.y, name: newLabel }] : netAnchors;
     }
 
@@ -1030,21 +1075,16 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // the circuit was never run they still sit in pendingProbes. Union covers both.
     const sim = useSimulationStore.getState();
     const selectedVariables = [...new Set([...sim.selectedVariables, ...sim.pendingProbes])];
-    // A terminal's name has no position of its own any more — it sits where the
-    // wiring puts it. Any offset left over from an older snapshot is dropped, so
-    // the same schematic draws the same way however it was opened.
-    const cleanNodes = nodes.map((n) => {
-      const t = (n.data as { componentType?: string }).componentType;
-      if (t !== "netlabel" && t !== "netconnector") return n;
-      const { labelOffset: _drop, ...rest } = n.data as Record<string, unknown>;
-      return { ...n, data: rest };
-    });
-    return { version: 1, nodes: cleanNodes, edges, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
+    return { version: 1, nodes, edges, netAnchors: get().netAnchors, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {
     const newCircuit = new Circuit();
     const rebuiltNodes = snapshot.nodes.map((n) => ({ ...n }));
+    // Anything written before names became coordinates carries them as nodes.
+    // Those links are already out in the world — printed on worksheets, pasted
+    // into course material — so they are converted here rather than rejected.
+    const legacy = snapshot.netAnchors ? [] : legacyNameNodes(rebuiltNodes);
 
     for (const node of rebuiltNodes) {
       const type = (node.data as { componentType?: ComponentType }).componentType;
@@ -1076,6 +1116,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       spiceDirectives: snapshot.spiceDirectives,
       simulationConfig: snapshot.simulationConfig,
       dataFlags: snapshot.dataFlags ?? [],
+      // The converted names go in as anchors; the nodes they came from are taken
+      // out below, once the nets have been built from them — removing a node
+      // bridges the wires that met at it, which is what keeps the net whole.
+      netAnchors: snapshot.netAnchors ?? legacy.map((l) => l.anchor),
       textBoxes: snapshot.textBoxes ?? [],
       sheetShapes: snapshot.sheetShapes ?? [],
       showDirectivesOnCanvas: snapshot.showDirectivesOnCanvas ?? false,
@@ -1101,22 +1145,33 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
     setTimeout(() => {
       get().rebuildConnections();
-      // Legacy net-id-keyed labels first (may miss if net ids shifted on rebuild)…
-      for (const [netId, label] of Object.entries(snapshot.netLabels)) {
-        get().renameNet(netId, label);
-      }
-      // …then port-anchored labels, which reliably resolve the net a given port
-      // now belongs to. These win, so a name is never lost to net-id churn.
-      if (snapshot.netLabelPorts) {
-        for (const [portId, label] of Object.entries(snapshot.netLabelPorts)) {
-          for (const comp of get().circuit.components.values()) {
-            const port = comp.ports.find((p) => p.id === portId);
-            if (port?.netId && port.netId !== "0") {
-              get().renameNet(port.netId, label);
-              break;
-            }
-          }
+
+      if (snapshot.netAnchors) return;
+
+      // ── Converting a snapshot from before the switch ────────────────────
+      // The label nodes are gone from the model but still in this payload. They
+      // are removed *after* the rebuild, through the normal delete path, because
+      // that path bridges the wires that met at the node: an imported net is
+      // routed as a star from its first pin, and when that pin is the label,
+      // every wire of the net hangs off it. Dropping the node outright would
+      // shred the net; the anchor is already sitting on the bridged wire.
+      for (const l of legacy) get().removeComponent(l.id);
+
+      // Names that were never a node — typed into the net-name field, kept only
+      // in the payload's net maps. Naming the net places the anchor for them, so
+      // a link written that way keeps its names too.
+      const named = new Set(legacy.map((l) => l.anchor.name));
+      for (const [portId, label] of Object.entries(snapshot.netLabelPorts ?? {})) {
+        if (named.has(label)) continue;
+        for (const comp of get().circuit.components.values()) {
+          const port = comp.ports.find((p) => p.id === portId);
+          if (port?.netId && port.netId !== "0") { get().renameNet(port.netId, label); named.add(label); break; }
         }
+      }
+      // Older still: keyed by net id, which the rebuild may have re-assigned.
+      // Tried last and only for names nothing else has placed.
+      for (const [netId, label] of Object.entries(snapshot.netLabels)) {
+        if (!named.has(label)) get().renameNet(netId, label);
       }
     }, 0);
   },

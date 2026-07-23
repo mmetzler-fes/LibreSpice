@@ -944,16 +944,19 @@ function wireGroups(wires: Wire[], points: Pt[]): Union {
 
 /**
  * Length of the stub between a component pin and a net label placed on it — one
- * visible grid square, the same lead the editor leaves when a label is dropped
- * on a pin by hand (see netLabelLead).
+ * visible grid square.
+ *
+ * The editor no longer leaves a lead of its own (a name is an anchor and simply
+ * sits on the pin), but a converted file still gets one: it is written for
+ * LTSpice as much as for us, and there a flag on a pin with no wire between them
+ * reads as a terminal rather than a labelled net.
  */
 const LEAD = 16;
 /**
  * Shortest a lead may be shrunk to when the preferred one is blocked: 0.3 cm at
  * the editor's 96 dpi, rounded up to LTSpice's 4-unit grid. Below this the
  * connector's tag sits on whatever it connects to — two of them on one point
- * draw on top of each other. Mirrors netLabelLead.MIN_LEAD; the two coordinate
- * spaces are 1:1 (see pinGeometry.GRID).
+ * draw on top of each other.
  */
 const MIN_LEAD = 12;
 

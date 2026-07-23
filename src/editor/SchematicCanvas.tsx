@@ -21,6 +21,7 @@ import { ComponentNode } from "./nodes/ComponentNode.js";
 import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, type FlowPoint } from "./WireTool.js";
 import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
+import { NetAnchorLayer } from "./NetAnchorLayer.js";
 import { TextBoxLayer } from "./TextBoxLayer.js";
 import { SheetShapeLayer } from "./SheetShapeLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
@@ -46,7 +47,6 @@ import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
 import { trackPointerDrag } from "./pointerDrag.js";
-import { netLabelPlacement, type LeadPin } from "./netLabelLead.js";
 import { forgetImportedRoutes } from "./importedRoutes.js";
 import { FragmentGhost } from "./FragmentGhost.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
@@ -199,40 +199,25 @@ function CanvasInner() {
 
   const placeComponent = useCallback(
     (type: ComponentType, cx: number, cy: number) => {
-      // Center the node on the (snapped) cursor: node.position is its top-left.
-      let terminal = { x: snapToGrid(cx), y: snapToGrid(cy) };
-      // A net label / net connector dropped on a component pin steps one grid
-      // square clear of the part and is joined by a short lead, instead of
-      // covering the terminal with a zero-length wire between the two coincident
-      // pins (see netLabelLead). The lead is a real wire, so the terminal stays
-      // draggable afterwards and the wire follows it.
-      const isNetTerminal = type === "netlabel" || type === "netconnector";
-      let leadPin: LeadPin | null = null;
-      if (isNetTerminal) {
-        const symbolNorm = useUIStore.getState().symbolNorm;
-        const pins: LeadPin[] = useCircuitStore.getState().nodes
-          // Another net terminal is not a part to lead away from.
-          .filter((n) => {
-            const t = (n.data as ComponentNodeData).componentType;
-            return t !== "netlabel" && t !== "netconnector";
-          })
-          .flatMap((n) => getNodePins(n, symbolNorm).map((p) => ({
-            nodeId: p.nodeId, handleId: p.handleId, x: p.x, y: p.y,
-            ownerCx: n.position.x + NODE_SIZE / 2, ownerCy: n.position.y + NODE_SIZE / 2,
-          })));
-        // Existing net terminals: not parts to lead away from, but the terminal
-        // must not come to rest on one — two connectors on the same point draw
-        // their tags on top of each other.
-        const others: FlowPoint[] = useCircuitStore.getState().nodes
-          .filter((n) => {
-            const t = (n.data as ComponentNodeData).componentType;
-            return t === "netlabel" || t === "netconnector";
-          })
-          .map((n) => ({ x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 }));
-        const placed = netLabelPlacement(terminal, pins, others);
-        terminal = placed.terminal;
-        leadPin = placed.pin;
+      // A name is not a part: it goes down as an anchor at the point the user
+      // aimed at, and that is the whole of it. It used to be a node with a pin,
+      // which is why dropping one on a terminal had to step it clear of the part
+      // and join it with a short lead — otherwise the two coincident pins wrote a
+      // zero-length `WIRE x y x y`. An anchor simply sits where it was dropped,
+      // on the pin included, exactly as in LTSpice.
+      if (type === "netlabel" || type === "netconnector") {
+        const at = { x: snapToGrid(cx), y: snapToGrid(cy) };
+        const isConnector = type === "netconnector";
+        const name = getNextLabel(type, existingLabels());
+        // A fresh connector defaults to a bi-directional port, the type that says
+        // the least about the signal and reads as the plain double arrow.
+        const id = useCircuitStore.getState().addNetAnchor(at.x, at.y, name, isConnector ? "BiDir" : undefined);
+        useUIStore.getState().setSelectedAnchorId(id);
+        return;
       }
+
+      // Center the node on the (snapped) cursor: node.position is its top-left.
+      const terminal = { x: snapToGrid(cx), y: snapToGrid(cy) };
       const x = terminal.x - NODE_SIZE / 2;
       const y = terminal.y - NODE_SIZE / 2;
       // Never reuse an id an import already handed out (see nextComponentId).
@@ -248,31 +233,9 @@ function CanvasInner() {
         position: { x, y },
         data: {
           componentType: type, label, valueLabel, rotation: placementRotation,
-          // A fresh connector defaults to a bi-directional port, the type that
-          // says the least about the signal and reads as the plain double arrow.
-          ...(type === "netconnector" ? { portType: "BiDir" as const } : {}),
         },
       };
       addComponent(component, node);
-      if (leadPin) {
-        // The label now sits a grid step off the pin, so the auto-connect (which
-        // docks *coincident* pins) can no longer see the pairing — lay the lead
-        // itself. Deferred like the auto-connect so the node is in the store.
-        const pin = leadPin;
-        setTimeout(() => {
-          const { edges: cur, setEdges, connectPorts, regenerateNetlist } = useCircuitStore.getState();
-          const edge: Edge = {
-            id: `wire_${pin.nodeId}-${pin.handleId}__${id}-t_${Date.now()}`,
-            source: pin.nodeId, sourceHandle: pin.handleId,
-            target: id, targetHandle: "t",
-            type: "wire", data: { waypoints: [] },
-          };
-          setEdges([...cur, edge]);
-          try { connectPorts(`${pin.nodeId}-${pin.handleId}`, `${id}-t`); } catch { /* */ }
-          regenerateNetlist();
-        }, 0);
-        return;
-      }
       setTimeout(() => autoConnectNodePins(node), 0);
     },
     [addComponent, placementRotation, autoConnectNodePins],
@@ -970,6 +933,7 @@ function CanvasInner() {
           </div>
 
           <SheetShapeLayer />
+          <NetAnchorLayer />
           <DataFlagLayer />
           <TextBoxLayer />
           <DirectiveBox />

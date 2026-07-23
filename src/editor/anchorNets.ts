@@ -2,7 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import { wireRoutes, type PinLookup, type RoutePoint } from "@core/geometry/wireRoutes.js";
 import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
-import { getNodePins, pinOutwardAxis } from "./pinGeometry.js";
+import { getNodePins, pinOutwardAxis, NODE_SIZE } from "./pinGeometry.js";
 import type { SymbolNorm } from "@sym/asyParser.js";
 
 /**
@@ -22,18 +22,29 @@ import type { SymbolNorm } from "@sym/asyParser.js";
  * point. One resolution rule covers both.
  */
 
-/** Pin lookup in flow space, for routing the wires an anchor may sit on. */
+/**
+ * Pin lookup in flow space, for routing the wires an anchor may sit on.
+ *
+ * Falls back to the node's centre when the handle cannot be located. That case is
+ * real: a part whose `.asy` has not loaded yet has no pins at all, and without
+ * the fallback *no* wire routes, so every name on the sheet resolves to nothing
+ * and the circuit briefly loses all its net names. Half a symbol off is wrong;
+ * silently un-naming the whole schematic is worse, and it recovers on the next
+ * rebuild once the symbol is there.
+ */
 function flowPins(nodes: Node[], norm: SymbolNorm): PinLookup {
   const at = new Map<string, RoutePoint>();
   const axis = new Map<string, ReturnType<typeof pinOutwardAxis>>();
+  const centre = new Map<string, RoutePoint>();
   for (const n of nodes) {
+    centre.set(n.id, { x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 });
     for (const p of getNodePins(n, norm)) {
       at.set(`${n.id}|${p.handleId}`, { x: p.x, y: p.y });
       axis.set(`${n.id}|${p.handleId}`, pinOutwardAxis(n, p.handleId, norm));
     }
   }
   return {
-    at: (nodeId, handle) => at.get(`${nodeId}|${handle}`),
+    at: (nodeId, handle) => at.get(`${nodeId}|${handle}`) ?? centre.get(nodeId),
     axis: (nodeId, handle) => axis.get(`${nodeId}|${handle}`),
   };
 }
