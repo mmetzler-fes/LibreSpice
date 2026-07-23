@@ -228,7 +228,7 @@ export function Toolbar() {
     const overlay = showDirectivesOnCanvas ? { text: spiceDirectives, pos: directivesPos } : undefined;
     // `circuit` resolves the wires' net names — a wire stores only *whether* to
     // show a label, never the text (see NetNameLookup).
-    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes), `${safeName}_Schaltung.svg`, "image/svg+xml");
+    downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes, netAnchors), `${safeName}_Schaltung.svg`, "image/svg+xml");
   };
 
   const handleSave = async (saveAs: boolean = false) => {

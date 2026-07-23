@@ -33,12 +33,6 @@ export interface WireData {
   sourceTap?: FlowPoint;
   /** Visual end point when the wire taps onto an existing wire (not a pin). */
   targetTap?: FlowPoint;
-  /** Show the net-name label permanently (not only while the wire is selected). */
-  showLabel?: boolean;
-  /** Position of the label / dock point along the wire, 0..1 of its length. */
-  labelT?: number;
-  /** Label offset from the dock point (flow px), clamped to ~1 cm. */
-  labelOffset?: FlowPoint;
   /** Allows assignment to React Flow's `Edge["data"]` (Record<string, unknown>). */
   [key: string]: unknown;
 }
@@ -113,19 +107,13 @@ export function orthoPath(points: FlowPoint[], hints?: RouteHints): string {
   return "M " + v.map((p) => `${p.x} ${p.y}`).join(" L ");
 }
 
-/** Max distance (flow px) a dragged label may sit from the wire (~1 cm). */
-const LABEL_MAX_OFFSET = PX_PER_CM;
-
 /** Custom edge that routes through stored waypoints with right angles. */
 export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, sourceX, sourceY, targetX, targetY, data, selected, markerEnd }: EdgeProps) {
   const circuit = useCircuitStore((s) => s.circuit);
   const nodes = useCircuitStore((s) => s.nodes);
-  const updateEdgeData = useCircuitStore((s) => s.updateEdgeData);
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
-  const canvasLocked = useUIStore((s) => s.canvasLocked);
-  const { screenToFlowPosition } = useReactFlow();
   const theme = useTheme();
 
   // Exact pin centre for an endpoint. React Flow anchors an edge at the handle's
@@ -159,53 +147,22 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   });
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
-  const showLabel = !!data?.showLabel;
-
-  // Net id/name of this wire (from its source port). Needed whenever the label
-  // is shown permanently (`showLabel`) or transiently (while selected).
+  // The name of this wire's net, shown *only* while the wire is selected.
+  //
+  // Transient on purpose: it is a readout, not a label. A wire used to be able to
+  // carry its net's name permanently (`showLabel`), which made it a second place
+  // a name could live — one the `.asc` has no slot for, so the exporter had to
+  // synthesise a `FLAG` on the wire and reconcile it against the real ones. A
+  // name that is meant to stay visible is a flag on the sheet (see
+  // NetAnchorLayer); this is just the answer to "what is this wire called".
   let netLabel: string | null = null;
-  if (selected || showLabel) {
+  if (selected) {
     const port = circuit.components.get(source)?.ports.find((p) => p.id === `${source}-${sourceHandleId}`);
     const netId = port?.netId ?? null;
     netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
   }
-  // The dock point rides along the wire at `labelT`; the label floats from it by
-  // `labelOffset` (up to ~1 cm). Both default to the wire's midpoint.
-  const labelT = typeof data?.labelT === "number" ? (data.labelT as number) : 0.5;
-  const labelOffset = (data?.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
-  const dock = pointAtT(verts, labelT);
-  const anchor = { x: dock.x + labelOffset.x, y: dock.y + labelOffset.y };
-
-  // Drag the label to slide it along the wire and up to ~1 cm away. The pointer's
-  // projection onto the wire sets the dock (`labelT`); the residual is the offset.
-  const onLabelPointerDown = (e: React.PointerEvent) => {
-    if (canvasLocked || !isDragPointer(e)) return;
-    e.stopPropagation();
-    e.preventDefault();
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => {
-      const flow = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
-      const t = projectToPolyline(verts, flow);
-      const d = pointAtT(verts, t);
-      let ox = flow.x - d.x, oy = flow.y - d.y;
-      const mag = Math.hypot(ox, oy);
-      if (mag > LABEL_MAX_OFFSET) { ox = (ox / mag) * LABEL_MAX_OFFSET; oy = (oy / mag) * LABEL_MAX_OFFSET; }
-      updateEdgeData(id, { labelT: t, labelOffset: { x: ox, y: oy } });
-    };
-    const up = () => {
-      target.releasePointerCapture(e.pointerId);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  // The wire's own name tag (always the net name): shown when `visible` or while
-  // selected. Ports are not wire attributes — a net connector is its own node
-  // (see NetTerminalNode), so a wire only ever carries its net's name.
-  const showBox = !!netLabel && (showLabel || selected);
+  const anchor = pointAtT(verts, 0.5);
+  const showBox = !!netLabel;
 
   return (
     <>
@@ -220,11 +177,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         // the drag handler; the shared shape is anchor-absolute, hence the shift.
         const t = wireNameTag({ x: 0, y: 0 }, netLabel);
         return (
-          <g
-            transform={`translate(${anchor.x}, ${anchor.y})`}
-            onPointerDown={onLabelPointerDown}
-            style={{ ...DRAG_TOUCH_ACTION, cursor: canvasLocked ? "default" : "move", pointerEvents: "all" }}
-          >
+          <g transform={`translate(${anchor.x}, ${anchor.y})`} style={{ pointerEvents: "none" }}>
             <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
             <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff" style={{ userSelect: "none" }}>{netLabel}</text>
           </g>

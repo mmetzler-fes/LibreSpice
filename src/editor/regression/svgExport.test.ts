@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import { buildSchematicSvg, type NetNameLookup } from "../svgExport.js";
+import { buildSchematicSvg } from "../svgExport.js";
 import { orthoVertices } from "../WireTool.js";
 
 export interface TestReport {
@@ -34,21 +34,18 @@ function viewBoxOf(svg: string): number[] | null {
 }
 
 /**
- * Two sources joined by one wire that sits on a net named "VCC", exported with
- * the given wire-label flags. The circuit lookup is a stub: only the source
- * port's net and that net's `nodeLabel` matter (see NetNameLookup).
+ * Two sources joined by one wire, exported with the given names on the sheet.
+ *
+ * A wire carries no name of its own any more: a name is a flag at a point, so
+ * what the export draws is the anchor list, not something read off the edge.
  */
-function labelledWireSvg(data: Record<string, unknown>): string {
+function labelledWireSvg(anchors: { id: string; x: number; y: number; name: string }[]): string {
   const a = vsource("V1", 0, 0), b = vsource("V2", 200, 200);
   const edge: Edge = {
     id: "w1", source: "V1", sourceHandle: "n", target: "V2", targetHandle: "p",
-    data: { waypoints: [], ...data },
+    data: { waypoints: [] },
   } as Edge;
-  const circuit: NetNameLookup = {
-    components: new Map([["V1", { ports: [{ id: "V1-n", netId: "n7" }] }]]),
-    nets: new Map([["n7", { nodeLabel: "VCC" }]]),
-  };
-  return buildSchematicSvg([a, b], [edge], "default", undefined, circuit);
+  return buildSchematicSvg([a, b], [edge], "default", undefined, undefined, [], [], anchors);
 }
 
 type Case = { name: string; run: (fail: (r: string) => void) => void };
@@ -146,17 +143,18 @@ const CASES: Case[] = [
   // missing from an exported SVG while node-based net labels were drawn. It now
   // takes the lookup as its last argument.
   {
-    name: "wire net-name label is exported",
+    name: "a name on the sheet is exported",
     run: (fail) => {
-      const svg = labelledWireSvg({ showLabel: true });
+      // On the wire's corner (40,140), so it resolves to that run.
+      const svg = labelledWireSvg([{ id: "a1", x: 40, y: 140, name: "VCC" }]);
       if (!svg.includes(">VCC<")) fail(`no VCC label in the export:\n${svg}`);
     },
   },
   {
-    name: "an unlabelled wire stays unlabelled",
+    name: "an unnamed wire stays unnamed",
     run: (fail) => {
-      // Same net, but neither flag set — the name must not leak into the export.
-      if (labelledWireSvg({}).includes(">VCC<")) fail("net name drawn on a wire that shows no label");
+      // The same net, with no flag on it — a wire never shows a name by itself.
+      if (labelledWireSvg([]).includes(">VCC<")) fail("net name drawn on a wire that carries no flag");
     },
   },
   {
@@ -175,18 +173,19 @@ const CASES: Case[] = [
     },
   },
   {
-    // A dragged name tag sits clear of the wire, so the bounding box has to
-    // account for it or the label is cropped at the sheet edge. Assert the
-    // property that matters (the tag lies inside the viewBox) rather than that
-    // the box grew: for a short name in the middle of the sheet it legitimately
-    // need not grow at all.
-    name: "wire labels are never clipped by the viewBox",
+    // A name tag steps clear of the wire, so the bounding box has to account for
+    // it or the label is cropped at the sheet edge. Assert the property that
+    // matters (the tag lies inside the viewBox) rather than that the box grew:
+    // for a short name in the middle of the sheet it legitimately need not grow
+    // at all.
+    name: "names are never clipped by the viewBox",
     run: (fail) => {
-      const cases: Record<string, unknown>[] = [
-        // Dragged to each far corner of its allowed offset, plus a long name.
-        { showLabel: true, labelT: 0, labelOffset: { x: -40, y: -40 } },
-        { showLabel: true, labelT: 1, labelOffset: { x: 40, y: 40 } },
-        { showLabel: true, labelT: 0.5, labelOffset: { x: 0, y: -40 } },
+      const cases = [
+        // Each end of the wire and its corner, plus a long name at the far end.
+        [{ id: "a1", x: 40, y: 72, name: "VCC" }],
+        [{ id: "a1", x: 240, y: 208, name: "VCC" }],
+        [{ id: "a1", x: 40, y: 140, name: "VCC" }],
+        [{ id: "a1", x: 240, y: 140, name: "SEHR_LANGER_NETZNAME" }],
       ];
       for (const data of cases) {
         const svg = labelledWireSvg(data);

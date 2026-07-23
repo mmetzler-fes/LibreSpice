@@ -148,7 +148,9 @@ const ROUNDTRIP_SPECS: { type: ComponentType; label: string; set: Record<string,
   // The reported bug: an AC current source came back as DC, with Phi lost.
   { type: "isource", label: "I1", set: { sourceType: "Sine", sOffset: 1e-3, sAmpl: 2, sFreq: 50, sTd: 0.01, sTheta: 3, sPhi: 90 } },
   { type: "isource", label: "I2", set: { sourceType: "DC", dcValue: 5e-3, acAmplitude: 1 } },
-  { type: "netlabel", label: "VCC", set: {} },
+  // No net label here any more: a name is not a component, so there is no
+  // instance whose properties could survive a round trip. Its round trip is a
+  // `FLAG` line, checked in netAnchor.test.
   { type: "ground", label: "0", set: {} },
 ];
 
@@ -376,14 +378,22 @@ SYMATTR Value 1k
     const p = Object.fromEntries((back?.getProperties() ?? []).map((x) => [x.key, x.value]));
     if (p.resistance !== 1591) fail(`after the round-trip resistance ${p.resistance} != 1591`);
   } },
-  { name: "flag-on-pin connects source terminals (no bridging wire)", run: (fail) => {
-    const { nodes, edges } = LTSpiceParser.parse(ASC);
+  { name: "a flag on a pin is a name there, not a part wired to it", run: (fail) => {
+    const { nodes, edges, anchors } = LTSpiceParser.parse(ASC);
     const v1 = nodeBy(nodes, (d) => d.label === "V1");
-    const vp = nodeBy(nodes, (d) => d.componentType === "netlabel" && d.label === "VP");
     const gnd = nodeBy(nodes, (d) => d.componentType === "ground");
-    if (!v1 || !vp || !gnd) { fail("missing imported node(s)"); return; }
-    if (!linked(edges, v1.id, "p", vp.id, "t")) fail("source + terminal not connected to the VP flag");
+    if (!v1 || !gnd) { fail("missing imported node(s)"); return; }
+    // Ground stays a part and is still wired to the pin it sits on.
     if (!linked(edges, v1.id, "n", gnd.id, "gnd")) fail("source - terminal not connected to ground");
+    // `VP` is a name at a coordinate. It imports as an anchor, and — the point of
+    // the model — brings no node and no edge with it, so there is nothing that
+    // could drag V1's wire when the name is moved.
+    const vp = anchors.find((a) => a.name === "VP");
+    if (!vp) { fail("VP did not import as an anchor"); return; }
+    if (nodes.some((n) => (n.data as { componentType?: string }).componentType === "netlabel")) {
+      fail("a net label came back as a node");
+    }
+    if (edges.some((e) => e.source === "VP" || e.target === "VP")) fail("the name brought an edge with it");
   } },
   { name: "localized UniversalOpAmp2_EN imports as an op-amp", run: (fail) => {
     const { nodes } = LTSpiceParser.parse(ASC_OPAMP);

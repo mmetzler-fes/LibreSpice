@@ -4,10 +4,10 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
-import { orthoVertices, pointAtT, type FlowPoint, type WireData } from "./WireTool.js";
-import { wireNameTag } from "./wireLabelShape.js";
+import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
 import { flattenForExport } from "./markdown.js";
 import type { TextBox } from "@core/circuit/textBox.js";
 import { dashArray, type SheetShape } from "@core/circuit/sheetShape.js";
@@ -50,7 +50,7 @@ function transformFor(rotation: number, mirrored: boolean, cx: number, cy: numbe
   return parts.length ? parts.join(" ") : undefined;
 }
 
-function SymbolNode({ node, norm, dir, tagSide }: { node: Node; norm: SymbolNorm; dir?: FlowPoint; tagSide?: 1 | -1 }) {
+function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   const data = node.data as ComponentNodeData;
   const type = data.componentType;
   const rotation = data.rotation ?? 0;
@@ -62,35 +62,6 @@ function SymbolNode({ node, norm, dir, tagSide }: { node: Node; norm: SymbolNorm
       <g transform={`translate(${x} ${y})`} color="#334155">
         <rect x={10} y={4} width={NODE_SIZE - 20} height={NODE_SIZE - 8} rx={4} fill="#f8fafc" stroke="currentColor" strokeWidth={1.6} />
         <text x={NODE_SIZE / 2} y={NODE_SIZE / 2 + 3} fontSize={11} fontWeight={600} textAnchor="middle" fill="currentColor">{data.subName ?? "X"}</text>
-      </g>
-    );
-  }
-
-  if (type === "netlabel" || type === "netconnector") {
-    // Net label / net connector: hollow terminal circle, the direction arrow for
-    // the port type, and the name tag — matching the editor's NetTerminalNode
-    // (see netLabelShape), including the tag's user-dragged offset and the tint
-    // that tells a connector apart from a plain label.
-    const isConnector = type === "netconnector";
-    const name = data.label || (isConnector ? "PORT" : "NET");
-    const portType: PortType = isConnector ? (data.portType as PortType) ?? "BiDir" : "None";
-    const shape = netLabelShape(portType, dir, tagSide);
-    const th = 16;
-    const tagW = Math.max(20, name.length * 6.8 + 12);
-    const off = data.labelOffset ?? { x: 0, y: 0 };
-    const origin = tagBoxOrigin(shape.tag, tagW, th);
-    const rectX = origin.x + off.x, rectY = origin.y + off.y;
-    return (
-      <g transform={`translate(${x} ${y})`}>
-        {shape.stem && (
-          <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
-        )}
-        {portType !== "None" && (
-          <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
-        )}
-        {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
-        <rect x={rectX} y={rectY} width={tagW} height={th} rx={4} fill={isConnector ? "#fde9c8" : "#e2e8f0"} stroke="#94a3b8" strokeWidth={1} />
-        <text x={rectX + tagW / 2} y={rectY + th / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor="middle">{name}</text>
       </g>
     );
   }
@@ -249,29 +220,16 @@ export interface NetNameLookup {
 }
 
 /** A wire's on-screen net-name tag, resolved and positioned (see wireLabelShape). */
-interface WireLabels {
-  netLabel: string;
-  anchor: FlowPoint;
-}
+/** Height of a name's tag box. */
+const TAG_H = 16;
 
-/**
- * Resolve the name a wire displays, mirroring WireEdge's rules — minus
- * `selected`, which has no meaning in an export, so the tag shows exactly when
- * `showLabel` is on.
- */
-function wireLabelsFor(edge: Edge, verts: FlowPoint[], circuit?: NetNameLookup): WireLabels | null {
-  const data = edge.data as WireData | undefined;
-  if (!circuit || verts.length === 0 || !data?.showLabel) return null;
-
-  const port = circuit.components.get(edge.source)?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
-  const netId = port?.netId ?? null;
-  const netLabel = netId ? (circuit.nets.get(netId)?.nodeLabel ?? netId) : null;
-  if (!netLabel) return null;
-
-  const labelT = typeof data.labelT === "number" ? data.labelT : 0.5;
-  const off = (data.labelOffset as FlowPoint | undefined) ?? { x: 0, y: 0 };
-  const dock = pointAtT(verts, labelT);
-  return { netLabel, anchor: { x: dock.x + off.x, y: dock.y + off.y } };
+/** Distance from a point to a segment — which wire a name is lying on. */
+function distToSegment(p: FlowPoint, a: FlowPoint, b: FlowPoint): number {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y);
 }
 
 export function buildSchematicSvg(
@@ -279,9 +237,12 @@ export function buildSchematicSvg(
   edges: Edge[],
   norm: SymbolNorm,
   directives?: DirectiveOverlay,
-  circuit?: NetNameLookup,
+  // Kept for call-site compatibility: the wires no longer carry a name of their
+  // own, so nothing here needs to look one up.
+  _circuit?: NetNameLookup,
   textBoxes: TextBox[] = [],
   sheetShapes: SheetShape[] = [],
+  anchors: NetAnchor[] = [],
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -306,9 +267,31 @@ export function buildSchematicSvg(
     wireVerts.push(orthoVertices([a as FlowPoint, ...waypoints, b as FlowPoint], edgeRouteHints(nodes, e, norm)));
   }
 
-  // The net names the wires carry. Resolved before the bounding box, since a
-  // dragged name tag sits clear of the wire itself.
-  const wireLabels = edges.map((e, i) => wireLabelsFor(e, wireVerts[i], circuit));
+  // Where each name sits and which way it faces, from the wire it lies on — the
+  // same rule as on screen (see terminalDirection), so the exported sheet is laid
+  // out exactly like the one the user is looking at. Worked out here because the
+  // bounding box below needs it as much as the drawing further down does.
+  const anchorLayouts = anchors.map((a) => {
+    const dock = { x: a.x, y: a.y };
+    let best = 24, ends: FlowPoint[] = [];
+    for (const verts of wireVerts) {
+      for (let i = 0; i < verts.length - 1; i++) {
+        const d = distToSegment(dock, verts[i], verts[i + 1]);
+        if (d < best) { best = d; ends = [verts[i], verts[i + 1]]; }
+      }
+    }
+    const dir = terminalDirection(dock, ends);
+    const neighbours = nodes.map((o) => ({ x: o.position.x + NODE_SIZE / 2, y: o.position.y + NODE_SIZE / 2 }));
+    for (const verts of wireVerts) neighbours.push(...sampleWire(verts, dock));
+    const portType: PortType = a.portType ?? "None";
+    const shape = netLabelShape(portType, dir, terminalTagSide(dock, dir, neighbours));
+    const tagW = Math.max(20, a.name.length * 6.8 + 12);
+    // Sheet coordinates for the tag's top-left: its anchor is local to the node
+    // frame, so it is shifted out of that frame once, here.
+    const local = tagBoxOrigin(shape.tag, tagW, TAG_H);
+    const tag = { x: a.x - NODE_SIZE / 2 + local.x, y: a.y - NODE_SIZE / 2 + local.y };
+    return { a, shape, portType, tagW, tag };
+  });
 
   // Bounding box over symbols, pins and every wire vertex (so a hand-routed
   // waypoint outside the component boxes is never clipped).
@@ -317,13 +300,15 @@ export function buildSchematicSvg(
   for (const n of nodes) { grow(n.position.x, n.position.y); grow(n.position.x + NODE_SIZE, n.position.y + NODE_SIZE); }
   for (const { x, y } of pinMap.values()) grow(x, y);
   for (const verts of wireVerts) for (const p of verts) grow(p.x, p.y);
-  // A dragged net name sits above its anchor: without this it gets clipped at
-  // the edge of the sheet.
-  for (const l of wireLabels) {
-    if (!l) continue;
-    const t = wireNameTag(l.anchor, l.netLabel);
-    grow(t.x, t.y);
-    grow(t.x + t.width, t.y + t.height);
+  // A name's tag steps clear of its point and a long one reaches a long way, so
+  // the box has to be grown by the tag actually drawn — estimating it as "about
+  // half a symbol" cropped `SEHR_LANGER_NETZNAME` at the sheet edge.
+  for (const l of anchorLayouts) {
+    grow(l.tag.x, l.tag.y);
+    grow(l.tag.x + l.tagW, l.tag.y + TAG_H);
+    // A connector's arrow reaches out the other way.
+    grow(l.a.x - NODE_SIZE / 2, l.a.y - NODE_SIZE / 2);
+    grow(l.a.x + NODE_SIZE / 2, l.a.y + NODE_SIZE / 2);
   }
   // The directive box is usually dragged clear of the parts, so it drives the
   // bounds as much as they do.
@@ -350,64 +335,30 @@ export function buildSchematicSvg(
     ),
   );
 
-  // Wire labels are drawn over the wires but under the symbols, exactly as the
-  // editor stacks them (edges render below nodes in React Flow).
-  const labels = wireLabels.map((l, i) => {
-    if (!l) return null;
-    const t = wireNameTag(l.anchor, l.netLabel);
-    return (
-      <g key={`wl${i}`}>
-        <rect x={t.x} y={t.y} width={t.width} height={t.height} rx={3} fill="#2563eb" />
-        <text x={t.textX} y={t.textY} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#fff">{l.netLabel}</text>
+  // The names, drawn over the wires but under the symbols — the same stacking
+  // the editor uses. Which way each one faces comes from the wire it lies on, by
+  // the same rule as on screen (see terminalDirection), so the exported sheet is
+  // laid out exactly like the one the user is looking at.
+  const labels = anchorLayouts.map(({ a, shape, portType, tagW, tag }) => (
+    <g key={a.id}>
+      {/* The circle and arrow are laid out in the old node's local frame, whose
+          centre is the dock — hence the shift by half a node box. The name tag is
+          drawn in sheet coordinates instead: it is always upright, and keeping it
+          absolute is what lets the bounding box above measure it directly. */}
+      <g transform={`translate(${a.x - NODE_SIZE / 2} ${a.y - NODE_SIZE / 2})`}>
+        {shape.stem && (
+          <line x1={shape.stem.x1} y1={shape.stem.y1} x2={shape.stem.x2} y2={shape.stem.y2} stroke="#334155" strokeWidth={1.6} strokeLinecap="round" />
+        )}
+        {portType !== "None" && (
+          <circle cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r} fill="#ffffff" stroke="#2563eb" strokeWidth={2} />
+        )}
+        {shape.heads.map((points, i) => <polygon key={i} points={points} fill="#334155" />)}
       </g>
-    );
-  });
-
-  // Which way each net terminal faces, from the wire attached to its dock — the
-  // same rule the editor node applies (see terminalDirection), so the exported
-  // sheet is laid out exactly like the one on screen.
-  const termDirs = new Map<string, { dir: FlowPoint; side: 1 | -1 }>();
-  for (const n of nodes) {
-    const t = (n.data as ComponentNodeData).componentType;
-    if (t !== "netlabel" && t !== "netconnector") continue;
-    const dock = { x: n.position.x + NODE_SIZE / 2, y: n.position.y + NODE_SIZE / 2 };
-    const farEnds: FlowPoint[] = [];
-    for (const e of edges) {
-      const atSource = e.source === n.id;
-      if (!atSource && e.target !== n.id) continue;
-      const wps = ((e.data as WireData | undefined)?.waypoints ?? []);
-      // Waypoints run source → target, so walk them from this terminal's end.
-      const first = atSource ? wps[0] : wps[wps.length - 1];
-      if (first) { farEnds.push(first); continue; }
-      const far = atSource
-        ? (e.target && e.targetHandle ? pinMap.get(`${e.target}-${e.targetHandle}`) : undefined)
-        : (e.source && e.sourceHandle ? pinMap.get(`${e.source}-${e.sourceHandle}`) : undefined);
-      if (far) farEnds.push(far);
-    }
-    // Tapped onto a wire: our own edge is zero-length at the dock, so the wire we
-    // sit on supplies the direction — same rule as the editor (see ComponentNode).
-    for (const e of edges) {
-      if (e.source !== n.id && e.target !== n.id) continue;
-      const hostId = (e.data as { hostEdgeId?: string } | undefined)?.hostEdgeId;
-      const host = hostId ? edges.find((h) => h.id === hostId) : undefined;
-      if (!host) continue;
-      for (const k of [`${host.source}-${host.sourceHandle}`, `${host.target}-${host.targetHandle}`]) {
-        const p = pinMap.get(k);
-        if (p) farEnds.push(p);
-      }
-    }
-    const dir = terminalDirection(dock, farEnds);
-    const neighbours = nodes
-      .filter((o) => o.id !== n.id)
-      .map((o) => ({ x: o.position.x + NODE_SIZE / 2, y: o.position.y + NODE_SIZE / 2 }));
-    // The wires count too — same rule as the editor, so the sheet matches the
-    // screen. The routes are already laid out above.
-    edges.forEach((e, i) => {
-      if (e.source === n.id || e.target === n.id) return;
-      neighbours.push(...sampleWire(wireVerts[i], dock));
-    });
-    termDirs.set(n.id, { dir, side: terminalTagSide(dock, dir, neighbours) });
-  }
+      <rect x={tag.x} y={tag.y} width={tagW} height={TAG_H} rx={4}
+        fill={portType === "None" ? "#e2e8f0" : "#fde9c8"} stroke="#94a3b8" strokeWidth={1} />
+      <text x={tag.x + tagW / 2} y={tag.y + TAG_H / 2 + 3.5} fontSize={11} fontFamily="monospace" fill="#0f172a" textAnchor="middle">{a.name}</text>
+    </g>
+  ));
 
   const svg = (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${minX} ${minY} ${width} ${height}`}>
@@ -423,7 +374,7 @@ export function buildSchematicSvg(
       })}
       {wires}
       {labels}
-      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} dir={termDirs.get(n.id)?.dir} tagSide={termDirs.get(n.id)?.side} />)}
+      {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} />)}
       {textBoxes.map((t) => <TextBoxShape key={t.id} box={t} />)}
       {directiveBox && <DirectiveTextBox box={directiveBox} />}
     </svg>

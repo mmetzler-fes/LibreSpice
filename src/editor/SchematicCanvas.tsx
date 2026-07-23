@@ -31,7 +31,7 @@ import { PropertiesPanel } from "./PropertiesPanel.js";
 import { Toolbar } from "./Toolbar.js";
 import { ComponentPalette } from "./ComponentPalette.js";
 import { NetLabelsPanel } from "./NetLabelsPanel.js";
-import { WirePropertiesPanel } from "./WirePropertiesPanel.js";
+import { NetAnchorPanel } from "./NetAnchorPanel.js";
 import { DockPanel } from "./DockPanel.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
@@ -87,7 +87,7 @@ function CanvasInner() {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
-    setDockTab, autoProbeCurrent, areaSelect, pendingFragment,
+    setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorId, setSelectedAnchorId,
   } = useUIStore();
 
   const theme = useTheme();
@@ -406,6 +406,10 @@ function CanvasInner() {
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       setSelectedComponentId(node.id);
+      // A name and a part are two different selections in two different layers;
+      // picking one lets go of the other, so the properties panel is never
+      // showing something the user is no longer pointing at.
+      setSelectedAnchorId(null);
       if (!autoProbeCurrent) return;
       const comp = circuit.components.get(node.id);
       if (!comp || comp.id.startsWith("ground")) return;
@@ -413,7 +417,7 @@ function CanvasInner() {
       addProbeCandidates(getCurrentProbeCandidates(comp.label));
       if (result) setDockTab("waveform");
     },
-    [setSelectedComponentId, autoProbeCurrent, circuit, addProbeCandidates, result, setDockTab],
+    [setSelectedComponentId, setSelectedAnchorId, autoProbeCurrent, circuit, addProbeCandidates, result, setDockTab],
   );
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -682,6 +686,7 @@ function CanvasInner() {
     (event: React.MouseEvent) => {
       if (dropPendingFragment(event.clientX, event.clientY)) return;
       setSelectedComponentId(null);
+      setSelectedAnchorId(null);
       // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
       // mouse commits its placement here, on the pane click.
       if (editorMode === "place" && lastPointerTypeRef.current === "mouse") {
@@ -693,7 +698,7 @@ function CanvasInner() {
         }
       }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, clientToFlow, dropPendingFragment],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, setSelectedAnchorId, clientToFlow, dropPendingFragment],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
@@ -987,7 +992,10 @@ function CanvasInner() {
           // keyboard-safe: its fields (component values, net names) can sit at the
           // bottom, where iPadOS' autofill bar would cover them (see index.css).
           <aside className="keyboard-safe" style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
-            {edges.some((e) => e.selected) ? <WirePropertiesPanel /> : <PropertiesPanel />}
+            {/* A selected *name* shows its own properties; a selected wire shows
+                none, because a wire has none the file can hold — its name is a
+                flag at a point, which is the panel above. */}
+            {selectedAnchorId ? <NetAnchorPanel /> : <PropertiesPanel />}
             <NetLabelsPanel />
           </aside>
         )}
