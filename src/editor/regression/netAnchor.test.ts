@@ -48,7 +48,7 @@ function exportCurrent(): string {
   const s = st();
   return LTSpiceExporter.export(
     s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
+    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors, busTaps: s.busTaps },
   );
 }
 
@@ -86,7 +86,7 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
         const s = st();
         const written = flagLines(LTSpiceExporter.export(
           s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
+          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors, busTaps: s.busTaps },
         ));
         const fromAnchors = allAnchors(s).flatMap(formatAnchor).sort();
 

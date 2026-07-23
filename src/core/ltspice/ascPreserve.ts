@@ -1,4 +1,4 @@
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 /**
  * `.asc` passthrough — keeping a saved file close to the one we opened.
  *
@@ -80,6 +80,8 @@ export interface AscPreserved {
    * it a selection: names the user did not pick are simply not in the list.
    */
   anchors?: NetAnchor[];
+  /** Bus taps (see BusTap) — written back so a file that has one keeps it. */
+  busTaps?: BusTap[];
 }
 
 /**

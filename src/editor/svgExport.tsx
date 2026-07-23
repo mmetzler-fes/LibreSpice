@@ -4,12 +4,12 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { orthoVertices, type FlowPoint, type WireData } from "./WireTool.js";
 import { flattenForExport } from "./markdown.js";
-import type { TextBox } from "@core/circuit/textBox.js";
+import { TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
 import { dashArray, type SheetShape } from "@core/circuit/sheetShape.js";
 import { captionSvgPlacement, captionSide, DEFAULT_HALF, LABEL_FONT_SIZE, VALUE_FONT_SIZE } from "./captionLayout.js";
 import {
@@ -165,18 +165,25 @@ function DirectiveTextBox({ box }: { box: DirectiveBoxGeometry }) {
  * the canvas gets from CSS has to be computed here (see flattenForExport).
  */
 function TextBoxShape({ box }: { box: TextBox }) {
-  const fontSize = 11;
+  // The text's own size and orientation (see textBox). A scale of 1 is LTSpice's
+  // 1.5, which is what everything here has always been drawn at.
+  const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
+  const flow = textFlow(box.justify ?? "Left");
   // Average glyph width of the sans-serif face at this size; good enough for a
   // greedy wrap, and erring narrow keeps text inside the frame.
   const charsPerLine = Math.max(4, Math.floor((box.width - 12) / (fontSize * 0.53)));
   const lines = flattenForExport(box.text, box.markdown, charsPerLine);
   const lineHeight = fontSize * 1.45;
+  // Sideways text is drawn by turning the whole block a quarter turn about the
+  // box's centre — read bottom to top, as LTSpice sets it.
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
   return (
     <g>
       <rect
         x={box.x} y={box.y} width={box.width} height={box.height}
         rx={4} fill="#ffffff" stroke="#94a3b8" strokeWidth={1}
       />
+      <g transform={flow.vertical ? `rotate(-90 ${cx} ${cy})` : undefined}>
       {lines.map((l, i) => {
         const y = box.y + 6 + lineHeight * (i + 0.8);
         // Clip at the frame rather than spilling past it, matching the canvas,
@@ -197,6 +204,7 @@ function TextBoxShape({ box }: { box: TextBox }) {
           </text>
         );
       })}
+      </g>
     </g>
   );
 }
@@ -243,6 +251,7 @@ export function buildSchematicSvg(
   textBoxes: TextBox[] = [],
   sheetShapes: SheetShape[] = [],
   anchors: NetAnchor[] = [],
+  busTaps: BusTap[] = [],
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -303,6 +312,7 @@ export function buildSchematicSvg(
   // A name's tag steps clear of its point and a long one reaches a long way, so
   // the box has to be grown by the tag actually drawn — estimating it as "about
   // half a symbol" cropped `SEHR_LANGER_NETZNAME` at the sheet edge.
+  for (const t of busTaps) { grow(Math.min(t.x, t.x2), t.y - 6); grow(Math.max(t.x, t.x2) + 12, t.y + 6); }
   for (const l of anchorLayouts) {
     grow(l.tag.x, l.tag.y);
     grow(l.tag.x + l.tagW, l.tag.y + TAG_H);
@@ -373,6 +383,14 @@ export function buildSchematicSvg(
         return <rect key={s.id} x={x} y={y} width={w} height={h} {...common} />;
       })}
       {wires}
+      {busTaps.map((t) => {
+        // Always pointing right — LTSpice offers no way to turn a bus tap.
+        const x = Math.min(t.x, t.x2), y = t.y;
+        return (
+          <polygon key={t.id} fill="#1e293b"
+            points={`${x},${y - 6} ${x},${y + 6} ${x + 12},${y}`} />
+        );
+      })}
       {labels}
       {nodes.map((n) => <SymbolNode key={n.id} node={n} norm={norm} />)}
       {textBoxes.map((t) => <TextBoxShape key={t.id} box={t} />)}

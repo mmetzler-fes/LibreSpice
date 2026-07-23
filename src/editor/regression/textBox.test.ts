@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
-import { encodeTextBox, decodeTextBox, estimateSize, type TextBox } from "@core/circuit/textBox.js";
+import { encodeTextBox, decodeTextBox, estimateSize, TEXT_SIZES, TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
 import { renderMarkdown, flattenForExport } from "../markdown.js";
 import { parseSheetShape, formatSheetShape, dashArray } from "@core/circuit/sheetShape.js";
 import type { TestReport } from "./svgExport.test.js";
@@ -23,12 +23,82 @@ const st = () => useCircuitStore.getState();
 type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> | void };
 
 const box = (over: Partial<TextBox> = {}): TextBox =>
-  ({ id: "tb_1", x: 10, y: 20, width: 240, height: 120, text: "Hallo", markdown: false, ...over });
+  ({ id: "tb_1", x: 10, y: 20, width: 240, height: 120, text: "Hallo", markdown: false,
+     justify: "Left", size: 2, ...over });
 
 const html = (src: string, markdown = true) =>
   renderToStaticMarkup(markdown ? renderMarkdown(src) as never : (src as never));
 
 const CASES: Case[] = [
+  {
+    // LTSpice keeps two things on a `TEXT` line that we used to throw away and
+    // overwrite with `Left 2`: how the text is set, and how big it is. Opening
+    // and saving a file therefore stood its sideways captions upright and shrank
+    // every heading to the default.
+    name: "a comment keeps its justification and size through a round trip",
+    run: async (fail) => {
+      const src = [
+        "Version 4",
+        "SHEET 1 880 680",
+        "TEXT 104 112 Left 0 ;klein",
+        "TEXT -56 -24 VLeft 2 ;senkrecht",
+        "TEXT 496 32 Right 7 ;gross",
+        "TEXT 112 -72 Center 4 ;mittig",
+        "",
+      ].join("\n");
+      st().clearCircuit();
+      st().loadFromAsc(src);
+      await tick(); await tick();
+
+      const got = st().textBoxes.map((b) => `${b.justify} ${b.size}`).sort();
+      const want = ["Center 4", "Left 0", "Right 7", "VLeft 2"];
+      if (got.join(" | ") !== want.join(" | ")) return fail(`read back as [${got.join(", ")}]`);
+
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, "", st().circuit, [], st().textBoxes);
+      for (const line of ["Left 0 ;klein", "VLeft 2 ;senkrecht", "Right 7 ;gross", "Center 4 ;mittig"]) {
+        if (!asc.includes(line)) fail(`the export lost "${line}":\n${asc}`);
+      }
+    },
+  },
+  {
+    // The dropdown LTSpice offers, in its order. 1.5 is its default and the size
+    // our own rendering has always used, so that entry must scale by exactly 1 —
+    // otherwise every existing schematic changes size on this release.
+    name: "the size table matches LTSpice, and its default scales by one",
+    run: (fail) => {
+      const want = [0.625, 1.0, 1.5, 2.0, 2.5, 3.5, 5.0, 7.0];
+      if (TEXT_SIZES.join() !== want.join()) fail(`size table is [${TEXT_SIZES.join(", ")}]`);
+      if (TEXT_SIZES[TEXT_SIZE_DEFAULT] !== 1.5) fail("the default index is not 1.5");
+      if (textScale(TEXT_SIZE_DEFAULT) !== 1) fail(`the default scales by ${textScale(TEXT_SIZE_DEFAULT)}, not 1`);
+      if (textScale(0) >= 1 || textScale(7) <= 1) fail("the table does not run small to large");
+      // Out of range is clamped rather than yielding NaN — a foreign file may
+      // carry an index from a version with a longer list.
+      if (!Number.isFinite(textScale(99)) || !Number.isFinite(textScale(-1))) fail("an unknown index gave NaN");
+    },
+  },
+  {
+    name: "a V-justification sets the text on its side and keeps its alignment",
+    run: (fail) => {
+      const cases: [string, boolean, string][] = [
+        ["Left", false, "left"],
+        ["Center", false, "center"],
+        ["Right", false, "right"],
+        ["VLeft", true, "left"],
+        ["VRight", true, "right"],
+        // Top/Bottom hang the text off an anchor point; our boxes have an extent
+        // of their own, so they read as Left and survive only to be written back.
+        ["Top", false, "left"],
+        ["Bottom", false, "left"],
+      ];
+      for (const [j, vertical, align] of cases) {
+        const f = textFlow(j as never);
+        if (f.vertical !== vertical || f.align !== align) {
+          fail(`${j} drew as ${f.vertical ? "vertical" : "horizontal"}/${f.align}`);
+        }
+      }
+    },
+  },
+
   {
     name: "a text box survives the .asc round trip with size, text and mode",
     run: async (fail) => {
@@ -37,7 +107,7 @@ const CASES: Case[] = [
       const id = st().addTextBox(100, 200);
       st().updateTextBox(id, { text: "Zeile 1\nZeile 2", width: 321, height: 89, markdown: true });
       const before = st().textBoxes[0];
-      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, [], { anchors: st().netAnchors });
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, [], { anchors: st().netAnchors, busTaps: st().busTaps });
       st().clearCircuit();
       st().loadFromAsc(asc);
       await tick();
@@ -210,7 +280,7 @@ RECTANGLE Normal 224 320 -16 32 1
       if ([s.x1, s.y1, s.x2, s.y2].join() !== "224,320,-16,32") fail(`corners ${[s.x1, s.y1, s.x2, s.y2].join()}`);
       if (s.dash !== 1) fail(`dash ${s.dash}, expected 1`);
 
-      const out = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, st().sheetShapes, { anchors: st().netAnchors });
+      const out = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, st().sheetShapes, { anchors: st().netAnchors, busTaps: st().busTaps });
       if (!/^RECTANGLE Normal 224 320 -16 32 1$/m.test(out)) fail(`not written back:\n${out}`);
     },
   },

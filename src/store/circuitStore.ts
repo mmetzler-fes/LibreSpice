@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
-import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, type TextBox } from "@core/circuit/textBox.js";
+import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, TEXT_SIZE_DEFAULT, type TextBox } from "@core/circuit/textBox.js";
 import type { SheetShape } from "@core/circuit/sheetShape.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -17,7 +17,7 @@ import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
 import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { resolveAnchors, orphanGroups, touchesGroup } from "@editor/anchorNets.js";
 import { ANCHOR_TOLERANCE } from "@core/circuit/anchorResolve.js";
 import type { PortType } from "@core/components/special/Special.js";
@@ -85,6 +85,8 @@ interface CircuitState {
    * anchor is derived from the node (see anchorsFromNodes).
    */
   netAnchors: NetAnchor[];
+  /** Bus taps on the sheet (see BusTap) — drawn, and written back on save. */
+  busTaps: BusTap[];
   /** Free text annotations on the sheet (see textBox). */
   textBoxes: TextBox[];
   /** Frames and other shapes drawn on the sheet (see sheetShape). */
@@ -306,6 +308,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   circuitName: "Untitled",
   dataFlags: [],
   netAnchors: [],
+  busTaps: [],
   textBoxes: [],
   sheetShapes: [],
   propertyVersion: 0,
@@ -614,6 +617,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         id, x, y,
         width: TEXTBOX_DEFAULT_W, height: TEXTBOX_DEFAULT_H,
         text: "", markdown: false,
+        // A new box starts where LTSpice starts one: upright, at the default size.
+        justify: "Left" as const, size: TEXT_SIZE_DEFAULT,
       }],
     }));
     return id;
@@ -636,7 +641,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors, busTaps } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -671,6 +676,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       ascOrphanWires: orphanWires,
       dataFlags,
       netAnchors: anchors,
+      busTaps,
       textBoxes,
       sheetShapes,
       selectedComponentId: null,
@@ -860,6 +866,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuitName: "Untitled",
       dataFlags: [],
       netAnchors: [],
+      busTaps: [],
       textBoxes: [],
       sheetShapes: [],
       // A new schematic starts blank: the previous circuit's SPICE directives
@@ -1139,7 +1146,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // the circuit was never run they still sit in pendingProbes. Union covers both.
     const sim = useSimulationStore.getState();
     const selectedVariables = [...new Set([...sim.selectedVariables, ...sim.pendingProbes])];
-    return { version: 1, nodes, edges, netAnchors: get().netAnchors, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
+    return { version: 1, nodes, edges, netAnchors: get().netAnchors, busTaps: get().busTaps, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -1184,6 +1191,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       // out below, once the nets have been built from them — removing a node
       // bridges the wires that met at it, which is what keeps the net whole.
       netAnchors: snapshot.netAnchors ?? legacy.map((l) => l.anchor),
+      busTaps: snapshot.busTaps ?? [],
       textBoxes: snapshot.textBoxes ?? [],
       sheetShapes: snapshot.sheetShapes ?? [],
       showDirectivesOnCanvas: snapshot.showDirectivesOnCanvas ?? false,

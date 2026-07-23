@@ -118,7 +118,7 @@ export async function runPinReseatTests(): Promise<{ total: number; passed: numb
       const s = st();
       return LTSpiceExporter.export(
         s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-        { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
+        { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors, busTaps: s.busTaps },
       );
     };
     const sorted = (t: string) => canonicalAscLines(t).slice().sort().join("\n");
@@ -174,7 +174,7 @@ export async function runPinReseatTests(): Promise<{ total: number; passed: numb
       const s = st();
       return LTSpiceExporter.export(
         s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-        { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
+        { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors, busTaps: s.busTaps },
       );
     };
     const wiresOf = (t: string) => canonicalAscLines(t).filter((l) => l.startsWith("WIRE ")).sort().join("\n");

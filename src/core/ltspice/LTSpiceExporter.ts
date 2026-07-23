@@ -7,10 +7,10 @@ import {
 } from "./ltspiceGeometry.js";
 import { outwardAxis, type Axis } from "@core/geometry/ortho.js";
 import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
-import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
+import { encodeTextBox, TEXT_SIZE_DEFAULT, type TextBox } from "@core/circuit/textBox.js";
 import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 import { sameAttrValue, shiftWindowLine, formatEng, type AscRaw, type AscPreserved } from "./ascPreserve.js";
-import { formatAnchor } from "@core/circuit/netAnchor.js";
+import { formatAnchor, formatBusTap } from "@core/circuit/netAnchor.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -388,12 +388,16 @@ export class LTSpiceExporter {
       wireLines.push(`WIRE ${fwd}`);
     }
 
+    // Bus taps sit with the flags: both are marks at a place, and LTSpice writes
+    // them in the same block above the symbols.
+    const busTapLines = (preserved.busTaps ?? []).map(formatBusTap);
+
     const dataflagLines = dataFlags.map((df) => `DATAFLAG ${Math.round(df.x)} ${Math.round(df.y)} "${df.expr}"`);
 
     // Text boxes go out as LTSpice sheet comments, so a file written here still
     // reads there — and a comment written there comes back as a text box.
     const textBoxLines = textBoxes.map(
-      (t) => `TEXT ${Math.round(t.x)} ${Math.round(t.y)} Left 2 ;${encodeTextBox(t)}`,
+      (t) => `TEXT ${Math.round(t.x)} ${Math.round(t.y)} ${t.justify ?? "Left"} ${t.size ?? TEXT_SIZE_DEFAULT} ;${encodeTextBox(t)}`,
     );
 
     // Directives keep the position and spelling they had in the source file. The
@@ -451,7 +455,7 @@ export class LTSpiceExporter {
       }
     }
 
-    return [...header, ...wireLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines, ...textBoxLines,
+    return [...header, ...wireLines, ...busTapLines, ...flagLines, ...symbolLines, ...dataflagLines, ...directiveLines, ...textBoxLines,
       ...sheetShapes.map(formatSheetShape)].join("\n");
   }
 }

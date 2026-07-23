@@ -30,6 +30,7 @@ import type { FlowPoint } from "./WireTool.js";
 export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: number, clientY: number) => void } = {}) {
   const vp = useViewport();
   const anchors = useCircuitStore((s) => s.netAnchors);
+  const busTaps = useCircuitStore((s) => s.busTaps);
   const nodes = useCircuitStore((s) => s.nodes);
   const edges = useCircuitStore((s) => s.edges);
   const move = useCircuitStore((s) => s.moveNetAnchor);
@@ -70,10 +71,27 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
     );
   };
 
-  if (anchors.length === 0) return null;
+  if (anchors.length === 0 && busTaps.length === 0) return null;
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5 }}>
+      {busTaps.map((t) => {
+        // Always pointing right, never rotated or mirrored — that is how LTSpice
+        // draws a bus tap, and it offers no way to turn one. The two coordinates
+        // say where the tap sits, not which way it faces.
+        const x = Math.min(t.x, t.x2), y = t.y;
+        const pts = [
+          [x, y - BUSTAP_HALF],
+          [x, y + BUSTAP_HALF],
+          [x + BUSTAP_LEN, y],
+        ].map(([px, py]) => `${vp.x + px * vp.zoom},${vp.y + py * vp.zoom}`).join(" ");
+        return (
+          <svg key={t.id} style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }}>
+            <polygon points={pts} fill={theme.wireStroke} opacity={0.85} />
+          </svg>
+        );
+      })}
+
       {anchors.map((a) => {
         const dock = { x: a.x, y: a.y };
         // The wire the name lies on decides which way it faces: the symbol points
@@ -170,6 +188,10 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
     </div>
   );
 }
+
+/** A bus tap's triangle: half its base, and how far the tip reaches right. */
+const BUSTAP_HALF = 6;
+const BUSTAP_LEN = 12;
 
 /**
  * The two ends of the wire segment nearest `p`, as far-end points.

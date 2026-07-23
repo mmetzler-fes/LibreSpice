@@ -14,12 +14,69 @@ export interface TextBox {
   /** Render the text as Markdown instead of showing it verbatim. */
   markdown: boolean;
   /**
-   * The size was estimated from the text, not chosen by the user — true for a
-   * plain LTSpice comment, which carries no size at all. Such a box writes no
+   * The box size was estimated from the text, not chosen by the user — true for a
+   * plain LTSpice comment, which carries no box size at all. Such a box writes no
    * `[w= h=]` header, so opening and saving a foreign file doesn't graft our
    * metadata onto every comment it has. Cleared as soon as the box is resized.
    */
   autoSized?: boolean;
+  /**
+   * LTSpice's justification keyword, verbatim: `Left`, `Center`, `Right`, `Top`,
+   * `Bottom` and the `V…` variants, which set the text on its side.
+   *
+   * Kept as the keyword rather than decomposed into "alignment + vertical?"
+   * because that is what the file holds and what has to go back into it. What we
+   * *draw* from it is a narrower thing — see {@link textFlow}.
+   */
+  justify: Justification;
+  /** Index into {@link TEXT_SIZES}; 2 (=1.5) is LTSpice's default. */
+  size: number;
+}
+
+/**
+ * LTSpice's text-size dropdown, in its own order — the `.asc` stores the index,
+ * not the number. `1.5` is the default and the one every text we have written so
+ * far carries, which is why it is also the size our own rendering has always
+ * been drawn at.
+ */
+export const TEXT_SIZES = [0.625, 1.0, 1.5, 2.0, 2.5, 3.5, 5.0, 7.0] as const;
+
+/** The index LTSpice starts a new text at. */
+export const TEXT_SIZE_DEFAULT = 2;
+
+/** The multiplier for a stored size index, relative to the 1.5 default. */
+export function textScale(size: number): number {
+  const v = TEXT_SIZES[Math.max(0, Math.min(TEXT_SIZES.length - 1, Math.round(size)))];
+  return v / TEXT_SIZES[TEXT_SIZE_DEFAULT];
+}
+
+export const JUSTIFICATIONS = [
+  "Left", "Center", "Right", "Top", "Bottom",
+  "VLeft", "VCenter", "VRight", "VTop", "VBottom",
+] as const;
+export type Justification = typeof JUSTIFICATIONS[number];
+
+/**
+ * How a justification is actually drawn: which way the text runs, and how it is
+ * aligned across the box.
+ *
+ * A `V…` keyword turns the text on its side — read bottom to top, the way
+ * LTSpice sets it. The rest of the keyword still chooses the alignment, so
+ * `VLeft` is left-aligned text running upwards. `Top`/`Bottom` describe where
+ * LTSpice hangs the text off its anchor point; our boxes have an extent of their
+ * own, so they align like `Left` and are kept only so the file round-trips.
+ */
+export function textFlow(j: Justification): { vertical: boolean; align: "left" | "center" | "right" } {
+  const vertical = j.startsWith("V");
+  const base = vertical ? j.slice(1) : j;
+  const align = base === "Center" ? "center" : base === "Right" ? "right" : "left";
+  return { vertical, align };
+}
+
+/** The justification keyword of a `TEXT` line, or `Left` when it is not one. */
+export function asJustification(word: string): Justification {
+  const hit = JUSTIFICATIONS.find((j) => j.toLowerCase() === word.toLowerCase());
+  return hit ?? "Left";
 }
 
 export const TEXTBOX_MIN_W = 80;
@@ -94,11 +151,18 @@ export function estimateSize(text: string): { width: number; height: number } {
  * someone else's comment as Markdown would reflow text that was laid out by
  * hand, and its `-----` underlines would turn into horizontal rules.
  */
-export function decodeTextBox(body: string, id: string, x: number, y: number): TextBox {
+export function decodeTextBox(
+  body: string, id: string, x: number, y: number,
+  justify: Justification = "Left", size: number = TEXT_SIZE_DEFAULT,
+): TextBox {
   const m = HEADER.exec(body);
   const text = (m ? body.slice(m[0].length) : body).replace(/\\n/g, "\n");
-  const size = m
+  const box = m
     ? { width: Number(m[1]), height: Number(m[2]) }
     : estimateSize(text);
-  return { id, x, y, width: size.width, height: size.height, markdown: m ? !!m[3] : false, text, ...(m ? {} : { autoSized: true }) };
+  return {
+    id, x, y, width: box.width, height: box.height,
+    markdown: m ? !!m[3] : false, text, justify, size,
+    ...(m ? {} : { autoSized: true }),
+  };
 }

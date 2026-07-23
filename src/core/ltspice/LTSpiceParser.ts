@@ -7,9 +7,9 @@ import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNod
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import { PORT_TYPES, type PortType } from "@core/components/special/Special.js";
-import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
+import { decodeTextBox, asJustification, type TextBox } from "@core/circuit/textBox.js";
 import type { AscRaw, DirectiveRaw } from "./ascPreserve.js";
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import { parseBusTap, type NetAnchor, type BusTap } from "@core/circuit/netAnchor.js";
 import { parseSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 
 
@@ -81,7 +81,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[] } {
+  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[]; busTaps: BusTap[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -107,6 +107,8 @@ export class LTSpiceParser {
      * schematics before the switch. Ground is the exception and stays a part.
      */
     const anchors: NetAnchor[] = [];
+    /** Bus taps, kept so a file that has one does not lose it on save. */
+    const busTaps: BusTap[] = [];
 
     let currentSymbol: any = null;
     // Where the generated ids start. A paste parses its fragment into a store
@@ -193,6 +195,9 @@ export class LTSpiceParser {
         // by what lies under it (see anchorNets), the same way LTSpice decides it
         // — and unlike the terminal node this replaces, it cannot drag a wire
         // along when it is moved, because it is not part of the topology.
+      } else if (cmd === "BUSTAP") {
+        const t = parseBusTap(line, `bustap_${busTaps.length + 1}`);
+        if (t) busTaps.push(t);
       } else if (cmd === "IOPIN") {
         // `IOPIN x y {In|Out|BiDir}` — pairs with the FLAG at the same point and
         // turns it into a net connector, the direction naming the port type. A
@@ -214,9 +219,16 @@ export class LTSpiceParser {
         // A comment TEXT becomes a text box. These used to be dropped on the
         // floor, which quietly discarded the exercise texts every converted
         // Multisim schematic carries.
-        const comment = line.match(/TEXT\s+(-?\d+)\s+(-?\d+)\s+\w+\s+\d+\s+;(.*)/i);
+        // The justification keyword and the size index are the text's own, not
+        // ours to choose: writing every comment back as `Left 2` set a file's
+        // sideways captions upright and shrank its headings to the default.
+        const comment = line.match(/TEXT\s+(-?\d+)\s+(-?\d+)\s+(\w+)\s+(\d+)\s+;(.*)/i);
         if (comment) {
-          textBoxes.push(decodeTextBox(comment[3], `tb_${textBoxes.length + 1}`, parseInt(comment[1], 10), parseInt(comment[2], 10)));
+          textBoxes.push(decodeTextBox(
+            comment[5], `tb_${textBoxes.length + 1}`,
+            parseInt(comment[1], 10), parseInt(comment[2], 10),
+            asJustification(comment[3]), parseInt(comment[4], 10),
+          ));
         }
         const textMatch = line.match(/TEXT\s+-?\d+\s+-?\d+\s+\w+\s+\d+\s+!(.*)/i);
         if (textMatch) {
@@ -523,7 +535,7 @@ export class LTSpiceParser {
       if (dir && dir !== "None") a.portType = dir;
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors };
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors, busTaps };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {

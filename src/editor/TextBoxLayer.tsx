@@ -4,7 +4,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { renderMarkdown } from "./markdown.js";
-import { TEXTBOX_MIN_W, TEXTBOX_MIN_H, type TextBox } from "@core/circuit/textBox.js";
+import { TEXTBOX_MIN_W, TEXTBOX_MIN_H, TEXT_SIZE_DEFAULT, TEXT_SIZES, textScale, textFlow, type TextBox, type Justification } from "@core/circuit/textBox.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 /**
@@ -18,6 +18,19 @@ import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDra
  * while the view pans and zooms. It is an annotation, not a part: it has no pins
  * and never reaches the netlist.
  */
+/** Compact style for the title bar's dropdowns. */
+function selectStyle(color: string): React.CSSProperties {
+  return {
+    border: "none", background: "transparent", color, cursor: "pointer",
+    fontSize: 10, padding: "0 1px", maxWidth: 52,
+  };
+}
+
+/** Turn a justification upright or on its side, keeping its alignment. */
+function flipVertical(j: Justification): Justification {
+  return (j.startsWith("V") ? j.slice(1) : `V${j}`) as Justification;
+}
+
 export function TextBoxLayer() {
   const vp = useViewport();
   const boxes = useCircuitStore((s) => s.textBoxes);
@@ -60,6 +73,12 @@ export function TextBoxLayer() {
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5 }}>
       {boxes.map((box) => {
         const isEditing = editing === box.id;
+        // The size index and the justification are the text's own (see textBox):
+        // 1.5 is LTSpice's default and the size everything here has always been
+        // drawn at, so a scale of 1 leaves every existing sheet untouched.
+        const scale = textScale(box.size ?? TEXT_SIZE_DEFAULT);
+        const flow = textFlow(box.justify ?? "Left");
+        const fontSize = 11 * scale;
         return (
           <div
             key={box.id}
@@ -123,6 +142,31 @@ export function TextBoxLayer() {
               >
                 ✎
               </button>
+              {/* Size and orientation, the two things LTSpice keeps on a text
+                  line. On the title bar rather than in a panel: a text box is
+                  edited where it sits, and it has no selection of its own. */}
+              <select
+                onPointerDown={(e) => e.stopPropagation()}
+                value={box.size ?? TEXT_SIZE_DEFAULT}
+                onChange={(e) => update(box.id, { size: Number(e.target.value) })}
+                title="Schriftgröße (LTSpice)"
+                style={selectStyle(theme.textStrong)}
+              >
+                {TEXT_SIZES.map((v, i) => (
+                  <option key={i} value={i}>{v.toFixed(v < 1 ? 3 : 1)}</option>
+                ))}
+              </select>
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => update(box.id, { justify: flipVertical(box.justify ?? "Left") })}
+                title={flow.vertical ? "Senkrecht — auf waagrecht umschalten" : "Waagrecht — auf senkrecht umschalten"}
+                style={{
+                  border: "none", background: "transparent", cursor: "pointer", fontSize: 11,
+                  color: flow.vertical ? "#2563eb" : "#94a3b8", padding: "0 3px",
+                }}
+              >
+                {flow.vertical ? "⭥" : "⭤"}
+              </button>
               <span style={{ flex: 1 }} />
               <button
                 onPointerDown={(e) => e.stopPropagation()}
@@ -147,7 +191,7 @@ export function TextBoxLayer() {
                 placeholder="Text… (Markdown mit MD)"
                 style={{
                   flex: 1, resize: "none", border: "none", outline: "none",
-                  padding: "4px 6px", fontFamily: "monospace", fontSize: 11, lineHeight: 1.45,
+                  padding: "4px 6px", fontFamily: "monospace", fontSize, lineHeight: 1.45,
                   background: "transparent", color: theme.textStrong,
                 }}
               />
@@ -155,7 +199,15 @@ export function TextBoxLayer() {
               <div
                 style={{
                   flex: 1, overflow: "auto", padding: "4px 6px",
-                  fontSize: 11, lineHeight: 1.45, color: theme.textStrong,
+                  fontSize, lineHeight: 1.45, color: theme.textStrong,
+                  textAlign: flow.align,
+                  // A `V…` justification sets the text on its side, read bottom to
+                  // top — LTSpice's only other orientation. `writing-mode` rather
+                  // than a rotate: the box keeps its own extent, so the text wraps
+                  // and scrolls inside it exactly as it does upright.
+                  ...(flow.vertical
+                    ? { writingMode: "vertical-rl" as const, transform: "rotate(180deg)" }
+                    : {}),
                   // Wrap long lines and break a word that is longer than the box,
                   // so widening and narrowing reflows instead of clipping.
                   whiteSpace: box.markdown ? "normal" : "pre-wrap",

@@ -82,7 +82,7 @@ async function roundTrip(): Promise<string> {
 
 function exportAsc(): string {
   const s = st();
-  return LTSpiceExporter.export(s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, [], [], { anchors: s.netAnchors });
+  return LTSpiceExporter.export(s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, [], [], { anchors: s.netAnchors, busTaps: s.busTaps });
 }
 
 /**

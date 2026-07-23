@@ -58,7 +58,7 @@ async function loadSpec(value: string): Promise<void> {
 
 /** The `SYMATTR Value` an export would write for the current circuit. */
 const written = (): string =>
-  LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, [], { anchors: st().netAnchors })
+  LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, [], { anchors: st().netAnchors, busTaps: st().busTaps })
     .split("\n").find((l) => l.startsWith("SYMATTR Value "))?.slice(14) ?? "(nichts)";
 
 /** Every field the exercises rely on, in forms that stress the number parsing. */

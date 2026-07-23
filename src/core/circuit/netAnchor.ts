@@ -86,3 +86,40 @@ export function formatAnchor(a: NetAnchor): string[] {
   if (a.portType && a.portType !== "None") lines.push(`IOPIN ${Math.round(a.x)} ${Math.round(a.y)} ${a.portType}`);
   return lines;
 }
+
+/**
+ * A bus tap: the short stub that hangs a wire off a bus (`BUSTAP x1 y1 x2 y2`).
+ *
+ * The same kind of thing as a {@link NetAnchor}, which is why it lives here — a
+ * mark at a place, beside the circuit rather than inside it, with its own line in
+ * the file and its own overlay layer. It differs only in what it says and how it
+ * is drawn: a name says "the net here is called this" and draws a tag, a tap says
+ * "the net here comes off a bus" and draws a triangle.
+ *
+ * It carries no name and no orientation. In LTSpice a bus tap always points the
+ * same way — the arrowhead to the right — and can be neither rotated nor
+ * mirrored, so the two coordinate pairs say where it is, never which way it
+ * faces. Buses themselves are not modelled: a tap is imported, drawn and written
+ * back so a file that has one keeps it, which is what it did *not* do before —
+ * `test2.asc` lost its `BUSTAP` line on every save.
+ */
+export interface BusTap {
+  id: string;
+  /** The end on the wire — the point the triangle's tip sits at. */
+  x: number;
+  y: number;
+  /** The end on the bus. */
+  x2: number;
+  y2: number;
+}
+
+/** The `.asc` line for a bus tap, in LTSpice's own order. */
+export function formatBusTap(t: BusTap): string {
+  return `BUSTAP ${Math.round(t.x)} ${Math.round(t.y)} ${Math.round(t.x2)} ${Math.round(t.y2)}`;
+}
+
+/** Parse a `BUSTAP` line, or null when it is not one. */
+export function parseBusTap(line: string, id: string): BusTap | null {
+  const m = /^BUSTAP\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*$/i.exec(line.trim());
+  return m ? { id, x: +m[1], y: +m[2], x2: +m[3], y2: +m[4] } : null;
+}

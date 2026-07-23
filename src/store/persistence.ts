@@ -4,7 +4,7 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { TextBox } from "@core/circuit/textBox.js";
 import type { SheetShape } from "@core/circuit/sheetShape.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
-import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import type { PlotSettings } from "@simulation/plotStore.js";
 
 export const AUTOSAVE_KEY = "librespice-autosave";
@@ -57,6 +57,8 @@ export interface CircuitSnapshot {
    * opens, and opens with its names intact.
    */
   netAnchors?: NetAnchor[];
+  /** Bus taps (see BusTap). Absent in anything written before they were kept. */
+  busTaps?: BusTap[];
   /** Free text annotations (see textBox). Optional: older snapshots carry none. */
   textBoxes?: TextBox[];
   /** Sheet drawings (see sheetShape). Optional: older snapshots carry none. */
