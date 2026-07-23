@@ -1,4 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import { resolveAnchor } from "@core/circuit/anchorResolve.js";
+import { netRoutes } from "@editor/anchorNets.js";
 import { LTSpiceExporter } from "./LTSpiceExporter.js";
 
 /**
@@ -28,7 +31,7 @@ interface Pt { x: number; y: number }
  * that reaches out of it has nothing to attach to at the far end, and carrying
  * it over as a stub would paste a wire dangling into empty space.
  */
-export function buildFragment(nodes: Node[], edges: Edge[], circuit: any): string {
+export function buildFragment(nodes: Node[], edges: Edge[], circuit: any, anchors: NetAnchor[] = []): string {
   const picked = nodes.filter((n) => n.selected);
   if (picked.length === 0) return "";
   const ids = new Set(picked.map((n) => n.id));
@@ -53,13 +56,15 @@ export function buildFragment(nodes: Node[], edges: Edge[], circuit: any): strin
     raw: `TEXT ${MODEL_TEXT_X} ${MODEL_TEXT_Y + i * 32} Left 0 !${raw.replace(/\r?\n/g, "\\n")}`,
   }));
 
-  // `derivedFlags: false` is the rule that makes a fragment a *selection*: only
-  // the labels and connectors actually picked come along. Saving a whole
-  // schematic also writes a flag for every named net that has no terminal, since
-  // the file has nowhere else to keep that name — but in a fragment those are
-  // names nobody selected, and pasting turned each into a label with a fresh
-  // wire to the nearest pin. Copying four parts produced three flags and three
-  // wires out of nothing.
+  // Which names come along: those sitting on something that was picked. An
+  // anchor owns nothing and is owned by nothing, so "selected" cannot be read
+  // off it — it is decided the same way its net is, by what lies underneath.
+  // Resolved against the picked parts and their wires alone, so a name on the
+  // net next door stays behind. (`netOf` hands back the port id itself: the
+  // question here is only *whether* an anchor reaches the selection, not which
+  // net it names.)
+  const inside = netRoutes(picked, inner, { netOf: (id) => id });
+  const carried = anchors.filter((a) => resolveAnchor({ x: a.x, y: a.y }, inside) !== null);
   //
   // The full circuit still goes in, because the values and models of the picked
   // parts are read from it. Sheet state beyond the carried models is empty.
@@ -68,7 +73,7 @@ export function buildFragment(nodes: Node[], edges: Edge[], circuit: any): strin
   // `TEXT … ;…` (which would paste back as a stray text box), and an unknown
   // leading line is exactly the kind of thing that would stop LTSpice reading the
   // payload. A fragment is recognised by its shape instead — see isFragment.
-  return LTSpiceExporter.export(picked, inner, blocks.join("\n"), circuit, [], [], [], { directiveRaw, derivedFlags: false }) + "\n";
+  return LTSpiceExporter.export(picked, inner, blocks.join("\n"), circuit, [], [], [], { directiveRaw, anchors: carried }) + "\n";
 }
 
 /** Where a carried `.subckt` block is parked on the fragment's sheet. */

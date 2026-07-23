@@ -30,7 +30,7 @@ const st = () => useCircuitStore.getState();
 
 /** The `.asc` the Save button would write for the current store state. */
 const currentAsc = () =>
-  LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+  LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
 
 /** Place a component in a fresh circuit, mirroring what the editor does. */
 function place(type: ComponentType, id: string, label: string, set: Record<string, string | number>, x: number) {

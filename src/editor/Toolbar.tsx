@@ -92,7 +92,7 @@ export function Toolbar() {
     canUndo, canRedo, undo, redo,
     clearCircuit, rotateSelected, mirrorSelected, deleteSelected, netlist, selectedComponentId, spiceDirectives,
     circuit, nodes, edges, loadFromAsc, fileHandle, setFileHandle, exportSnapshot,
-    circuitName, setCircuitName, dataFlags, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
+    circuitName, setCircuitName, dataFlags, netAnchors, textBoxes, sheetShapes, directiveRaw, ascHeader, ascOrphanWires,
     showDirectivesOnCanvas, directivesPos, setFragmentClipboard,
   } = useCircuitStore();
   const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect, setPendingFragment } = useUIStore();
@@ -177,7 +177,7 @@ export function Toolbar() {
    * through the async Clipboard API, which *is* allowed inside a click.
    */
   const copySelectionToClipboard = async (cut: boolean) => {
-    const fragment = buildFragment(nodes, edges, circuit);
+    const fragment = buildFragment(nodes, edges, circuit, netAnchors);
     if (!fragment) return;
     // Kept in-app as well, so pasting works even where reading the system
     // clipboard is refused (see fragmentClipboard).
@@ -232,7 +232,7 @@ export function Toolbar() {
   };
 
   const handleSave = async (saveAs: boolean = false) => {
-    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes, { directiveRaw, header: ascHeader, orphanWires: ascOrphanWires });
+    const content = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes, { directiveRaw, header: ascHeader, orphanWires: ascOrphanWires, anchors: netAnchors });
     if ("showSaveFilePicker" in window) {
       try {
         let handle = fileHandle;

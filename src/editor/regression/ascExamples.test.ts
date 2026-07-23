@@ -135,7 +135,7 @@ export async function runAscExamplesTests(): Promise<TestReport> {
       const beforeDevices = deviceLabels();
       const beforeNets = connectivity();
 
-      const export1 = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+      const export1 = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
       if (!/^Version\s+\d/m.test(export1)) {
         fail(`export produced no LTSpice header:\n${export1.slice(0, 120)}`);
       } else {
@@ -147,7 +147,7 @@ export async function runAscExamplesTests(): Promise<TestReport> {
         await load(reloaded);
         const afterDevices = deviceLabels();
         const afterNets = connectivity();
-        const export2 = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+        const export2 = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
 
         const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
         const known = file in KNOWN_ROUNDTRIP_ISSUES;

@@ -1,3 +1,4 @@
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
 /**
  * `.asc` passthrough — keeping a saved file close to the one we opened.
  *
@@ -70,19 +71,15 @@ export interface AscPreserved {
    *  Written back untouched — see LTSpiceParser for why that is safe. */
   orphanWires?: string[];
   /**
-   * Also write the `FLAG`s that are *derived* rather than drawn: one for every
-   * named net that has no terminal of its own, and one for every wire showing
-   * its net's name. Default true, which is what saving a whole schematic needs —
-   * those names would otherwise be lost, the file having nowhere else to put
-   * them.
+   * The names on the sheet (see NetAnchor). These *are* the file's `FLAG` and
+   * `IOPIN` lines — there is no longer a second, derived source that has to be
+   * reconciled with them, which is what used to stack a duplicate flag on the
+   * same spot with every save.
    *
-   * A *fragment* sets it false. There the rule is the opposite: it must contain
-   * what the user selected and nothing else. Deriving flags from the nets the
-   * selected parts happen to sit on dragged names along that were never picked,
-   * and pasting turned each into a label with a fresh wire to the nearest pin —
-   * wires that appeared from nowhere.
+   * A fragment passes only the anchors inside the selection, which is what makes
+   * it a selection: names the user did not pick are simply not in the list.
    */
-  derivedFlags?: boolean;
+  anchors?: NetAnchor[];
 }
 
 /**

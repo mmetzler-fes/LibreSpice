@@ -6,7 +6,7 @@ import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, type TextBox } from "@core/circui
 import type { SheetShape } from "@core/circuit/sheetShape.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
-import { getValueLabel, createSpiceComponent, createSubcircuitComponent, nextComponentId } from "@editor/componentFactory.js";
+import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
 import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
 import { reseatTwoPinEdges } from "@editor/pinReseat.js";
 import { useUIStore } from "./uiStore.js";
@@ -17,6 +17,9 @@ import type { DirectiveRaw } from "@core/ltspice/ascPreserve.js";
 import { fragmentOrigin, fragmentModels, isFragment, pasteLabelFor } from "@core/ltspice/ascFragment.js";
 import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
+import type { NetAnchor } from "@core/circuit/netAnchor.js";
+import { netRoutes, anchorNets } from "@editor/anchorNets.js";
+import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { useSimulationStore } from "./simulationStore.js";
@@ -71,6 +74,16 @@ interface CircuitState {
   circuitName: string;
   /** Positioned data-point annotations (LTSpice DATAFLAGs). */
   dataFlags: DataFlag[];
+  /**
+   * The names on the sheet (LTSpice `FLAG`, plus `IOPIN` for a connector).
+   *
+   * A name is a coordinate and a string, not a part: it owns no pin, no edge and
+   * no netlist line, and finds its net by lying on one (see anchorNets). Ground
+   * is the exception that stays a component — in the file it is a flag named `0`
+   * like any other, but on our sheet it is a drawn symbol with a pin, and its
+   * anchor is derived from the node (see anchorsFromNodes).
+   */
+  netAnchors: NetAnchor[];
   /** Free text annotations on the sheet (see textBox). */
   textBoxes: TextBox[];
   /** Frames and other shapes drawn on the sheet (see sheetShape). */
@@ -105,6 +118,12 @@ interface CircuitActions {
   moveDirectivesBox: (x: number, y: number) => void;
   setCircuitName: (name: string) => void;
   renameNet: (netId: string, label: string) => void;
+  /** Put a name at a point. Returns the new anchor's id. */
+  addNetAnchor: (x: number, y: number, name: string, portType?: PortType) => string;
+  /** Rename an anchor, or change its port type. An empty name removes it. */
+  updateNetAnchor: (id: string, patch: { name?: string; portType?: PortType }) => void;
+  moveNetAnchor: (id: string, x: number, y: number) => void;
+  removeNetAnchor: (id: string) => void;
   addDataFlag: (x: number, y: number, expr: string) => void;
   removeDataFlag: (id: string) => void;
   addTextBox: (x: number, y: number) => string;
@@ -178,24 +197,36 @@ function labelAnchor(host: Edge, nodes: Node[]): FlowPoint | null {
  * which destroyed the name in the file — opening and saving `leitungstest.asc`
  * turned its `x2` into a second `x1`.
  *
- * Ids are handed out in ascending order (`netlabel_3`, `netconnector_7`), so the
- * smallest is the terminal that was there first — and on import, the first FLAG
- * in the file, which is the name LTSpice itself shows.
+ * Ids are handed out in ascending order (`anchor_3`, `anchor_7`), so the smallest
+ * is the name that was there first — and on import, the first FLAG in the file,
+ * which is the name LTSpice itself shows.
  */
 /** `0` and `GND` name the ground net wherever they appear. */
 function isGroundName(s: string): boolean {
   return /^(0|gnd)$/i.test(s.trim());
 }
 
-function applyNetNames(circuit: Circuit): void {
+/** The net a port is on, by the port id the circuit uses (`comp_1-a`). */
+function portNet(circuit: Circuit, portId: string): string | undefined {
+  const compId = portId.slice(0, portId.lastIndexOf("-"));
+  return circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
+}
+
+/** Anchor ids ascend, and the order decides which of a net's names wins. */
+function nextAnchorId(anchors: NetAnchor[]): string {
+  const max = anchors.reduce((m, a) => Math.max(m, Number(a.id.split("_").pop()) || 0), 0);
+  return `anchor_${max + 1}`;
+}
+
+function applyNetNames(circuit: Circuit, anchors: NetAnchor[], byAnchor: Map<string, string>): void {
   const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
   const oldest = new Map<string, { id: string; name: string }>();
-  for (const comp of circuit.components.values()) {
-    const name = comp.getNetLabel();
-    const netId = comp.ports[0]?.netId;
-    if (name === null || !netId || netId === "0") continue;
+  for (const a of anchors) {
+    const netId = byAnchor.get(a.id);
+    const name = a.name.trim();
+    if (!name || !netId || netId === "0") continue;
     const cur = oldest.get(netId);
-    if (!cur || ordinal(comp.id) < ordinal(cur.id)) oldest.set(netId, { id: comp.id, name });
+    if (!cur || ordinal(a.id) < ordinal(cur.id)) oldest.set(netId, { id: a.id, name });
   }
   for (const [netId, winner] of oldest) {
     const net = circuit.nets.get(netId);
@@ -220,6 +251,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   directivesPos: { x: 40, y: 40 },
   circuitName: "Untitled",
   dataFlags: [],
+  netAnchors: [],
   textBoxes: [],
   sheetShapes: [],
   propertyVersion: 0,
@@ -394,12 +426,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   regenerateNetlist: () => {
-    const { circuit, simulationConfig, spiceDirectives } = get();
-    // Net-label terminals name their net, so nets sharing a name collapse to one
-    // node (which is how distant parts connect). Where several name one net, the
-    // same winner is chosen as everywhere else — this used to impose each name in
-    // turn, letting whichever came last win.
-    applyNetNames(circuit);
+    const { circuit, simulationConfig, spiceDirectives, netAnchors, nodes, edges } = get();
+    // Anchors name their net, so nets sharing a name collapse to one node (which
+    // is how distant parts connect). Where several name one net, the same winner
+    // is chosen as everywhere else — this used to impose each name in turn,
+    // letting whichever came last win.
+    applyNetNames(circuit, netAnchors, anchorNets(netAnchors, netRoutes(nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm)));
     const generator = new NetlistGenerator();
     const libraryBlocks = useLibraryStore.getState().getDefinitionBlocks();
     const netlist = generator.generate(circuit, simulationConfig, spiceDirectives, undefined, libraryBlocks);
@@ -427,7 +459,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   setCircuitName: (name) => set({ circuitName: name }),
 
   renameNet: (netId, label) => {
-    const { circuit, edges } = get();
+    const { circuit, edges, netAnchors, nodes } = get();
     const net = circuit.nets.get(netId);
     if (!net) return;
     const oldLabel = net.nodeLabel;
@@ -435,93 +467,42 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (oldLabel === newLabel) return;
     net.nodeLabel = newLabel;
 
-    // Net terminals — net labels and net connectors alike (imported LTSpice
-    // FLAGs) — *are* the net's name: regenerateNetlist re-imposes their label, so
-    // renaming the net has to rename the terminal too or the new name is
-    // overwritten on the next rebuild.
-    const labelIds = new Set<string>();
-    for (const comp of circuit.components.values()) {
-      if (comp.getNetLabel() !== null && comp.ports[0]?.netId === netId) {
-        comp.setProperty("label", newLabel);
-        labelIds.add(comp.id);
-      }
-    }
+    // Naming a net *is* placing a flag on it. There is no other slot for the
+    // name: the `.asc` writes `FLAG x y NAME` and nothing else, so a name held
+    // anywhere but on an anchor would survive the session and vanish on save.
+    //
+    // Which anchors this touches: the ones lying on the net. Renaming rewrites
+    // the one that currently names it (the oldest, the one applyNetNames picked)
+    // and leaves the others alone — they are aliases the file records on purpose,
+    // and rewriting them would turn `leitungstest.asc`'s `x2` into a second `x1`.
+    const byAnchor = anchorNets(netAnchors, netRoutes(nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm));
+    const mine = netAnchors.filter((a) => byAnchor.get(a.id) === netId);
+    const ordinal = (id: string) => Number(id.split("_").pop()) || 0;
+    const winner = mine.slice().sort((a, b) => ordinal(a.id) - ordinal(b.id))[0];
 
-    // No terminal yet: naming the net places a net label on it.
-    //
-    // A name that lives only on a wire is not saved — the `.asc` has no slot for
-    // it, so it survived only in the session and in a share link, and vanished on
-    // the first save. A label *is* the file's way of naming a net (`FLAG x y
-    // NAME`), so naming and labelling are one and the same act. A plain label,
-    // not a connector: a connector additionally declares a direction (`IOPIN`),
-    // which is a claim the user has not made by typing a name.
-    //
-    // Clearing the name back to the auto id removes the label again, so a net
+    // Clearing the name back to the auto id takes the flag away with it, so a net
     // never keeps a tag that says nothing.
     const clearing = newLabel === netId;
-    const onNetEdge = (e: Edge) =>
-      circuit.components.get(e.source!)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId === netId ||
-      circuit.components.get(e.target!)?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId === netId;
 
-    /** A label to place, when the net has none and is being given a real name. */
-    let spawn: { node: Node; comp: SpiceComponent; edge: Edge } | null = null;
-    if (labelIds.size === 0 && !clearing) {
-      // On the wire the user is looking at — the selected one, else any of the
-      // net — at its midpoint, which is where a name reads best.
+    let next: NetAnchor[];
+    if (clearing) {
+      next = netAnchors.filter((a) => !mine.includes(a));
+    } else if (winner) {
+      next = netAnchors.map((a) => (a.id === winner.id ? { ...a, name: newLabel } : a));
+    } else {
+      // Nothing names this net yet: put the name on the wire the user is looking
+      // at — the selected one, else any of the net — at its midpoint, which is
+      // where a name reads best and is clear of the parts at either end.
+      const onNetEdge = (e: Edge) =>
+        portNet(circuit, `${e.source}-${e.sourceHandle}`) === netId || portNet(circuit, `${e.target}-${e.targetHandle}`) === netId;
       const host = edges.find((e) => e.selected && onNetEdge(e)) ?? edges.find(onNetEdge);
-      const at = host ? labelAnchor(host, get().nodes) : null;
-      if (at) {
-        const id = nextComponentId("netlabel", get().nodes.map((n) => n.id));
-        const comp = createSpiceComponent("netlabel", id, newLabel, at.x - NODE_SIZE / 2, at.y - NODE_SIZE / 2);
-        spawn = {
-          comp,
-          node: {
-            id, type: "component",
-            position: { x: at.x - NODE_SIZE / 2, y: at.y - NODE_SIZE / 2 },
-            data: { componentType: "netlabel", label: newLabel },
-          },
-          edge: {
-            id: `wire_label_${id}`,
-            source: host!.source, sourceHandle: host!.sourceHandle,
-            target: id, targetHandle: "t",
-            type: "wire",
-            data: { waypoints: [], targetTap: at, hostEdgeId: host!.id },
-          },
-        };
-      }
+      const at = host ? labelAnchor(host, nodes) : null;
+      next = at ? [...netAnchors, { id: nextAnchorId(netAnchors), x: at.x, y: at.y, name: newLabel }] : netAnchors;
     }
-    /** Labels to drop, when the name is cleared back to the auto id. */
-    const doomed = clearing ? [...labelIds] : [];
 
-    if (spawn) {
-      circuit.addComponent(spawn.comp);
-      // Join it to the net at once. Waiting for the next rebuild would leave the
-      // label unattached in between — invisible to the netlist, and invisible to
-      // this very function on a second call, so clearing the name again would
-      // find nothing to remove.
-      try {
-        circuit.connectPorts(`${spawn.edge.source}-${spawn.edge.sourceHandle}`, `${spawn.node.id}-t`);
-      } catch { /* visual-only */ }
-    }
-    for (const id of doomed) circuit.removeComponent(id);
-
-    const snap = { nodes: get().nodes, edges: get().edges };
     set((state) => ({
       netVersion: state.netVersion + 1,
-      // Placing or dropping a label is a structural edit, so it belongs in the
-      // undo history like any other.
-      _history: [...state._history, snap],
-      _future: [],
-      nodes: [
-        ...state.nodes
-          .filter((n) => !doomed.includes(n.id))
-          .map((n) => (labelIds.has(n.id) ? { ...n, data: { ...n.data, label: newLabel } } : n)),
-        ...(spawn ? [spawn.node] : []),
-      ],
-      edges: [
-        ...state.edges.filter((e) => !doomed.includes(e.source) && !doomed.includes(e.target)),
-        ...(spawn ? [spawn.edge] : []),
-      ],
+      netAnchors: next,
       // Keep data-point expressions pointing at the renamed net.
       dataFlags: state.dataFlags.map((d) => ({ ...d, expr: renameNetInProbe(d.expr, oldLabel, newLabel) })),
     }));
@@ -532,6 +513,38 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // (both immediately and after a re-run), instead of keeping the old label.
     useSimulationStore.getState().renameNetVariable(oldLabel, newLabel);
     usePlotStore.getState().renameTraceNet(oldLabel, newLabel);
+  },
+
+  addNetAnchor: (x, y, name, portType) => {
+    const id = nextAnchorId(get().netAnchors);
+    set((state) => ({
+      netAnchors: [...state.netAnchors, { id, x: Math.round(x), y: Math.round(y), name, ...(portType && portType !== "None" ? { portType } : {}) }],
+    }));
+    get().rebuildConnections();
+    return id;
+  },
+
+  updateNetAnchor: (id, patch) => {
+    // An emptied name is a deleted flag, not a nameless one: `FLAG x y` with no
+    // name is not a line LTSpice writes, and an invisible anchor could never be
+    // grabbed again.
+    if (patch.name !== undefined && !patch.name.trim()) { get().removeNetAnchor(id); return; }
+    set((state) => ({ netAnchors: state.netAnchors.map((a) => (a.id === id ? { ...a, ...patch } : a)) }));
+    get().rebuildConnections();
+  },
+
+  moveNetAnchor: (id, x, y) => {
+    // Moving a name can move it onto a different wire, which renames two nets at
+    // once — so the net rebuild runs on every move, not just at the end of the
+    // drag. That is what makes the anchor model behave: the name follows the
+    // geometry instead of remembering what it used to be attached to.
+    set((state) => ({ netAnchors: state.netAnchors.map((a) => (a.id === id ? { ...a, x: Math.round(x), y: Math.round(y) } : a)) }));
+    get().rebuildConnections();
+  },
+
+  removeNetAnchor: (id) => {
+    set((state) => ({ netAnchors: state.netAnchors.filter((a) => a.id !== id) }));
+    get().rebuildConnections();
   },
 
   addDataFlag: (x, y, expr) =>
@@ -570,7 +583,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({ dataFlags: state.dataFlags.map((d) => (d.id === id ? { ...d, x, y } : d)) })),
 
   loadFromAsc: (ascContent) => {
-    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires } = LTSpiceParser.parse(ascContent);
+    const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors } = LTSpiceParser.parse(ascContent);
     const snap = { nodes: get().nodes, edges: get().edges };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
@@ -604,6 +617,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       ascHeader: header,
       ascOrphanWires: orphanWires,
       dataFlags,
+      netAnchors: anchors,
       textBoxes,
       sheetShapes,
       selectedComponentId: null,
@@ -783,6 +797,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       netlist: "",
       circuitName: "Untitled",
       dataFlags: [],
+      netAnchors: [],
       textBoxes: [],
       sheetShapes: [],
       // A new schematic starts blank: the previous circuit's SPICE directives
@@ -905,15 +920,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   rebuildConnections: () => {
     const { circuit, edges } = get();
-    // Save existing custom labels
-    const customLabels = new Map<string, string>();
-    for (const net of circuit.nets.values()) {
-      if (net.id !== "0" && net.nodeLabel !== net.id) {
-        if (net.connectedPortIds.size > 0) {
-          customLabels.set(Array.from(net.connectedPortIds)[0], net.nodeLabel);
-        }
-      }
-    }
+    // Nothing is carried over from the previous nets. A name lives on an anchor
+    // and nowhere else, so re-deriving it from the geometry below is the whole
+    // point: a name restored from the last rebuild would outlive the anchor that
+    // produced it, and deleting a flag would leave its name behind.
 
     // Disconnect all ports
     for (const comp of circuit.components.values()) {
@@ -949,15 +959,26 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
     }
 
-    // A label reading "0" or "GND" *is* ground — merge its net into net "0",
+    // ── Where the names land ───────────────────────────────────────────────
+    // Every name on the sheet is a coordinate, so this is the one place that
+    // asks the geometry which net each one is sitting on. It has to run here,
+    // after the edges have rebuilt the nets and before anything reads a name:
+    // moving a wire out from under a name un-names its net, and that has to be
+    // as true as moving the name out from under the wire.
+    const anchors = get().netAnchors;
+    const byAnchor = anchorNets(
+      anchors,
+      netRoutes(get().nodes, edges, { netOf: (id) => portNet(circuit, id) }, useUIStore.getState().symbolNorm),
+    );
+
+    // A name reading "0" or "GND" *is* ground — merge its net into net "0",
     // exactly as LTSpice treats a "0" flag. Otherwise it became a SPICE node
     // literally called GND, sitting next to the real ground node "0": the circuit
     // looked earthed but was floating, and two nets displayed the same name.
     const isGroundName = (s: string) => /^(0|gnd)$/i.test(s.trim());
-    for (const comp of circuit.components.values()) {
-      const name = comp.getNetLabel();
-      const netId = comp.ports[0]?.netId;
-      if (!name || !isGroundName(name) || !netId || netId === "0") continue;
+    for (const a of anchors) {
+      const netId = byAnchor.get(a.id);
+      if (!isGroundName(a.name) || !netId || netId === "0") continue;
 
       const groundNet = circuit.nets.get("0") ?? new Net("0", "GND");
       circuit.nets.set("0", groundNet);
@@ -971,74 +992,18 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         }
       }
       circuit.nets.delete(netId);
-    }
-
-    // Restore custom labels – never relabel the ground net "0".
-    for (const [portId, label] of customLabels.entries()) {
-      for (const comp of circuit.components.values()) {
-        const port = comp.ports.find(p => p.id === portId);
-        if (port && port.netId && port.netId !== "0") {
-          const net = circuit.nets.get(port.netId);
-          if (net) net.nodeLabel = label;
-        }
-      }
-    }
-
-    // Wire-carried names (`edge.data.netName`) are the persistent source of truth
-    // for a labelled wire — they live on the edge and so survive every rebuild,
-    // even after the net is renumbered or merged. Apply them onto the freshly
-    // built nets (overriding the port-keyed restore above).
-    for (const edge of edges) {
-      const nm = (edge.data as { netName?: string } | undefined)?.netName;
-      if (!nm) continue;
-      const port = circuit.components.get(edge.source ?? "")?.ports.find((p) => p.id === `${edge.source}-${edge.sourceHandle}`);
-      const nid = port?.netId;
-      if (nid && nid !== "0") { const net = circuit.nets.get(nid); if (net) net.nodeLabel = nm; }
-    }
-
-    // A net whose *name* is ground — typed into the net-name field on a wire, with
-    // no terminal node — is ground too (mirrors the terminal-based merge above).
-    // Runs after the labels are restored, so the ground names are visible here.
-    for (const [nid, net] of [...circuit.nets]) {
-      if (nid === "0" || !isGroundName(net.nodeLabel)) continue;
-      const groundNet = circuit.nets.get("0") ?? new Net("0", "GND");
-      circuit.nets.set("0", groundNet);
-      for (const comp of circuit.components.values()) {
-        for (const port of comp.ports) {
-          if (port.netId === nid) { port.connect("0"); groundNet.addPort(port.id); }
-        }
-      }
-      circuit.nets.delete(nid);
+      // The merge renumbered the ports, so anything resolved against the old net
+      // id now points at a net that is gone.
+      for (const [anchorId, nid] of byAnchor) if (nid === netId) byAnchor.set(anchorId, "0");
     }
 
     // ── The net's name for the netlist ─────────────────────────────────────
-    // One name wins (see applyNetNames); the other terminals keep theirs. They
-    // are aliases for the same net, exactly as LTSpice stores them, and renaming
-    // them here would rewrite the user's file the moment they opened it.
-    applyNetNames(circuit);
-    const byNet = new Map<string, true>();
-    for (const comp of circuit.components.values()) {
-      const nid = comp.ports[0]?.netId;
-      if (comp.getNetLabel() !== null && nid && nid !== "0") byNet.set(nid, true);
-    }
+    // One name wins (see applyNetNames); the net's other names stand. They are
+    // aliases for the same net, exactly as LTSpice stores them, and rewriting
+    // them here would change the user's file the moment they opened it.
+    applyNetNames(circuit, anchors, byAnchor);
 
-    // A named net shows its name at its terminal, so the wire must not repeat it.
-    // Both mechanisms exist on purpose — a net without a terminal carries its
-    // name on the wire — but a net with both said the same thing twice.
-    const labelledNets = new Set(byNet.keys());
-    const netOfEdge2 = (e: Edge) =>
-      circuit.components.get(e.source ?? "")?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId
-      ?? circuit.components.get(e.target ?? "")?.ports.find((p) => p.id === `${e.target}-${e.targetHandle}`)?.netId;
-
-    set((state) => ({
-      netVersion: state.netVersion + 1,
-      edges: state.edges.map((e) => {
-        const nid = netOfEdge2(e);
-        if (!nid || !labelledNets.has(nid) || !(e.data as { showLabel?: boolean } | undefined)?.showLabel) return e;
-        const { showLabel: _hide, ...rest } = (e.data ?? {}) as Record<string, unknown>;
-        return { ...e, data: rest };
-      }),
-    }));
+    set((state) => ({ netVersion: state.netVersion + 1 }));
     get().regenerateNetlist();
   },
 

@@ -3,13 +3,14 @@ import type { ComponentType } from "@editor/nodes/ComponentNode.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { PortType } from "@core/components/special/Special.js";
 import {
-  CENTER, TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
+  TYPE_TO_SYMBOL, GROUND_PIN, rotStr, offsetsForNode, nodeToSymbol, centeringFor,
 } from "./ltspiceGeometry.js";
 import { outwardAxis, type Axis } from "@core/geometry/ortho.js";
-import { wireRoutes, routeOf, type PinLookup } from "@core/geometry/wireRoutes.js";
+import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
 import { encodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 import { sameAttrValue, shiftWindowLine, formatEng, type AscRaw, type AscPreserved } from "./ascPreserve.js";
+import { formatAnchor } from "@core/circuit/netAnchor.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -141,164 +142,11 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
   return { value: fallback };
 }
 
-/** Point at parametric position `t` (0..1 of total length) along a polyline —
- *  mirrors WireTool.pointAtT, kept local so `core` needn't import the editor. */
-function dockPoint(verts: Pt[], t: number): Pt {
-  if (verts.length === 0) return { x: 0, y: 0 };
-  if (verts.length === 1) return verts[0];
-  let total = 0;
-  for (let i = 0; i < verts.length - 1; i++) total += Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
-  if (total === 0) return verts[0];
-  let target = Math.max(0, Math.min(1, t)) * total;
-  for (let i = 0; i < verts.length - 1; i++) {
-    const segLen = Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
-    if (target <= segLen || i === verts.length - 2) {
-      const f = segLen === 0 ? 0 : target / segLen;
-      return { x: verts[i].x + (verts[i + 1].x - verts[i].x) * f, y: verts[i].y + (verts[i + 1].y - verts[i].y) * f };
-    }
-    target -= segLen;
-  }
-  return verts[verts.length - 1];
-}
-
-/**
- * Wire routes with the pass-through net labels taken out of them.
- *
- * A net label / net connector is a node with one pin here, so a label dropped
- * onto an existing wire is imported as *two* edges — part → label, label → part
- * — and the label's coordinate becomes a wire endpoint. That is not what the
- * label means, and not what LTSpice stores: there a `FLAG` is a free-standing
- * marker and the wire runs on unbroken underneath. The consequence was that
- * nudging a label bent the wire it named.
- *
- * So a label is spliced out when it sits *on* the route between its two
- * neighbours: the two edges become one neighbour-to-neighbour route carrying
- * both edges' waypoints, and the label's own position leaves the path. It still
- * gets its `FLAG` at wherever the user put it.
- *
- * The test is geometric, not a count of edges. Two edges alone means nothing
- * here: the importer wires each net as a star from its first pin, so a label
- * terminating a stub (`U2` in 06-2-2_RC_HP1, a connector hanging off the R/C
- * junction) also has two. Splicing that one deleted its wire outright. Only a
- * label whose removal leaves the wire's shape intact is a pass-through; one that
- * is the end of the wire stays an endpoint, exactly as in LTSpice, and moving it
- * is meant to move the wire.
- */
-function spliceAnnotations(nodes: Node[], edges: Edge[], pins: PinLookup): Edge[] {
-  const annot = new Set(
-    nodes
-      .filter((n) => {
-        const t = (n.data as { componentType?: ComponentType }).componentType;
-        return t === "netlabel" || t === "netconnector";
-      })
-      .map((n) => n.id),
-  );
-  if (annot.size === 0) return edges;
-
-  // Keyed by id and rebuilt at the end: splicing an array while iterating other
-  // labels' indices into it is how a second label on the same net gets merged
-  // into the wrong wire.
-  const byId = new Map(edges.map((e) => [e.id, e]));
-  for (const id of annot) {
-    const inc = [...byId.values()].filter((e) => e.source === id || e.target === id);
-    // Only a label *between* two things is a pass-through. One edge means it
-    // terminates the wire; more than two means it is a junction, where removing
-    // it would silently rewire the net.
-    if (inc.length !== 2) continue;
-    const [p, q] = [{ e: inc[0] }, { e: inc[1] }];
-    // Orient both away from the label so the waypoints join up in path order.
-    const far = (e: Edge) => (e.source === id
-      ? { node: e.target, handle: e.targetHandle, flip: true }
-      : { node: e.source, handle: e.sourceHandle, flip: false });
-    const A = far(p.e), B = far(q.e);
-    if (!A.node || !B.node) continue;
-    const wps = (e: Edge, flip: boolean) => {
-      const w = ((e.data?.waypoints as Pt[] | undefined) ?? []).slice();
-      return flip ? w : w.reverse();
-    };
-    const merged: Edge = {
-      ...p.e,
-      id: `${p.e.id}+${q.e.id}`,
-      source: A.node, sourceHandle: A.handle,
-      target: B.node, targetHandle: B.handle,
-      data: {
-        ...p.e.data,
-        // A → (A-side waypoints) → (B-side waypoints) → B, with the label's own
-        // coordinate deliberately absent.
-        waypoints: [...wps(p.e, !A.flip), ...wps(q.e, B.flip)],
-        diagonal: !!(p.e.data?.diagonal || q.e.data?.diagonal),
-        sourceTap: A.flip ? p.e.data?.targetTap : p.e.data?.sourceTap,
-        targetTap: B.flip ? q.e.data?.targetTap : q.e.data?.sourceTap,
-      },
-    };
-
-    // Is this label a marker *on* a wire, or the end of one?
-    //
-    // For an imported label the file already answered that (`ascPassThrough`,
-    // set by the parser from the wire directions around the flag), and that
-    // answer is kept however far the user then drags the label — which is the
-    // whole point: moving a mid-wire label must not reshape its wire.
-    //
-    // A freshly placed label has no such record, so fall back to geometry: it is
-    // a pass-through only while it actually lies on the route between its two
-    // neighbours. The tolerance is deliberately under one grid step, so a label
-    // on a stub is not mistaken for one on the wire.
-    const marked = (nodes.find((n) => n.id === id)?.data as { ascPassThrough?: boolean })?.ascPassThrough;
-    if (marked === false) continue;
-    if (marked === undefined) {
-      const label = pins.at(id, "t");
-      const ca = pins.at(A.node, A.handle), cb = pins.at(B.node, B.handle);
-      if (!label || !ca || !cb) continue;
-      const verts = routeOf(merged, ca, cb, pins);
-      if (!projectsInside(label, verts, 6)) continue;
-    }
-
-    byId.delete(q.e.id);
-    byId.set(p.e.id, merged);
-  }
-  return [...byId.values()];
-}
-
-/**
- * Does `p` sit *along* the polyline `verts` rather than beyond one of its ends?
- *
- * Interiority, not distance, is what separates a label marking a wire from a
- * label terminating one. `UA2` in OP-nicht_inv_Verstärker hangs off a 16px stub
- * past a junction: it is only one grid step from the route, so any tolerance
- * loose enough to be useful also swallows it — and splicing it deleted its wire.
- * Its nearest point on the route is the route's *endpoint*; a genuine mid-wire
- * label's is not. Measured along the whole polyline's arc length, so a label
- * sitting exactly on an interior corner still counts as interior.
- *
- * The distance tolerance stays generous on top of that: a label may be dropped
- * near its wire rather than exactly on it, which is what lets the user move one
- * without the wire following.
- */
-function projectsInside(p: Pt, verts: Pt[], tol = 16, endEps = 4): boolean {
-  let best = Infinity, bestS = 0, run = 0, total = 0;
-  for (let i = 0; i < verts.length - 1; i++) {
-    total += Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
-  }
-  for (let i = 0; i < verts.length - 1; i++) {
-    const a = verts[i], b = verts[i + 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    const len = Math.sqrt(len2);
-    if (len2 === 0) continue;
-    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-    const d = Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y);
-    if (d < best) { best = d; bestS = run + t * len; }
-    run += len;
-  }
-  return best <= tol && bestS > endEps && bestS < total - endEps;
-}
-
 /**
  * Split a wire segment at every flag lying strictly inside it, returning the
  * pieces in order. Reproduces LTSpice's own convention — it stores a wire that
  * passes under a `FLAG` as two wires meeting at the flag's coordinate — so a
- * label spliced out of the routing (see {@link spliceAnnotations}) still writes
- * the same lines the file was read with.
+ * name lying on a wire still writes the same lines the file was read with.
  */
 function splitAtFlags(p: Pt, q: Pt, flags: Pt[]): [Pt, Pt][] {
   const dx = q.x - p.x, dy = q.y - p.y;
@@ -329,7 +177,11 @@ export class LTSpiceExporter {
       preserved.header?.["SHEET"] ?? "SHEET 1 880 680",
     ];
     const symbolLines: string[] = [];
-    const flagLines: string[] = [];
+    // Names first: each anchor is a `FLAG`, plus the `IOPIN` a connector's
+    // direction rides on. This is the whole of the file's naming — there is no
+    // second source any more, so nothing here has to be reconciled with
+    // something else that might also have written the name.
+    const flagLines: string[] = (preserved.anchors ?? []).flatMap(formatAnchor);
     // Pin coordinates in LTSpice space, keyed by port id `${compId}-${handle}`,
     // so wires and net-label flags attach exactly to the terminals.
     const pinCoord = new Map<string, Pt>();
@@ -354,27 +206,13 @@ export class LTSpiceExporter {
         ascRaw?: AscRaw;
       };
 
+      // Ground is the one name that is also a part, so its flag comes from the
+      // node. Every other name is an anchor and was written above.
       if (data.componentType === "ground") {
         const fx = Math.round(node.position.x + GROUND_PIN.dx);
         const fy = Math.round(node.position.y + GROUND_PIN.dy);
         flagLines.push(`FLAG ${fx} ${fy} 0`);
         pinCoord.set(`${node.id}-${GROUND_PIN.handle}`, { x: fx, y: fy });
-        continue;
-      }
-
-      // Net label → LTSpice `FLAG x y name` at its single pin. A net connector
-      // writes the same FLAG plus the `IOPIN x y In|Out|BiDir` line LTSpice pairs
-      // with it, exactly as it stores a flag whose Port Type is set. Port type
-      // `None` is a bare FLAG — LTSpice writes no IOPIN for it either, so such a
-      // connector round-trips back as a plain net label.
-      if (data.componentType === "netlabel" || data.componentType === "netconnector") {
-        const fx = Math.round(node.position.x + CENTER);
-        const fy = Math.round(node.position.y + CENTER);
-        const fallback = data.componentType === "netconnector" ? "PORT" : "NET";
-        flagLines.push(`FLAG ${fx} ${fy} ${String(data.label ?? fallback).trim() || fallback}`);
-        const portType = data.componentType === "netconnector" ? data.portType ?? "BiDir" : "None";
-        if (portType !== "None") flagLines.push(`IOPIN ${fx} ${fy} ${portType}`);
-        pinCoord.set(`${node.id}-t`, { x: fx, y: fy });
         continue;
       }
 
@@ -495,14 +333,12 @@ export class LTSpiceExporter {
     // segment twice. Emit each one once — duplicates piled up with every save, so
     // the file grew on every round-trip.
     //
-    // A net label sitting *on* a wire is spliced out of the route first: in
-    // LTSpice a `FLAG` is a marker at a coordinate that happens to touch a wire,
-    // not a joint in it. Our model gives the label a pin and wires the two
-    // neighbours to it, so dragging the label used to drag the wire's endpoint
-    // with it — moving `U1` in 06-2-2_RC_HP1 by 40px turned a straight wire into
-    // a diagonal. Routing neighbour-to-neighbour and letting the flag land on the
-    // result keeps the label free to move anywhere along (or near) the wire
-    // without touching it.
+    // Nothing has to be taken *out* of the routes any more. A name used to be a
+    // node with a pin, so a label dropped on a wire arrived as two edges meeting
+    // at it, and the exporter had to splice it back out or dragging the label
+    // bent the wire (moving `U1` in 06-2-2_RC_HP1 by 40px turned a straight wire
+    // into a diagonal). An anchor is not in the topology at all, so the wire it
+    // names is simply the wire that was drawn.
     // Pins measured in LTSpice symbol space — *not* the canvas's `getNodePins`,
     // which differs by a few pixels (see wireRoutes for why that matters).
     const symbolPins: PinLookup = {
@@ -510,10 +346,7 @@ export class LTSpiceExporter {
       axis: (nodeId, handle) => pinAxis.get(`${nodeId}-${handle}`),
     };
 
-    const routes = spliceAnnotations(nodes, edges, symbolPins);
-    // Flag coordinates written so far (grounds, net labels, connectors), used to
-    // break wires the way LTSpice does. Wire *labels* are placed further down —
-    // they are docked onto a wire that already exists, so they cannot split it.
+    // Flag coordinates, used to break wires the way LTSpice does.
     const flagPoints: Pt[] = flagLines
       .map((l) => l.trim().split(/\s+/))
       .filter((p) => p[0] === "FLAG")
@@ -522,7 +355,7 @@ export class LTSpiceExporter {
 
     const wireSeen = new Set<string>();
     const wireLines: string[] = [];
-    for (const { verts } of wireRoutes(routes, symbolPins)) {
+    for (const { verts } of wireRoutes(edges, symbolPins)) {
       for (let i = 0; i < verts.length - 1; i++) {
         const p = verts[i], q = verts[i + 1];
         if (p.x === q.x && p.y === q.y) continue;
@@ -553,57 +386,6 @@ export class LTSpiceExporter {
       if (wireSeen.has(fwd) || wireSeen.has(rev)) continue;
       wireSeen.add(fwd);
       wireLines.push(`WIRE ${fwd}`);
-    }
-
-    // Both flag sources below are *derived*: nothing on the sheet was placed to
-    // make them, they exist so a saved file can carry a name the format has
-    // nowhere else to keep. A fragment must not have them (see AscPreserved).
-    const derivedFlags = preserved.derivedFlags !== false;
-
-    // Wire-carried net *names* (the editor's `visible` label on a wire) → a
-    // `FLAG` at the label's dock point. LTSpice has no notion of a label owned by
-    // a wire, so this is its faithful representation: a flag sitting on the wire.
-    // Ports are not wire attributes here — a net connector is its own node and
-    // wrote its FLAG/IOPIN above. Records the net so the named-net fallback below
-    // doesn't add a second flag for it.
-    const labelledNets = new Set<string>();
-    for (const node of nodes) {
-      const t = (node.data as { componentType?: ComponentType }).componentType;
-      if (t !== "netlabel" && t !== "netconnector") continue;
-      const netId = circuit?.components?.get(node.id)?.ports?.[0]?.netId;
-      if (netId) labelledNets.add(netId);
-    }
-    if (circuit?.nets && derivedFlags) {
-      for (const edge of edges) {
-        const d = edge.data as { showLabel?: boolean; labelT?: number; waypoints?: Pt[] } | undefined;
-        if (!d?.showLabel) continue;
-        const netId = circuit.components.get(edge.source)?.ports?.find((p: { id: string; netId?: string }) => p.id === `${edge.source}-${edge.sourceHandle}`)?.netId;
-        if (!netId || netId === "0" || labelledNets.has(netId)) continue;
-        const rawName = circuit.nets.get(netId)?.nodeLabel;
-        const name = (rawName ?? netId).trim();
-        if (!name) continue;
-        const a = pinCoord.get(`${edge.source}-${edge.sourceHandle}`);
-        const b = pinCoord.get(`${edge.target}-${edge.targetHandle}`);
-        if (!a || !b) continue;
-        const dock = dockPoint(routeOf(edge, a, b, symbolPins), typeof d.labelT === "number" ? d.labelT : 0.5);
-        flagLines.push(`FLAG ${Math.round(dock.x)} ${Math.round(dock.y)} ${name}`);
-        labelledNets.add(netId);
-      }
-    }
-
-    // Named nets → FLAGs, for a net whose name is *not* already carried by a
-    // net-label terminal or a wire label (both wrote their own FLAG above).
-    // Emitting one here as well gave every labelled net two flags, and each
-    // save/load cycle stacked another label on the same spot — the file grew and
-    // the schematic collected invisible duplicates.
-    if (circuit?.nets && derivedFlags) {
-      for (const [netId, net] of circuit.nets as Map<string, { nodeLabel: string; connectedPortIds: Set<string> }>) {
-        if (netId === "0" || net.nodeLabel === netId || labelledNets.has(netId)) continue;
-        for (const portId of net.connectedPortIds) {
-          const c = pinCoord.get(portId);
-          if (c) { flagLines.push(`FLAG ${c.x} ${c.y} ${net.nodeLabel}`); break; }
-        }
-      }
     }
 
     const dataflagLines = dataFlags.map((df) => `DATAFLAG ${Math.round(df.x)} ${Math.round(df.y)} "${df.expr}"`);

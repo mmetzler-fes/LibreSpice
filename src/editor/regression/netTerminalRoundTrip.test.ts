@@ -68,7 +68,7 @@ function terminals(): string[] {
 
 /** Save to `.asc` and read it back, exactly as the app's Save→Open does. */
 async function roundTrip(): Promise<string> {
-  const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+  const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
   st().clearCircuit();
   st().loadFromAsc(asc);
   await tick();
@@ -377,7 +377,7 @@ const CASES: Case[] = [
       st().renameNet(netId, "UB");
       await tick();
 
-      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
       if (!/^FLAG\s+-?\d+\s+-?\d+\s+UB$/m.test(asc)) {
         return fail(`the name never reached the file:\n${asc}`);
       }
@@ -418,7 +418,7 @@ const CASES: Case[] = [
       // exporter's. If it is present but the terminal does not return, the
       // parser is at fault. Splitting the two makes the failure say which.
       await danglingTerminal("netlabel", "Q4");
-      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags);
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, [], [], { anchors: st().netAnchors });
       if (!/^FLAG\s+-?\d+\s+-?\d+\s+Q4$/m.test(asc)) {
         fail(`no "FLAG x y Q4" line in the export:\n${asc}`);
       }

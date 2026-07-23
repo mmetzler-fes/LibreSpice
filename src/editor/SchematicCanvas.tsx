@@ -386,8 +386,8 @@ function CanvasInner() {
     const onCopy = (e: ClipboardEvent, cut: boolean) => {
       // A dialog's text field owns its own clipboard behaviour.
       if (editingText(e.target)) return;
-      const { nodes: ns, edges: es, circuit: c } = useCircuitStore.getState();
-      const fragment = buildFragment(ns, es, c);
+      const { nodes: ns, edges: es, circuit: c, netAnchors: as } = useCircuitStore.getState();
+      const fragment = buildFragment(ns, es, c, as);
       if (!fragment) return;
       e.clipboardData?.setData("text/plain", fragment);
       e.preventDefault();

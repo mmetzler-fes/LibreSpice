@@ -44,9 +44,9 @@ const FIDELITY_BUDGET: Record<string, number> = {
   "RL-Parallelkompensation4b.asc": 2,
   "RLC_Reihenschwingkreis.asc": 2,
   "Spannungsteiler_unbelastet.asc": 2,
-  "TGM-Abi2025_A2-2-6.asc": 6,
+  "TGM-Abi2025_A2-2-6.asc": 0,
   "TGM-Abi2025_A2-2-9.asc": 2,
-  "test.asc": 4,
+  "test.asc": 3,
   "test_belastungskennlinie.asc": 6,
 };
 
@@ -62,7 +62,7 @@ function exportCurrent(): string {
   const s = st();
   return LTSpiceExporter.export(
     s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
+    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
   );
 }
 
@@ -195,10 +195,12 @@ export async function runAscFidelityTests(): Promise<{ total: number; passed: nu
     fail("rotating a part touches only that part", `threw: ${(e as Error).message}`);
   }
 
-  // ── 3. Moving a net label must not move its wire ───────────────────────────
+  // ── 3. Moving a name must not move its wire ────────────────────────────────
   // A `FLAG` marks a coordinate on a wire; it is not a joint in it. Dragging the
   // label used to drag the wire's endpoint, which is what turned a straight run
-  // into a diagonal in the reported schematic.
+  // into a diagonal in the reported schematic. Now that a name is an anchor
+  // rather than a node with a pin, this holds by construction — the check stays
+  // because it is the regression that motivated the whole model.
   total++;
   try {
     const src = fs.readFileSync(path.join(dir, "06-2-2_RC_HP1_orig.asc"), "latin1");
@@ -208,21 +210,20 @@ export async function runAscFidelityTests(): Promise<{ total: number; passed: nu
 
     const before = wireGeometry(exportCurrent());
 
-    // `U1` sits mid-wire between the source and the capacitor — the pass-through
-    // case. Nudge it along the wire and off it by a few pixels.
-    const label = st().nodes.find((n) => (n.data as { label?: string }).label === "U1");
-    if (!label) throw new Error("no U1 net label in the fixture");
-    st().setNodes(st().nodes.map((n) =>
-      n.id === label.id ? { ...n, position: { x: n.position.x + 24, y: n.position.y - 8 } } : n));
+    // `U1` sits mid-wire between the source and the capacitor — the case that
+    // used to bend the wire. Nudge it along the wire and off it by a few pixels.
+    const label = st().netAnchors.find((a) => a.name === "U1");
+    if (!label) throw new Error("no U1 name in the fixture");
+    st().moveNetAnchor(label.id, label.x + 24, label.y - 8);
     await tick(); await tick();
 
     const after = wireGeometry(exportCurrent());
     if (before.join("\n") !== after.join("\n")) {
-      fail("moving a net label leaves the wire alone",
+      fail("moving a name leaves the wire alone",
         `wire geometry changed:\n  before:\n    ${before.join("\n    ")}\n  after:\n    ${after.join("\n    ")}`);
     }
   } catch (e) {
-    fail("moving a net label leaves the wire alone", `threw: ${(e as Error).message}`);
+    fail("moving a name leaves the wire alone", `threw: ${(e as Error).message}`);
   }
 
   return { total, passed: total - failures.length, failures };

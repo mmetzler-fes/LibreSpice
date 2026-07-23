@@ -37,7 +37,7 @@ const CASES: Case[] = [
       const id = st().addTextBox(100, 200);
       st().updateTextBox(id, { text: "Zeile 1\nZeile 2", width: 321, height: 89, markdown: true });
       const before = st().textBoxes[0];
-      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes);
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, [], { anchors: st().netAnchors });
       st().clearCircuit();
       st().loadFromAsc(asc);
       await tick();
@@ -210,7 +210,7 @@ RECTANGLE Normal 224 320 -16 32 1
       if ([s.x1, s.y1, s.x2, s.y2].join() !== "224,320,-16,32") fail(`corners ${[s.x1, s.y1, s.x2, s.y2].join()}`);
       if (s.dash !== 1) fail(`dash ${s.dash}, expected 1`);
 
-      const out = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, st().sheetShapes);
+      const out = LTSpiceExporter.export(st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags, st().textBoxes, st().sheetShapes, { anchors: st().netAnchors });
       if (!/^RECTANGLE Normal 224 320 -16 32 1$/m.test(out)) fail(`not written back:\n${out}`);
     },
   },

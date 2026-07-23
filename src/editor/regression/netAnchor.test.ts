@@ -1,33 +1,62 @@
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
-import { formatAnchor, isGroundAnchor, anchorsFromNodes } from "@core/circuit/netAnchor.js";
-import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
-import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
-import { getNodePins } from "@editor/pinGeometry.js";
+import { formatAnchor, isGroundAnchor, anchorsFromNodes, type NetAnchor } from "@core/circuit/netAnchor.js";
+import { netRoutes, anchorNets } from "@editor/anchorNets.js";
 import { withSymbols } from "./withSymbols.js";
 
 /**
- * Do net anchors carry everything the net-label *nodes* carry?
+ * Names are coordinates, and this is what holds that model to account.
  *
- * This is the evidence step of moving labels out of the topology. A `.asc`
- * `FLAG` is a name at a coordinate; we model it as a node with a pin, joined by
- * edges, and that one decision is behind the label dragging its wire, the
- * `ascPassThrough` bookkeeping, splicing labels out of routes before writing
- * them, and a second name on a net overwriting the first.
+ * A `.asc` `FLAG` is a name at a point. We used to model it as a node with a
+ * pin, joined by edges — part of the topology — and that one decision was behind
+ * the label dragging its wire, the splicing of labels out of routes before
+ * writing them, and a second name on a net overwriting the first. Anchors
+ * replaced it: a name owns no pin, no edge and no netlist line, and finds its
+ * net by lying on one.
  *
- * Anchors are the replacement, and they are introduced *beside* the nodes rather
- * than instead of them. Before anything switches over, this suite checks the
- * claim that makes the switch safe: for every bundled schematic, the anchors the
- * parser collected reproduce exactly the `FLAG` and `IOPIN` lines the exporter
- * writes today — same names, same coordinates, same directions.
+ * Three claims are checked here, over every bundled schematic:
  *
- * If that holds across the whole corpus, the anchor set is a faithful
- * representation of the file's naming and the exporter can be switched to it. If
- * it does not, the failing file names precisely what the model still misses.
+ *   1. what the store holds is what the file gets — the anchors (plus ground,
+ *      the one name that is still a part) reproduce every `FLAG`/`IOPIN` line
+ *      the exporter writes;
+ *   2. the names survive the trip — saving and re-reading yields the same set,
+ *      so no name is invented, dropped or moved by a round trip;
+ *   3. the names name the right nets — each anchor resolves, geometrically, to
+ *      a net that actually carries its name.
+ *
+ * Plus the editing case that the old node model got wrong: moving a name must
+ * not move the wire, and must re-resolve to whatever it now lies on.
  */
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const st = () => useCircuitStore.getState();
+
+/**
+ * Every name on the sheet: the anchors, plus ground.
+ *
+ * Ground is the one flag that is also a part — on our sheet it is a drawn symbol
+ * with a pin the netlist ties to node 0 — so its anchor is derived back from the
+ * node. `anchorsFromNodes` is that derivation, and the union is what the file
+ * gets.
+ */
+function allAnchors(s: ReturnType<typeof st>): NetAnchor[] {
+  return [...anchorsFromNodes(s.nodes), ...s.netAnchors];
+}
+
+/** The net a port sits on, as the store keys them. */
+function portNetOf(circuit: any, portId: string): string | undefined {
+  const compId = portId.slice(0, portId.lastIndexOf("-"));
+  return circuit.components.get(compId)?.ports.find((p: { id: string }) => p.id === portId)?.netId ?? undefined;
+}
+
+/** Save the current store exactly as the Save button does. */
+function exportCurrent(): string {
+  const s = st();
+  return LTSpiceExporter.export(
+    s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
+    { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
+  );
+}
 
 /** `FLAG`/`IOPIN` lines, sorted — their order in the file carries no meaning. */
 function flagLines(text: string): string[] {
@@ -51,10 +80,10 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       ? fs.readdirSync(dir).filter((f: string) => f.endsWith(".asc")).sort()
       : [];
 
-    // ── The anchors reproduce what the exporter writes ──────────────────────
+    // ── 1. What the store holds is what the file gets ──────────────────────
     for (const file of files) {
       total++;
-      const name = `anchors reproduce the flags of ${file}`;
+      const name = `the store's names are the file's flags: ${file}`;
       try {
         st().clearCircuit();
         st().loadFromAsc(fs.readFileSync(path.join(dir, file), "latin1"));
@@ -63,9 +92,9 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
         const s = st();
         const written = flagLines(LTSpiceExporter.export(
           s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
+          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires, anchors: s.netAnchors },
         ));
-        const fromAnchors = anchorsFromNodes(s.nodes).flatMap(formatAnchor).sort();
+        const fromAnchors = allAnchors(s).flatMap(formatAnchor).sort();
 
         if (written.join("\n") !== fromAnchors.join("\n")) {
           const only = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
@@ -79,68 +108,88 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       }
     }
 
-    // ── Geometry finds the same net the topology does ──────────────────────
-    // The mechanism the switch stands or falls on. Today a label's net comes
-    // from the edge it hangs on; an anchor has no edge and must find its net by
-    // lying on a wire, the way LTSpice does. So: for every named flag in every
-    // bundled schematic, does the geometric answer match the one the wired-up
-    // label node already gives?
+    // ── 2. The names survive the round trip ────────────────────────────────
+    // Saving and re-reading must yield the same names at the same points. This
+    // is the check the old model could not have passed quietly: a label was a
+    // node on the net, so a net carrying two names lost one of them to
+    // `applyNetNames` and the file came back a name short.
     for (const file of files) {
       total++;
-      const name = `anchors resolve to the same nets in ${file}`;
+      const name = `names survive a save and re-read: ${file}`;
+      try {
+        st().clearCircuit();
+        st().loadFromAsc(fs.readFileSync(path.join(dir, file), "latin1"));
+        await tick(); await tick();
+        const before = allAnchors(st()).flatMap(formatAnchor).sort();
+
+        const saved = exportCurrent();
+        st().clearCircuit();
+        st().loadFromAsc(saved);
+        await tick(); await tick();
+        const after = allAnchors(st()).flatMap(formatAnchor).sort();
+
+        if (before.join("\n") !== after.join("\n")) {
+          const only = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
+          fail(name,
+            `${before.length} names in, ${after.length} out\n` +
+            `    lost:  ${only(before, after).slice(0, 6).join(" | ") || "—"}\n` +
+            `    gained: ${only(after, before).slice(0, 6).join(" | ") || "—"}`);
+        }
+      } catch (e) {
+        fail(name, `threw: ${(e as Error).message}`);
+      }
+    }
+
+    // ── 3. Each name lands on a net that carries it ────────────────────────
+    // The one genuinely new mechanism: with no edge to ride on, an anchor finds
+    // its net by lying on a wire or a pin. So every anchor that resolves must
+    // resolve to a net that really is named that — either the winning name or
+    // one of its aliases, both of which the file records on purpose.
+    for (const file of files) {
+      total++;
+      const name = `every name lands on a net that carries it: ${file}`;
       try {
         st().clearCircuit();
         st().loadFromAsc(fs.readFileSync(path.join(dir, file), "latin1"));
         await tick(); await tick();
         const s = st();
 
-        // Wires as the canvas draws them — flow coordinates, so the anchor is
-        // measured against the wire the user actually sees (see wireRoutes).
-        const flowPins: PinLookup = {
-          at: (nodeId, handle) => {
-            const n = s.nodes.find((x) => x.id === nodeId);
-            if (!n) return undefined;
-            const p = getNodePins(n).find((q) => q.handleId === handle);
-            return p ? { x: p.x, y: p.y } : undefined;
-          },
-        };
-        const netOfEdge = (e: { source: string; sourceHandle?: string | null }) =>
-          s.circuit.components.get(e.source)?.ports.find((p) => p.id === `${e.source}-${e.sourceHandle}`)?.netId;
-        const routes: RoutedNet[] = wireRoutes(s.edges, flowPins)
-          .map(({ edge, verts }) => ({ netId: netOfEdge(edge) ?? "", verts }))
-          .filter((r) => r.netId !== "");
-
-        const mismatches: string[] = [];
-        for (const a of anchorsFromNodes(s.nodes)) {
-          if (isGroundAnchor(a)) continue; // ground stays a component for now
-          // The label node the parser made for this same flag.
-          const node = s.nodes.find((n) => {
-            const d = n.data as { componentType?: string; label?: string };
-            return (d.componentType === "netlabel" || d.componentType === "netconnector")
-              && d.label === a.name
-              && Math.abs(n.position.x + 40 - a.x) < 1 && Math.abs(n.position.y + 40 - a.y) < 1;
-          });
-          if (!node) continue;
-          const viaTopology = s.circuit.components.get(node.id)?.ports[0]?.netId ?? null;
-          const viaGeometry = resolveAnchor(a, routes);
-          // A label on a wire nobody else touches has no edge at all, so the
-          // topology gives it a net of its own that geometry cannot see. Only
-          // disagreement about a *shared* net matters here.
-          if (viaTopology && viaGeometry && viaTopology !== viaGeometry) {
-            mismatches.push(`${a.name}@${a.x},${a.y}: topology ${viaTopology}, geometry ${viaGeometry}`);
-          }
+        const routes = netRoutes(s.nodes, s.edges, { netOf: (id) => portNetOf(s.circuit, id) });
+        const resolved = anchorNets(s.netAnchors, routes);
+        // Every name sitting on each net, so an alias counts as carried too.
+        const namesOn = new Map<string, string[]>();
+        for (const a of s.netAnchors) {
+          const nid = resolved.get(a.id);
+          if (nid) namesOn.set(nid, [...(namesOn.get(nid) ?? []), a.name]);
         }
-        if (mismatches.length) fail(name, mismatches.slice(0, 6).join("\n    "));
+
+        const wrong: string[] = [];
+        for (const a of s.netAnchors) {
+          const nid = resolved.get(a.id);
+          // A name reaching nothing is allowed and LTSpice writes them:
+          // `leitungstest.asc` parks `x3` and `nc3` clear of every wire.
+          if (!nid) continue;
+          const net = s.circuit.nets.get(nid);
+          if (!net) { wrong.push(`${a.name}@${a.x},${a.y}: net ${nid} does not exist`); continue; }
+          const carried = namesOn.get(nid) ?? [];
+          // Ground takes any number of names and keeps calling itself GND —
+          // `OP-inv_Verstärker.asc` labels the op-amp's earthed input `U+`, which
+          // is a name on net 0, not a rival name for it.
+          const ok = nid === "0" || net.nodeLabel === a.name || carried.includes(net.nodeLabel) || isGroundAnchor(a);
+          if (!ok) wrong.push(`${a.name}@${a.x},${a.y}: net reads "${net.nodeLabel}"`);
+        }
+        if (wrong.length) fail(name, wrong.slice(0, 6).join("\n    "));
       } catch (e) {
         fail(name, `threw: ${(e as Error).message}`);
       }
     }
 
-    // ── The projection holds while the schematic is edited ──────────────────
-    // Anchors used to be a snapshot taken at load, which was fine for proving
-    // the idea and useless for building on: the moment a label moved, the list
-    // described where the name *had been*. Derived from the parts instead, it
-    // cannot drift — and that is what this checks, by editing and asking again.
+    // ── Moving a name moves nothing else ───────────────────────────────────
+    // The failure the whole model exists to prevent. A label was a node with a
+    // pin, so nudging it dragged the wire's endpoint along — moving `U1` in
+    // 06-2-2_RC_HP1 by 40px turned a straight wire into a diagonal. An anchor is
+    // not in the topology, so the wires must come out byte-identical, and the
+    // name must re-resolve to whatever it now lies on.
     total++;
     try {
       const file = path.resolve("examples", "05-2-3_Brummspannung1.asc");
@@ -148,45 +197,52 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       st().loadFromAsc(fs.readFileSync(file, "latin1"));
       await tick(); await tick();
 
-      const agrees = (what: string) => {
-        const s = st();
-        const written = flagLines(LTSpiceExporter.export(
-          s.nodes, s.edges, s.spiceDirectives, s.circuit, s.dataFlags, s.textBoxes, s.sheetShapes,
-          { directiveRaw: s.directiveRaw, header: s.ascHeader, orphanWires: s.ascOrphanWires },
-        ));
-        const derived = anchorsFromNodes(s.nodes).flatMap(formatAnchor).sort();
-        if (written.join("\n") !== derived.join("\n")) {
-          fail("anchors keep up with edits", `after ${what}:\n    written: ${written.join(" | ")}\n    derived: ${derived.join(" | ")}`);
-          return false;
-        }
-        return true;
-      };
+      const wiresOf = (asc: string) => asc.split(/\r?\n/).filter((l) => /^WIRE\s/.test(l.trim())).sort();
+      const wiresBefore = wiresOf(exportCurrent());
 
-      if (agrees("loading")) {
-        // Move a label: the anchor has to move with it, not stay where the file
-        // put it.
-        const label = st().nodes.find((n) => (n.data as { label?: string }).label === "UA1")!;
-        st().setNodes(st().nodes.map((n) =>
-          n.id === label.id ? { ...n, position: { x: n.position.x + 48, y: n.position.y - 16 } } : n));
-        await tick();
-        if (agrees("moving a label")) {
-          // Rename one: same again for the name itself.
-          st().updateComponentProperty(label.id, "label", "UAx");
-          await tick();
-          if (agrees("renaming a label")) {
-            // And a ground, whose flag sits at its pin rather than its centre.
-            const gnd = st().nodes.find((n) => (n.data as { componentType?: string }).componentType === "ground");
-            if (gnd) {
-              st().setNodes(st().nodes.map((n) =>
-                n.id === gnd.id ? { ...n, position: { x: n.position.x - 32, y: n.position.y } } : n));
-              await tick();
-              agrees("moving a ground");
-            }
-          }
-        }
+      const ua1 = st().netAnchors.find((a) => a.name === "UA1");
+      if (!ua1) throw new Error("no UA1 anchor in the fixture");
+
+      st().moveNetAnchor(ua1.id, ua1.x + 48, ua1.y - 16);
+      await tick();
+      const wiresAfter = wiresOf(exportCurrent());
+      if (wiresBefore.join("\n") !== wiresAfter.join("\n")) {
+        fail("moving a name leaves the wires alone",
+          `${wiresBefore.length} wires before, ${wiresAfter.length} after — the name is still in the topology`);
+      }
+
+      // And the flag itself did move, at the point the user dropped it.
+      total++;
+      const moved = st().netAnchors.find((a) => a.id === ua1.id);
+      if (!moved || moved.x !== ua1.x + 48 || moved.y !== ua1.y - 16) {
+        fail("the name itself moved", `expected ${ua1.x + 48},${ua1.y - 16}, got ${moved?.x},${moved?.y}`);
+      }
+      total++;
+      if (!exportCurrent().includes(`FLAG ${ua1.x + 48} ${ua1.y - 16} UA1`)) {
+        fail("the moved name is written at its new point", "no FLAG at the new coordinate");
+      }
+
+      // Renaming goes through the anchor and reaches the file.
+      total++;
+      st().updateNetAnchor(ua1.id, { name: "UAx" });
+      await tick();
+      const renamed = exportCurrent();
+      if (!renamed.includes("UAx") || renamed.includes("UA1")) {
+        fail("renaming a name reaches the file", "the file still reads UA1, or never got UAx");
+      }
+
+      // Deleting it takes the name off the net — and leaves the wires standing.
+      total++;
+      st().removeNetAnchor(ua1.id);
+      await tick();
+      const afterDelete = exportCurrent();
+      if (afterDelete.includes("UAx")) fail("deleting a name removes its flag", "the flag is still in the file");
+      total++;
+      if (wiresOf(afterDelete).join("\n") !== wiresBefore.join("\n")) {
+        fail("deleting a name leaves the wires alone", "the wires changed when the name went away");
       }
     } catch (e) {
-      fail("anchors keep up with edits", `threw: ${(e as Error).message}`);
+      fail("moving a name leaves the wires alone", `threw: ${(e as Error).message}`);
     }
 
     // ── The shape of an anchor ─────────────────────────────────────────────

@@ -93,7 +93,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
 
     const pastedCountBefore = st().edges.length;
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
-    const fragment = buildFragment(st().nodes, st().edges, st().circuit);
+    const fragment = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
     check("a fragment is produced", fragment.length > 0 && isFragment(fragment));
     check("the fragment carries the parts", (fragment.match(/^SYMBOL /gm) ?? []).length === deviceCount,
       `${(fragment.match(/^SYMBOL /gm) ?? []).length} SYMBOL lines for ${deviceCount} devices`);
@@ -160,7 +160,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
       st().loadFromAsc(fs.readFileSync(path.resolve("examples", "05-2-3_Brummspannung1.asc"), "latin1"));
       await tick(); await tick();
       st().setNodes(st().nodes.map((x) => ({ ...x, selected: want.has(String((x.data as { label?: string }).label)) })));
-      const frag = buildFragment(st().nodes, st().edges, st().circuit);
+      const frag = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
       const idsBefore = new Set(st().nodes.map((x) => x.id));
       st().pasteFragment(frag, { x: 100, y: 600 });
       await tick(); await tick();
@@ -199,7 +199,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     {
       const want = new Set(["R1", "C1"]);
       st().setNodes(st().nodes.map((x) => ({ ...x, selected: want.has(String((x.data as { label?: string }).label)) })));
-      const partial = buildFragment(st().nodes, st().edges, st().circuit);
+      const partial = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
 
       check("a partial copy carries only the parts picked",
         (partial.match(/^SYMBOL /gm) ?? []).length === 2,
@@ -225,7 +225,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     await tick(); await tick();
     const one = st().nodes.find((x) => (x.data as { label?: string }).label === "R1")!;
     st().setNodes(st().nodes.map((x) => ({ ...x, selected: x.id === one.id })));
-    const single = buildFragment(st().nodes, st().edges, st().circuit);
+    const single = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
     check("a single part copies without its wires",
       (single.match(/^SYMBOL /gm) ?? []).length === 1 && !/^WIRE /m.test(single),
       `fragment was:\n${single}`);
@@ -251,7 +251,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     } as never);
     await tick();
 
-    const frag = buildFragment(st().nodes, st().edges, st().circuit);
+    const frag = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
     check("the fragment carries the .subckt", /\.subckt\s+MYAMP/i.test(frag),
       `no model in:\n${frag}`);
     check("the model stays on one TEXT line", (frag.match(/^TEXT .*\.subckt/gim) ?? []).length === 1,
@@ -295,7 +295,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     await tick(); await tick();
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
 
-    const fragment = buildFragment(st().nodes, st().edges, st().circuit);
+    const fragment = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
     st().setFragmentClipboard(fragment);
     check("a copy is remembered in-app", st().fragmentClipboard === fragment);
 
@@ -338,7 +338,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     };
 
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
-    st().pasteFragment(buildFragment(st().nodes, st().edges, st().circuit), { x: 100, y: 500 });
+    st().pasteFragment(buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors), { x: 100, y: 500 });
     await tick(); await tick();
     st().regenerateNetlist();
     const after = st().netlist.split("\n").filter((l) => /^[A-Z]/i.test(l) && !/^\./.test(l));
@@ -381,7 +381,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     const partsBefore = st().nodes.length;
 
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
-    const fragment = buildFragment(st().nodes, st().edges, st().circuit);
+    const fragment = buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors);
 
     // What a copy does: fill both, so the block can be put down now *and* pasted
     // into another schematic later.
@@ -421,7 +421,7 @@ export async function runClipboardTests(): Promise<{ total: number; passed: numb
     await tick(); await tick();
     st().setNodes(st().nodes.map((n) => ({ ...n, selected: true })));
 
-    const { nodes, edges } = LTSpiceParser.parse(buildFragment(st().nodes, st().edges, st().circuit));
+    const { nodes, edges } = LTSpiceParser.parse(buildFragment(st().nodes, st().edges, st().circuit, st().netAnchors));
     const raw = buildSchematicSvg(nodes, edges, "en");
     const ghost = ghostify(raw);
 

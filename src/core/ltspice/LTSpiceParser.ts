@@ -1,12 +1,12 @@
 import type { Node, Edge } from "@xyflow/react";
-import { createSpiceComponent, createSubcircuitComponent, getValueLabel, isNetTerminalId } from "@editor/componentFactory.js";
+import { createSpiceComponent, createSubcircuitComponent, getValueLabel } from "@editor/componentFactory.js";
 import { getNodePins } from "@editor/pinGeometry.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import { symbolToType, CENTER, GROUND_PIN, parseRot, offsetsForNode, symbolToNode, centeringFor } from "./ltspiceGeometry.js";
 import { symbolByName } from "@sym/asyParser.js";
 import type { ComponentType } from "@editor/nodes/ComponentNode.js";
-import { PORT_TYPES, type NetConnector, type PortType } from "@core/components/special/Special.js";
+import { PORT_TYPES, type PortType } from "@core/components/special/Special.js";
 import { decodeTextBox, type TextBox } from "@core/circuit/textBox.js";
 import type { AscRaw, DirectiveRaw } from "./ascPreserve.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
@@ -81,7 +81,7 @@ interface Wire { x1: number; y1: number; x2: number; y2: number; netId?: number 
 interface Pin { compId: string; handle: string; x: number; y: number; netId?: number }
 
 export class LTSpiceParser {
-  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; netNames: { compId: string; handle: string; name: string }[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[] } {
+  static parse(content: string, opts: { idStart?: number } = {}): { nodes: Node[]; edges: Edge[]; directives: string; components: SpiceComponent[]; dataFlags: DataFlag[]; textBoxes: TextBox[]; sheetShapes: SheetShape[]; directiveRaw: DirectiveRaw[]; header: Record<string, string>; orphanWires: string[]; anchors: NetAnchor[] } {
     const lines = content.split(/\r?\n/);
     const nodes: Node[] = [];
     const components: SpiceComponent[] = [];
@@ -90,9 +90,6 @@ export class LTSpiceParser {
     const dataFlags: DataFlag[] = [];
     const textBoxes: TextBox[] = [];
     const sheetShapes: SheetShape[] = [];
-    // Named-flag positions, so we can also anchor the net name on a real
-    // component pin (robust even if the terminal's edge is dropped at runtime).
-    const namedFlags: { name: string; x: number; y: number }[] = [];
     /** Flags already imported, keyed x,y,name — see the FLAG handler. */
     const seenFlags = new Set<string>();
     /** IOPIN coordinates ("x,y") → port type: a FLAG at one of these is a connector. */
@@ -104,10 +101,10 @@ export class LTSpiceParser {
     /** The file's `Version` / `SHEET` lines, written back as-is. */
     const header: Record<string, string> = {};
     /**
-     * Every `FLAG` as a coordinate-anchored name (see netAnchor). Collected
-     * alongside the net-label nodes, not instead of them — the differential test
-     * proves the two agree before anything is switched over. Ground is included:
-     * in the file it is simply a flag named `0`.
+     * Every named `FLAG` as what it is: a name at a coordinate (see netAnchor).
+     * These replace the net-label nodes the parser used to build — the anchors
+     * were proven to reproduce every `FLAG`/`IOPIN` line across all 91 bundled
+     * schematics before the switch. Ground is the exception and stays a part.
      */
     const anchors: NetAnchor[] = [];
 
@@ -169,11 +166,19 @@ export class LTSpiceParser {
         const flagKey = `${x},${y},${flagName}`;
         if (seenFlags.has(flagKey)) continue;
         seenFlags.add(flagKey);
-        if (!isNaN(x) && !isNaN(y) && flagName) {
+        // Ground is excluded: it comes back as a component below, and its flag is
+        // derived from that node again on export. An anchor here as well would
+        // write the `FLAG x y 0` line twice.
+        if (!isNaN(x) && !isNaN(y) && flagName && flagName !== "0") {
           anchors.push({ id: `anchor_${anchors.length + 1}`, x, y, name: flagName });
         }
 
         if (flagName === "0") {
+          // Ground is the one flag that stays a part. In the file it is a flag
+          // named `0` like any other, but on our sheet it is a drawn symbol with
+          // a pin that the netlist connects to node 0 — so it is imported as the
+          // component it is, and its anchor is derived back from the node on
+          // export (see anchorsFromNodes).
           const id = `ground_${compIdCounter++}`;
           const gx = x - GROUND_PIN.dx, gy = y - GROUND_PIN.dy;
           const comp = createSpiceComponent("ground", id, "0", gx, gy);
@@ -182,19 +187,12 @@ export class LTSpiceParser {
           // terminal lands exactly on the LTSpice flag coordinate.
           nodes.push({ id, type: "component", position: { x: gx, y: gy }, data: { componentType: "ground", label: "0" } });
           pins.push({ compId: id, handle: "gnd", x, y });
-        } else if (flagName) {
-          // Named net label (e.g. UB-) → a placeable NetLabel terminal at the
-          // flag point. Its single pin sits on the flag coordinate so the wire
-          // routing connects it (exactly like ground), and its name is imposed
-          // on that net (see SpiceComponent.getNetLabel), so same-named labels
-          // collapse to one node.
-          const id = `netlabel_${compIdCounter++}`;
-          const comp = createSpiceComponent("netlabel", id, flagName, x - CENTER, y - CENTER);
-          components.push(comp);
-          nodes.push({ id, type: "component", position: { x: x - CENTER, y: y - CENTER }, data: { componentType: "netlabel", label: flagName } });
-          pins.push({ compId: id, handle: "t", x, y });
-          namedFlags.push({ name: flagName, x, y });
         }
+        // Every other named flag is *only* the anchor pushed above: a name at a
+        // point, with no node, no pin and no edge. Which net it names is decided
+        // by what lies under it (see anchorNets), the same way LTSpice decides it
+        // — and unlike the terminal node this replaces, it cannot drag a wire
+        // along when it is moved, because it is not part of the topology.
       } else if (cmd === "IOPIN") {
         // `IOPIN x y {In|Out|BiDir}` — pairs with the FLAG at the same point and
         // turns it into a net connector, the direction naming the port type. A
@@ -253,25 +251,13 @@ export class LTSpiceParser {
     }
 
     // A named FLAG that coincides with an IOPIN is a net connector, not a plain
-    // label. IOPIN may follow its FLAG, so this is resolved once the whole file
-    // is read — the node was imported as a label above and is promoted here,
-    // component instance included, so it carries the connector's port type.
-    if (iopinCoords.size > 0) {
-      for (const node of nodes) {
-        const d = node.data as { componentType?: string; label?: string; portType?: PortType };
-        if (d.componentType !== "netlabel") continue;
-        const fx = Math.round(node.position.x + CENTER), fy = Math.round(node.position.y + CENTER);
-        const portType = iopinCoords.get(`${fx},${fy}`);
-        if (!portType) continue;
-        d.componentType = "netconnector";
-        d.portType = portType;
-        const i = components.findIndex((c) => c.id === node.id);
-        if (i >= 0) {
-          const swapped = createSpiceComponent("netconnector", node.id, d.label ?? "PORT", node.position.x, node.position.y);
-          (swapped as NetConnector).portType = portType;
-          components[i] = swapped;
-        }
-      }
+    // label — the direction is the only difference between them, which is why a
+    // connector is an anchor with a `portType` rather than a second kind of
+    // thing. IOPIN may follow its FLAG, so this is resolved once the whole file
+    // is read.
+    for (const a of anchors) {
+      const portType = iopinCoords.get(`${a.x},${a.y}`);
+      if (portType) a.portType = portType;
     }
 
     // Assign Nets using simple distance-based Union-Find
@@ -346,23 +332,6 @@ export class LTSpiceParser {
           for (const p of pins) if (p.netId === oldId) p.netId = newId;
         }
       }
-    }
-
-    // Named FLAGs are imported as NetLabel terminals (see the FLAG handler). As a
-    // robust backup, also resolve each flag to a *real* component pin on its net,
-    // so the store can label that net directly — this keeps the naming correct
-    // even if the terminal's single edge doesn't survive the initial render.
-    const netNames: { compId: string; handle: string; name: string }[] = [];
-    for (const nf of namedFlags) {
-      let wireNet: number | undefined, best = PIN_TOL;
-      for (const w of wires) {
-        const d = distToSegment(nf.x, nf.y, w);
-        if (d <= best) { best = d; wireNet = w.netId; }
-      }
-      const rep = pins.find(
-        (p) => p.netId !== undefined && p.netId === wireNet && !isNetTerminalId(p.compId) && !p.compId.startsWith("ground_"),
-      );
-      if (rep) netNames.push({ compId: rep.compId, handle: rep.handle, name: nf.name });
     }
 
     // ── Faithful wire routing ──────────────────────────────────────────────
@@ -554,7 +523,7 @@ export class LTSpiceParser {
       if (dir && dir !== "None") a.portType = dir;
     }
 
-    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, netNames, directiveRaw, header, orphanWires, anchors };
+    return { nodes, edges, directives: directives.trim(), components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, orphanWires, anchors };
   }
 
   private static finalizeSymbol(sym: any, nodes: Node[], components: SpiceComponent[], pins: Pin[]) {
