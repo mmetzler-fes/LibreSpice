@@ -4,6 +4,7 @@ import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js"
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
+import { orphanGroups } from "./anchorNets.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
@@ -252,6 +253,7 @@ export function buildSchematicSvg(
   sheetShapes: SheetShape[] = [],
   anchors: NetAnchor[] = [],
   busTaps: BusTap[] = [],
+  orphanWires: string[] = [],
 ): string {
   const directiveBox = directives?.text.trim() ? directiveBoxGeometry(directives.text, directives.pos) : null;
 
@@ -312,6 +314,9 @@ export function buildSchematicSvg(
   // A name's tag steps clear of its point and a long one reaches a long way, so
   // the box has to be grown by the tag actually drawn — estimating it as "about
   // half a symbol" cropped `SEHR_LANGER_NETZNAME` at the sheet edge.
+  // Segments no edge carries (see OrphanWireLayer) are part of the drawing too.
+  const orphanSegs = orphanGroups(orphanWires).flat();
+  for (const seg of orphanSegs) for (const p of seg) grow(p.x, p.y);
   for (const t of busTaps) { grow(Math.min(t.x, t.x2), t.y - 6); grow(Math.max(t.x, t.x2) + 12, t.y + 6); }
   for (const l of anchorLayouts) {
     grow(l.tag.x, l.tag.y);
@@ -383,6 +388,10 @@ export function buildSchematicSvg(
         return <rect key={s.id} x={x} y={y} width={w} height={h} {...common} />;
       })}
       {wires}
+      {orphanSegs.map((seg, i) => (
+        <line key={`ow${i}`} x1={seg[0].x} y1={seg[0].y} x2={seg[1].x} y2={seg[1].y}
+          stroke="#1e293b" strokeWidth={2} strokeLinecap="round" />
+      ))}
       {busTaps.map((t) => {
         // Always pointing right — LTSpice offers no way to turn a bus tap.
         const x = Math.min(t.x, t.x2), y = t.y;
