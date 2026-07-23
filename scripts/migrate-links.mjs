@@ -144,7 +144,11 @@ await withSymbols(async () => {
     if (!snapshot) { console.error(`  ! Payload liess sich nicht dekodieren: ${z.slice(0, 24)}…`); failed++; continue; }
 
     const name = snapshot.circuitName ?? "(ohne Namen)";
-    if (snapshot.netAnchors) { already++; continue; }
+    // Already converted *and* free of the legacy name maps — nothing to do. A
+    // payload that has both carries every name three times over and is rewritten
+    // to drop the two copies the reader no longer looks at.
+    const legacy = snapshot.netLabels !== undefined || snapshot.netLabelPorts !== undefined;
+    if (snapshot.netAnchors && !legacy) { already++; continue; }
 
     const wantNames = namesOf(snapshot);
 

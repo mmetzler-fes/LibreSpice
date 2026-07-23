@@ -1130,23 +1130,11 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // the UI currently shows, so a source in DC mode would save no sine fields
     // and lose e.g. a configured phase on reload.
     for (const [id, comp] of circuit.components) componentProps[id] = comp.serialize();
-    const netLabels: Record<string, string> = {};
-    // Anchor custom net names to a stable port id as well: net ids are
-    // re-assigned when the circuit is rebuilt on load, so the net-id map alone
-    // loses labels whose net happens to get a different id. A port id survives.
-    const netLabelPorts: Record<string, string> = {};
-    for (const [id, net] of circuit.nets) {
-      if (id !== "0" && net.nodeLabel !== id) {
-        netLabels[id] = net.nodeLabel;
-        const anchor = net.connectedPortIds.size > 0 ? Array.from(net.connectedPortIds)[0] : null;
-        if (anchor) netLabelPorts[anchor] = net.nodeLabel;
-      }
-    }
     // Persist the active scope: after a run these are ngspice-resolved names; if
     // the circuit was never run they still sit in pendingProbes. Union covers both.
     const sim = useSimulationStore.getState();
     const selectedVariables = [...new Set([...sim.selectedVariables, ...sim.pendingProbes])];
-    return { version: 1, nodes, edges, netAnchors: get().netAnchors, busTaps: get().busTaps, circuitName, spiceDirectives, simulationConfig, componentProps, netLabels, netLabelPorts, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
+    return { version: 1, nodes, edges, netAnchors: get().netAnchors, busTaps: get().busTaps, circuitName, spiceDirectives, simulationConfig, componentProps, dataFlags, textBoxes, sheetShapes, showDirectivesOnCanvas, directivesPos, plotSettings: currentPlotSettings(), selectedVariables };
   },
 
   loadFromSnapshot: (snapshot) => {
@@ -1242,7 +1230,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       }
       // Older still: keyed by net id, which the rebuild may have re-assigned.
       // Tried last and only for names nothing else has placed.
-      for (const [netId, label] of Object.entries(snapshot.netLabels)) {
+      for (const [netId, label] of Object.entries(snapshot.netLabels ?? {})) {
         if (!named.has(label)) get().renameNet(netId, label);
       }
     }, 0);
