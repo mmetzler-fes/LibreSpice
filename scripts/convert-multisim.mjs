@@ -19,8 +19,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const outfile = resolve(root, "node_modules/.cache/librespice-multisim.mjs");
 
+// Beide Haelften: der Leser macht aus dem .msjs das Zwischenmodell, der
+// Konverter macht daraus das .asc (siehe model.ts).
 await build({
-  entryPoints: [resolve(root, "src/core/multisim/MultisimConverter.ts")],
+  stdin: {
+    contents: `
+      export { convert, R_CLOSED, R_OPEN } from "./src/core/multisim/MultisimConverter.ts";
+      export { readMsjs, msjsToSchematic } from "./src/core/multisim/msjs.ts";
+    `,
+    resolveDir: root,
+    loader: "ts",
+  },
   bundle: true,
   format: "esm",
   platform: "node",
@@ -29,7 +38,7 @@ await build({
   logLevel: "warning",
 });
 
-const { readMsjs, convert, R_CLOSED, R_OPEN } = await import(pathToFileURL(outfile).href);
+const { readMsjs, msjsToSchematic, convert, R_CLOSED, R_OPEN } = await import(pathToFileURL(outfile).href);
 
 // ---------------------------------------------------------------------------
 // Report
@@ -142,7 +151,7 @@ function main() {
     const name = basename(f, ".msjs");
     try {
       const buf = readFileSync(join(inDir, f));
-      const { asc, skipped, substituted, shorts } = convert(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)));
+      const { asc, skipped, substituted, shorts } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
       writeFileSync(join(outDir, `${name}.asc`), asc, "latin1");
       ok++;
       results.push({ name, skipped, substituted, shorts });

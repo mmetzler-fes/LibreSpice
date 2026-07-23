@@ -10,7 +10,8 @@ import { InsertComponentModal } from "./InsertComponentModal.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
-import { readMsjs, convert } from "@core/multisim/MultisimConverter.js";
+import { convert } from "@core/multisim/MultisimConverter.js";
+import { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildShareQrSvg } from "./qrExport.js";
@@ -321,7 +322,7 @@ export function Toolbar() {
     }
 
     try {
-      const { asc, skipped, substituted, shorts } = convert(readMsjs(bytes));
+      const { asc, skipped, substituted, shorts } = convert(msjsToSchematic(readMsjs(bytes)));
       loadFromAsc(asc);
       // No handle: saving must write a new `.asc`, not back over the `.msjs` it
       // was converted from.

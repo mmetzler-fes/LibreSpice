@@ -295,17 +295,6 @@ function uniqueName(prefix: string, number: string | null | undefined, used: Set
  * Flatten Multisim's `{modelGuid: {param: {stringvalue}}}` levels into one
  * plain `{param: value}` map. Later arguments win.
  */
-function flatten(...levels: any[]): Params {
-  const out: Params = {};
-  for (const level of levels) {
-    for (const params of Object.values(level ?? {})) {
-      for (const [k, v] of Object.entries(params ?? {})) {
-        if (v?.stringvalue !== undefined) out[k] = v.stringvalue;
-      }
-    }
-  }
-  return out;
-}
 
 /**
  * Lamp resistance from its ratings: R = U²/P.
@@ -441,35 +430,6 @@ function pulse(p: Params): string {
 // Geometry
 // ---------------------------------------------------------------------------
 
-/**
- * Pin coordinates of a Multisim symbol, in Multisim grid units.
- *
- * The artwork is SVG: an outer `<g transform="scale(s) translate(tx,ty)">`
- * wraps one `<g oecl:pinid="N">` per pin, each holding a `<g transform=
- * "translate(x,y)" oecl:pin=...>` at the connection point. Multisim's own
- * comment notes the scale exists "to make it match the OECL Pin Grid"; after it,
- * ten SVG units are one grid unit.
- */
-function symbolPins(svg: string): Record<string, Pt> {
-  const outer = /<g transform="scale\(([-\d.]+)\)\s*translate\(([-\d.]+),\s*([-\d.]+)\)"/.exec(svg);
-  const s = outer ? parseFloat(outer[1]) : 1;
-  const tx = outer ? parseFloat(outer[2]) : 0;
-  const ty = outer ? parseFloat(outer[3]) : 0;
-
-  const pins: Record<string, Pt> = {};
-  const groups = svg.split(/<g oecl:pinid="/).slice(1);
-  for (const g of groups) {
-    const id = g.slice(0, g.indexOf('"'));
-    // The connection point is the inner group carrying `oecl:pin`.
-    const m = /<g[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)"[^>]*oecl:pin=/.exec(g);
-    if (!m) continue;
-    pins[id] = [
-      ((parseFloat(m[1]) + tx) * s) / 10,
-      ((parseFloat(m[2]) + ty) * s) / 10,
-    ];
-  }
-  return pins;
-}
 
 /** Scale a Multisim point to LTSpice units, keeping the tuple shape. */
 const scaled = (p: Pt, to: (v: number) => number): Pt => [to(p[0]), to(p[1])];
@@ -557,6 +517,8 @@ const GATES: Record<string, { gate: string; ins: string[] }> = {
 const GATE_SYMBOL: Record<string, string> = { not: "inv", buffer: "buf" };
 
 /** Logic levels the converted gates and digital sources use. */
+import type { MsPart, MsSchematic, MsNet } from "./model.js";
+
 const LOGIC_HIGH = 5;
 const LOGIC_THRESHOLD = 2.5;
 
@@ -581,23 +543,14 @@ function gatePinOffsets(n: number): Pt[] {
  * the following stage is wired to; the inputs then fall out of the symbol's own
  * geometry and the net-list reconciliation labels whatever does not line up.
  */
-function emitGate(part: any, inst: any, doc: any, spec: { gate: string; ins: string[] }, ctx: Ctx): void {
+function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
-  const name = uniqueName(inst?.refdes?.prefix || "U", inst?.refdes?.number, used);
+  const name = uniqueName(part.refdes.prefix || "U", part.refdes.number, used);
 
-  const symId = inst?.activesymbol;
-  const map: Record<string, string> = {};
-  const bp = doc.blueprints?.components?.[part.component]?.component;
-  for (const sc of bp?.symbolConfigurations ?? []) {
-    for (const sec of sc.sections ?? []) {
-      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
-    }
-  }
-  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
-  const at = (conn: string, p: Pt) => { const id = map[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
+  const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
 
   const offs = gatePinOffsets(spec.ins.length);
-  const outLocal = svgPins[map["Y"]];
+  const outLocal = part.pins["Y"];
   const outAbs: Pt = outLocal ? scaled(applyMatrix(part.matrix, outLocal), ctx.to) : [0, 0];
   const origin: Pt = [outAbs[0] - offs[offs.length - 1][0], outAbs[1] - offs[offs.length - 1][1]];
 
@@ -647,24 +600,15 @@ const ffPins = (kind: string): { conn: string; off: Pt }[] =>
  * Anchored on Q, the pin that exists on every flip-flop and that the following
  * stage is wired to.
  */
-function emitDFlipFlop(part: any, inst: any, doc: any, kind: string, ctx: Ctx): void {
+function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
-  const name = uniqueName(inst?.refdes?.prefix || "U", inst?.refdes?.number, used);
+  const name = uniqueName(part.refdes.prefix || "U", part.refdes.number, used);
 
-  const p = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
+  const p = part.params;
   const edge = p.Negative_Edge_Trigg_CLOCK === "1" ? "falling" : "rising";
   const asyncPol = p.ACTIVE_LOW_SET_and_RESET === "1" ? "low" : "high";
 
-  const symId = inst?.activesymbol;
-  const map: Record<string, string> = {};
-  const bp = doc.blueprints?.components?.[part.component]?.component;
-  for (const sc of bp?.symbolConfigurations ?? []) {
-    for (const sec of sc.sections ?? []) {
-      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
-    }
-  }
-  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
-  const qLocal = svgPins[map["Q"]];
+  const qLocal = part.pins["Q"];
   const qAbs: Pt = qLocal ? scaled(applyMatrix(part.matrix, qLocal), ctx.to) : [0, 0];
   const pins = ffPins(kind);
   const qOff = pins.find((x) => x.conn === "Q")!.off;
@@ -681,7 +625,7 @@ function emitDFlipFlop(part: any, inst: any, doc: any, kind: string, ctx: Ctx): 
 
   // Multisim spells the complement "~Q" on some symbols and "Qneg" on others.
   for (const { conn, off } of pins) {
-    const id = map[conn] ?? (conn === "~Q" ? map["Qneg"] : undefined);
+    const id = part.connPin[conn] ?? (conn === "~Q" ? part.connPin["Qneg"] : undefined);
     if (id !== undefined) pinPos[`${part.guid}/${id}`] = [origin[0] + off[0], origin[1] + off[1]];
   }
 }
@@ -693,10 +637,10 @@ function emitDFlipFlop(part: any, inst: any, doc: any, kind: string, ctx: Ctx): 
  * the source's negative terminal gets its own ground flag rather than being left
  * floating — which ngspice would reject as an open circuit.
  */
-function emitDigitalSource(part: any, inst: any, doc: any, kind: "constant" | "clock", ctx: Ctx): void {
+function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx): void {
   const { symbolLines, pinPos, flags, used } = ctx;
-  const name = uniqueName(`V${inst?.refdes?.prefix || "DG"}`, inst?.refdes?.number, used);
-  const p = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
+  const name = uniqueName(`V${part.refdes.prefix || "DG"}`, part.refdes.number, used);
+  const p = part.params;
 
   let value: string;
   if (kind === "clock") {
@@ -711,17 +655,8 @@ function emitDigitalSource(part: any, inst: any, doc: any, kind: "constant" | "c
     value = String(lvl === "" || parseFloat(lvl) !== 0 ? LOGIC_HIGH : 0);
   }
 
-  const symId = inst?.activesymbol;
-  const map: Record<string, string> = {};
-  const bp = doc.blueprints?.components?.[part.component]?.component;
-  for (const sc of bp?.symbolConfigurations ?? []) {
-    for (const sec of sc.sections ?? []) {
-      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
-    }
-  }
-  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
-  const conn = bp?.connections?.[0]?.connName ?? "1";
-  const local = svgPins[map[conn]];
+  const conn = part.connNames[0] ?? "1";
+  const local = part.pins[conn];
   const outAbs: Pt = local ? scaled(applyMatrix(part.matrix, local), ctx.to) : [0, 0];
 
   const VS = PIN_OFFSETS.voltage;
@@ -732,7 +667,7 @@ function emitDigitalSource(part: any, inst: any, doc: any, kind: "constant" | "c
 
   const minus: Pt = [origin[0] + VS[1][0], origin[1] + VS[1][1]];
   flags.push(`FLAG ${minus[0]} ${minus[1]} 0`);
-  const id = map[conn];
+  const id = part.connPin[conn];
   if (id !== undefined) pinPos[`${part.guid}/${id}`] = outAbs;
 }
 
@@ -776,30 +711,20 @@ const SWITCHES: Record<string, SwitchSpec> = {
  * contacts they are emitted complementary — the position the circuit was saved
  * in closed, the other open.
  */
-function emitSwitch(part: any, inst: any, doc: any, spec: SwitchSpec, ctx: Ctx): string[] {
+function emitSwitch(part: MsPart, spec: SwitchSpec, ctx: Ctx): string[] {
   const { symbolLines, directives, pinPos, used } = ctx;
 
-  const base = uniqueName(`R${inst?.refdes?.prefix || "S"}`, inst?.refdes?.number, used);
+  const base = uniqueName(`R${part.refdes.prefix || "S"}`, part.refdes.number, used);
 
-  const params: any = Object.values(inst?.modelinstancedata ?? {})[0] ?? {};
-  const state = parseInt(params.State?.stringvalue ?? "0", 10) || 0;
+  const state = parseInt(part.params.State ?? "0", 10) || 0;
 
-  const symId = inst?.activesymbol;
-  const map: Record<string, string> = {};
-  const bp = doc.blueprints?.components?.[part.component]?.component;
-  for (const sc of bp?.symbolConfigurations ?? []) {
-    for (const sec of sc.sections ?? []) {
-      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
-    }
-  }
-  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
 
   const RES = PIN_OFFSETS.res;
   const anchorConn = spec.paths[0][0];
-  const anchorLocal = svgPins[map[anchorConn]];
+  const anchorLocal = part.pins[anchorConn];
   const anchor: Pt = anchorLocal ? scaled(applyMatrix(part.matrix, anchorLocal), ctx.to) : [0, 0];
 
-  const at = (conn: string, p: Pt) => { const id = map[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
+  const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
 
   spec.paths.forEach(([from, to], i) => {
     // With two contacts, `State` picks which one is closed; a single contact is
@@ -842,15 +767,14 @@ function emitSwitch(part: any, inst: any, doc: any, spec: SwitchSpec, ctx: Ctx):
  * Names are derived from the pot's refdes because a schematic may hold several
  * pots, and one shared `T1`/`R0` would tie them all to the same position.
  */
-function emitPotentiometer(part: any, inst: any, doc: any, ctx: Ctx): void {
+function emitPotentiometer(part: MsPart, ctx: Ctx): void {
   const { symbolLines, directives, pinPos, used } = ctx;
 
   // A pot's refdes already carries an R prefix ("R4", "Rp"), so use it as is.
-  const base = uniqueName(inst?.refdes?.prefix || "Rp", inst?.refdes?.number, used);
+  const base = uniqueName(part.refdes.prefix || "Rp", part.refdes.number, used);
 
-  const params: any = Object.values(inst?.modelinstancedata ?? {})[0] ?? {};
-  const total = si(params.Res?.stringvalue) || "1k";
-  const pos = parseFloat(params.PosPercent?.stringvalue ?? "50") / 100;
+  const total = si(part.params.Res) || "1k";
+  const pos = parseFloat(part.params.PosPercent ?? "50") / 100;
 
   const tName = `T_${base}`;
   const rName = `R_${base}`;
@@ -863,12 +787,10 @@ function emitPotentiometer(part: any, inst: any, doc: any, ctx: Ctx): void {
     `.param ${lower}=${tName}*${rName}+1n`,
   );
 
-  const symId = inst?.activesymbol;
-
   // Stack the two halves along the track, anchored where the pot's first
   // terminal sat. They need not line up with the old wiring — the net-list
   // reconciliation below labels them onto the right nets either way.
-  const svgPins = symbolPins(doc.blueprints?.symbols?.[symId]?.svg ?? "");
+  const svgPins = part.pinsById;
   const end1: Pt = svgPins["1"] ? scaled(applyMatrix(part.matrix, svgPins["1"]), ctx.to) : [0, 0];
   const RES = PIN_OFFSETS.res;
   const span = RES[1][1] - RES[0][1];
@@ -884,14 +806,7 @@ function emitPotentiometer(part: any, inst: any, doc: any, ctx: Ctx): void {
 
   // Terminal 1 → top of the upper half, wiper → the shared node, terminal 3 →
   // bottom of the lower half. Keyed by symbol pin id, as the net list is.
-  const map: Record<string, string> = {};
-  const bp = doc.blueprints?.components?.[part.component]?.component;
-  for (const sc of bp?.symbolConfigurations ?? []) {
-    for (const sec of sc.sections ?? []) {
-      if (sec.id === symId) for (const cp of sec.connPinMap ?? []) map[cp.connName] = cp.symbolPinID;
-    }
-  }
-  const at = (conn: string, p: Pt) => { const id = map[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
+  const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
   at("1", [originA[0] + RES[0][0], originA[1] + RES[0][1]]);
   at("2", [originB[0] + RES[0][0], originB[1] + RES[0][1]]);
   at("3", [originB[0] + RES[1][0], originB[1] + RES[1][1]]);
@@ -1030,7 +945,7 @@ function occupied(p: Pt, pinPos: PinPos, wires: Wire[]): boolean {
  * another pin or on an existing wire is dropped back onto the pin, since a stub
  * into an occupied point would invent a connection Multisim never had.
  */
-function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags: string[]): string[] {
+function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[]): string[] {
   // Ground already has FLAGs from the connector symbols; take their points into
   // account so a grounded pin isn't labelled a second time under another name.
   const flagPts: Pt[] = [];
@@ -1047,7 +962,7 @@ function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags:
   const placed: Pt[] = [...flagPts];
   for (const net of netList) {
     const pts: { p: Pt; key: string }[] = [];
-    for (const obj of net.objects ?? []) {
+    for (const obj of net.pins) {
       const k = `${obj.component}/${obj.pin}`;
       const p = pinPos[k];
       if (p) pts.push({ p, key: k });
@@ -1055,7 +970,8 @@ function reconcile(netList: any[], pinPos: PinPos, wires: Wire[], existingFlags:
     if (pts.length < 2) continue;
 
     // Multisim's node 0 is ground; LTSpice spells that label "0" as well.
-    const name = /^\d+$/.test(net.name) ? (net.name === "0" ? "0" : `N${net.name}`) : net.name;
+    const netName = net.name ?? "";
+    const name = /^\d+$/.test(netName) ? (netName === "0" ? "0" : `N${netName}`) : netName;
 
     const islands = new Map<string, { p: Pt; key: string }>();
     for (const it of pts) {
@@ -1123,7 +1039,7 @@ function cutCrossings(wires: Wire[], junctions: Pt[]): Wire[] {
  * here. This is the one error the drawing can introduce that a reader is
  * unlikely to spot, so it is checked rather than assumed.
  */
-function findShorts(netList: any[], pinPos: PinPos, wires: Wire[], flags: string[]): string[] {
+function findShorts(netList: MsNet[], pinPos: PinPos, wires: Wire[], flags: string[]): string[] {
   const pts = Object.values(pinPos);
   const uf = wireGroups(wires, pts);
   for (const f of flags) {
@@ -1136,13 +1052,14 @@ function findShorts(netList: any[], pinPos: PinPos, wires: Wire[], flags: string
   const groupNet = new Map<string, string>();
   const shorts = new Set<string>();
   for (const net of netList) {
-    for (const obj of net.objects ?? []) {
+    for (const obj of net.pins) {
       const p = pinPos[`${obj.component}/${obj.pin}`];
       if (!p) continue;
       const root = uf.find(key(p));
       const prev = groupNet.get(root);
-      if (prev === undefined) groupNet.set(root, net.name);
-      else if (prev !== net.name) shorts.add([prev, net.name].sort().join(" = "));
+      const nm = net.name ?? "";
+      if (prev === undefined) groupNet.set(root, nm);
+      else if (prev !== nm) shorts.add([prev, nm].sort().join(" = "));
     }
   }
   return [...shorts];
@@ -1152,23 +1069,10 @@ function findShorts(netList: any[], pinPos: PinPos, wires: Wire[], flags: string
 // Conversion
 // ---------------------------------------------------------------------------
 
-export function convert(doc: any): ConversionResult {
-  const tpl = doc.sheettemplates?.[0];
-  if (!tpl) throw new Error("no sheet template");
-  const sheet = tpl.template;
+export function convert(sch: MsSchematic): ConversionResult {
   const skipped: string[] = [];
   /** Parts replaced by a stand-in rather than converted one-to-one. */
   const substituted: string[] = [];
-
-  // Blueprint lookups: part type info and symbol artwork by id.
-  const blueprints = doc.blueprints?.components ?? {};
-  const symbols = doc.blueprints?.symbols ?? {};
-
-  // Instance data (refdes, parameter values) is keyed by the placed part's guid.
-  const instances: Record<string, any> = {};
-  for (const inst of tpl.instances ?? []) {
-    for (const cs of inst.componentsections ?? []) instances[cs.guid] = cs;
-  }
 
   const wires: Wire[] = [];
   const flags: string[] = [];
@@ -1183,32 +1087,30 @@ export function convert(doc: any): ConversionResult {
   // Reserve every refdes Multisim spelled out, so auto-numbering cannot take a
   // name a later part already claims.
   const used = new Set<string>();
-  for (const part of sheet.parts ?? []) {
-    const bp = blueprints[part.component]?.component;
-    const cs = instances[part.guid];
-    const num = cs?.refdes?.number;
-    if (!bp || num === null || num === undefined) continue;
-    const prefix = TYPES[bp.name]?.forcePrefix
-      || (SWITCHES[bp.name] || bp.name === "Potentiometer" ? "R" : null)
-      || (bp.name === "Digital Constant" || bp.name === "Digital Clock" ? `V${cs?.refdes?.prefix ?? "DG"}` : null)
-      || cs?.refdes?.prefix || TYPES[bp.name]?.prefix;
+  for (const part of sch.parts) {
+    const name = part.typeName;
+    const num = part.refdes.number;
+    if (num === null || num === undefined) continue;
+    const prefix = TYPES[name]?.forcePrefix
+      || (SWITCHES[name] || name === "Potentiometer" ? "R" : null)
+      || (name === "Digital Constant" || name === "Digital Clock" ? `V${part.refdes.prefix ?? "DG"}` : null)
+      || part.refdes.prefix || TYPES[name]?.prefix;
     if (prefix) used.add(`${prefix}${num}`);
   }
 
   // --- placed parts -------------------------------------------------------
-  for (const part of sheet.parts ?? []) {
-    const bp = blueprints[part.component]?.component;
-    if (!bp) continue;
+  for (const part of sch.parts) {
+    const bp = { name: part.typeName };
 
     const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, to };
 
     if (bp.name === "Potentiometer") {
-      emitPotentiometer(part, instances[part.guid], doc, ctx);
+      emitPotentiometer(part, ctx);
       continue;
     }
 
     if (GATES[bp.name]) {
-      emitGate(part, instances[part.guid], doc, GATES[bp.name], ctx);
+      emitGate(part, GATES[bp.name], ctx);
       substituted.push(`${bp.name} (ideales Gatter, ohne Laufzeit)`);
       continue;
     }
@@ -1221,20 +1123,19 @@ export function convert(doc: any): ConversionResult {
     };
     if (FF_KINDS[bp.name]) {
       const kind = FF_KINDS[bp.name];
-      emitDFlipFlop(part, instances[part.guid], doc, kind, ctx);
+      emitDFlipFlop(part, kind, ctx);
       substituted.push(`${bp.name} (${kind === "dlatch" ? "ideales Latch" : "ideales Flipflop"}, ohne Laufzeit)`);
       continue;
     }
 
     if (bp.name === "Digital Constant" || bp.name === "Digital Clock") {
-      emitDigitalSource(part, instances[part.guid], doc,
-        bp.name === "Digital Clock" ? "clock" : "constant", ctx);
+      emitDigitalSource(part, bp.name === "Digital Clock" ? "clock" : "constant", ctx);
       substituted.push(`${bp.name} (als Spannungsquelle)`);
       continue;
     }
 
     if (SWITCHES[bp.name]) {
-      const dropped = emitSwitch(part, instances[part.guid], doc, SWITCHES[bp.name], ctx);
+      const dropped = emitSwitch(part, SWITCHES[bp.name], ctx);
       if (dropped.length) substituted.push(`${bp.name} (Steuereingang ${dropped.join("/")} entfällt)`);
       else substituted.push(bp.name);
       continue;
@@ -1245,26 +1146,11 @@ export function convert(doc: any): ConversionResult {
       skipped.push(bp.name);
       continue;
     }
-    const inst = instances[part.guid];
     const offsets = PIN_OFFSETS[type.sym] ?? [];
-
-    // The symbol Multisim actually drew tells us which pin id belongs to which
-    // logical connection — the same part has different pin ids per symbol
-    // variant (IEC vs ANSI), so the map has to come from the active symbol.
-    const symId = inst?.activesymbol;
-    const connToPin: Record<string, string> = {};
-    for (const sc of bp.symbolConfigurations ?? []) {
-      for (const sec of sc.sections ?? []) {
-        if (sec.id === symId) {
-          for (const cp of sec.connPinMap ?? []) connToPin[cp.connName] = cp.symbolPinID;
-        }
-      }
-    }
-    const svgPins = symbolPins(symbols[symId]?.svg ?? "");
 
     // Prefer the IEC artwork when Multisim used it — these are German teaching
     // schematics and the box resistor is what the source drawings show.
-    const isIec = /:IEC:/.test(symbols[symId]?.description ?? "");
+    const isIec = /:IEC:/.test(part.symbolDescription);
     const symName = isIec && type.euro ? type.euro : type.sym;
     const useOffsets = PIN_OFFSETS[symName] ?? offsets;
 
@@ -1272,8 +1158,7 @@ export function convert(doc: any): ConversionResult {
     const want: (Pt | null)[] = [];
     for (let i = 0; i < type.pins.length; i++) {
       const conn = type.pins[i];
-      const pid = conn === null ? undefined : connToPin[conn];
-      const local = pid !== undefined ? svgPins[pid] : undefined;
+      const local = conn === null ? undefined : part.pins[conn];
       want.push(local ? scaled(applyMatrix(part.matrix, local), to) : null);
     }
     const anchorIdx = want.findIndex((p) => p !== null);
@@ -1284,13 +1169,13 @@ export function convert(doc: any): ConversionResult {
 
     // Refdes: Multisim leaves the number null on single-instance designs, so
     // number those ourselves per prefix rather than emitting a bare "R".
-    const prefix = type.forcePrefix || inst?.refdes?.prefix || type.prefix;
-    symbolLines.push(`SYMATTR InstName ${uniqueName(prefix, inst?.refdes?.number, used)}`);
+    const prefix = type.forcePrefix || part.refdes.prefix || type.prefix;
+    symbolLines.push(`SYMATTR InstName ${uniqueName(prefix, part.refdes.number, used)}`);
 
     // Ratings can sit on either level — a lamp keeps its voltage and power in
     // `modeldefinitiondata` while a resistor keeps its value in
     // `modelinstancedata`. Instance data wins where both carry a key.
-    const flat = flatten(inst?.modeldefinitiondata, inst?.modelinstancedata);
+    const flat = part.params;
     const value = type.value(flat);
     if (value) symbolLines.push(`SYMATTR Value ${value}`);
     for (const a of type.attrs ?? []) symbolLines.push(`SYMATTR ${a}`);
@@ -1315,7 +1200,7 @@ export function convert(doc: any): ConversionResult {
       // symbol pin "2". Keying these by connection name silently tied each part
       // to the wrong net.
       const conn = type.pins[i];
-      const pid = conn === null ? undefined : connToPin[conn];
+      const pid = conn === null ? undefined : part.connPin[conn];
       if (pid !== undefined) pinPos[`${part.guid}/${pid}`] = [ax, ay];
       const target = want[i];
       if (!target) continue;
@@ -1354,8 +1239,8 @@ export function convert(doc: any): ConversionResult {
   }
 
   // --- ground and other connectors ---------------------------------------
-  for (const c of sheet.connectors ?? []) {
-    if (c.component === "ground") {
+  for (const c of sch.connectors) {
+    if (c.kind === "ground") {
       const [x, y] = applyMatrix(c.matrix, [0, 0]);
       flags.push(`FLAG ${to(x)} ${to(y)} 0`);
       // Ground appears in the net list like any other pin, so record it.
@@ -1371,8 +1256,8 @@ export function convert(doc: any): ConversionResult {
   }
 
   // --- wires --------------------------------------------------------------
-  for (const w of sheet.wires ?? []) {
-    const path = w.path ?? [];
+  for (const w of sch.wires) {
+    const path = w.path;
     for (let i = 0; i + 1 < path.length; i++) {
       wires.push([to(path[i][0]), to(path[i][1]), to(path[i + 1][0]), to(path[i + 1][1])]);
     }
@@ -1385,24 +1270,17 @@ export function convert(doc: any): ConversionResult {
   // one. Rather than guess at extra routing, reconcile geometry against the net
   // list and bridge whatever is still split with an LTSpice net label — which
   // connects by name and so cannot introduce a false crossing.
-  const routed = cutCrossings(wires, (sheet.junctions ?? []).map((j: any): Pt => [to(j.position.x), to(j.position.y)]));
+  const routed = cutCrossings(wires, sch.junctions.map((j): Pt => [to(j[0]), to(j[1])]));
   wires.length = 0;
   wires.push(...routed);
-  flags.push(...reconcile(doc.nets ?? [], pinPos, wires, flags));
+  flags.push(...reconcile(sch.nets, pinPos, wires, flags));
 
   // --- free-standing text -------------------------------------------------
   const texts: string[] = [];
-  const textValue: Record<string, string> = {};
-  for (const inst of tpl.instances ?? []) {
-    for (const t of inst.texts ?? []) textValue[t.guid] = t.variableName;
-  }
-  for (const t of sheet.texts ?? []) {
-    if (!t.standalone || !t.visibility) continue;
-    const v = textValue[t.guid];
-    if (!v) continue;
+  for (const t of sch.texts) {
     // LTSpice keeps a comment on one line; Multisim's free text is multi-line.
-    const body = v.split("\n").map((l) => l.trim()).filter(Boolean).join(" \\n ");
-    texts.push(`TEXT ${to(t.matrix.e)} ${to(t.matrix.f)} Left 2 ;${body}`);
+    const body = t.text.split("\n").map((l) => l.trim()).filter(Boolean).join(" \\n ");
+    texts.push(`TEXT ${to(t.position[0])} ${to(t.position[1])} Left 2 ;${body}`);
   }
 
   // L-routed stubs collapse to a zero-length segment whenever only one axis
@@ -1435,6 +1313,6 @@ export function convert(doc: any): ConversionResult {
     asc: lines.join("\n") + "\n",
     skipped: [...new Set(skipped)],
     substituted: [...new Set(substituted)],
-    shorts: findShorts(doc.nets ?? [], pinPos, cleanWires, flags),
+    shorts: findShorts(sch.nets, pinPos, cleanWires, flags),
   };
 }
