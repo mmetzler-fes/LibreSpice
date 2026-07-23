@@ -1,4 +1,5 @@
 import { LogicGate } from "@core/components/digital/LogicGate.js";
+import { LTSpiceParser } from "@core/ltspice/LTSpiceParser.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -17,7 +18,62 @@ function line(gate: string, inputs: number): string {
   return g.getNetlistLine();
 }
 
+/**
+ * A gate with `n` inputs, wired from a source into every one of them, as the
+ * Multisim converter writes it. The gate sits at the origin, so its LTSpice pins
+ * are at `(0, 40 ± spread)` for the inputs and `(72, 40)` for the output.
+ */
+function wiredGate(n: number): string {
+  const span = 48;
+  const ys = Array.from({ length: n }, (_, i) => 40 + (n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1))));
+  const wires = ys.map((y, i) => `WIRE -64 ${y} 0 ${y}\nFLAG -64 ${y} IN${i + 1}`);
+  return [
+    "Version 4", "SHEET 1 880 680",
+    ...wires,
+    "SYMBOL Digital\\and 0 0 R0",
+    "SYMATTR InstName U1",
+    "SYMATTR Value AND",
+    `SYMATTR LibreSpice gate=and;inputs=${n};vth=2.5;vhigh=5;pins=${
+      Array.from({ length: n }, (_, i) => `In${i + 1}`).join(",")},Out`,
+    "",
+  ].join("\n");
+}
+
 const CASES: Case[] = [
+  {
+    // Two faults, one symptom. The parser registered a gate's pins under their
+    // *display* names (`In1`) while the ports are `…-in1`, so `connectPorts`
+    // threw for every wire on a gate and was caught as "visual only"; and it
+    // passed no pin list for a gate, so a three- or four-input one was laid out
+    // as the default two-input gate and its wires met nothing at all. Both left
+    // the same trace: gates drawn wired, netlisted with every input on node 0.
+    // 489 dead inputs across the converted Multisim set.
+    name: "a wired gate connects every input, whatever its width",
+    run: (fail) => {
+      // Two upwards: an AND with one input is not a thing, and the parts that
+      // do have one (`not`, `buffer`) get their count from the gate type.
+      for (const n of [2, 3, 4]) {
+        const { components, edges } = LTSpiceParser.parse(wiredGate(n));
+        const gate = components.find((c) => c.label === "U1");
+        if (!gate) { fail(`${n} inputs: the gate did not import`); continue; }
+        if (gate.ports.length !== n + 1) {
+          fail(`${n} inputs: the gate came back with ${gate.ports.length} ports, expected ${n + 1}`);
+          continue;
+        }
+        // One wire per input reached it.
+        const onGate = edges.filter((e) => e.source === gate.id || e.target === gate.id);
+        if (onGate.length !== n) fail(`${n} inputs: ${onGate.length} wires reached the gate, expected ${n}`);
+        // And the handles they use are the ports' own, not the display names.
+        const handles = onGate.map((e) => (e.source === gate.id ? e.sourceHandle : e.targetHandle));
+        for (const h of handles) {
+          if (!gate.ports.some((p) => p.id === `${gate.id}-${h}`)) {
+            fail(`${n} inputs: handle "${h}" matches no port of the gate`);
+          }
+        }
+      }
+    },
+  },
+
   {
     name: "AND joins its inputs with &&",
     run: (fail) => {

@@ -201,15 +201,20 @@ export function subcircuitPinOffsets(pinNames: string[], symbolName?: string): P
  * LogicGate.createPorts so schematic and `.asc` agree.
  */
 function logicGatePinOffsets(pinNames: string[]): PinOffset[] {
+  // The *handle* is the port id's suffix, not the pin's display name. The file
+  // spells them `In1,In2,Out` (that is what LTSpice shows), while the ports are
+  // `…-in1`, `…-out` — and a pin registered under the display name produced a
+  // port id no port had, so `connectPorts` threw for every wire on a gate and
+  // caught it as "visual only". The gates were drawn wired and netlisted with
+  // every input on node 0: 489 dead inputs across the converted Multisim set.
   const ins = pinNames.slice(0, -1);
-  const out = pinNames[pinNames.length - 1] ?? "Out";
   const span = 48;
-  const offsets = ins.map((name, i) => ({
-    handle: name,
+  const offsets = ins.map((_name, i) => ({
+    handle: `in${i + 1}`,
     dx: 0,
     dy: CENTER + (ins.length === 1 ? 0 : Math.round(-span / 2 + (span * i) / (ins.length - 1))),
   }));
-  offsets.push({ handle: out, dx: CENTER + 32, dy: CENTER });
+  offsets.push({ handle: "out", dx: CENTER + 32, dy: CENTER });
   return offsets;
 }
 

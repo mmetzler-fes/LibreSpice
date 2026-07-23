@@ -645,7 +645,11 @@ export class LTSpiceParser {
       lsAttrs.pins?.split(",").map((s) => s.trim()).filter(Boolean) ??
       [...(symbolByName(symBase)?.pins ?? [])].sort((a, b) => a.order - b.order).map((p) => p.name);
     const cType: ComponentType = known ?? (declaredPins.length > 0 ? "subcircuit" : "resistor");
-    const subPins = cType === "subcircuit" ? declaredPins : undefined;
+    // A gate needs its pin list as much as a subcircuit does: how many inputs it
+    // has decides where they sit (they are spread over a fixed span, so two and
+    // four land in different places). Without it every gate was registered as the
+    // default two-input one, and a three- or four-input gate's wires met nothing.
+    const subPins = cType === "subcircuit" || cType === "logicgate" ? declaredPins : undefined;
 
     // `R<deg>` / `M<deg>`: a mirrored symbol is flipped horizontally first, then
     // rotated. Dropping the `M` (as we used to) put every pin of a mirrored part
