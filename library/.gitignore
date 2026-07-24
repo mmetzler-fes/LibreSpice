@@ -22,4 +22,31 @@
 !/sym/SCR.asy
 # The jumper, referenced by name from the shipped schematics.
 !/sym/jumper.asy
+# The potentiometer: every converted Multisim sheet with a pot references it by
+# name, so it has to ship for those tracked .asc files to be complete.
+!/sub/pot.lib
+!/sym/pot.asy
+# The changeover switch, the pot's counterpart for a contact rather than a track.
+!/sub/spdt.lib
+!/sym/spdt.asy
+# The rest of the switch family: the simple contact, and the two the converter
+# needs so a voltage-controlled switch keeps its control input.
+!/sub/spst.lib
+!/sym/spst.asy
+!/sub/vcspst.lib
+!/sym/vcspst.asy
+!/sub/vcspdt.lib
+!/sym/vcspdt.asy
+# The hexadecimal display: four binary inputs, a load on the counter outputs
+# that four converted schematics were missing entirely.
+!/sub/seg7hex.lib
+!/sym/seg7hex.asy
+# The three-terminal ideal op-amp: both formats have one, and every converted
+# sheet with a Multisim `3 Terminal Opamp` now references it by name.
+!/sub/opamp.lib
+!/sym/opamp.asy
+# The ideal comparator: same drawing, output levels on the instance instead of
+# on supply pins — referenced by name from the converted Dual-Slope ADC.
+!/sub/comparator.lib
+!/sym/comparator.asy
 !/sym/OpAmps/

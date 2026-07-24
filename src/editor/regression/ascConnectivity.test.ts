@@ -202,6 +202,30 @@ ROUNDTRIP_CASES.push({ name: "round-trip: library subcircuit keeps symbol, pins 
   if (back.edges.length === 0) fail("wires on the subcircuit were dropped");
 } });
 
+// A library part's instance parameters (`SYMATTR SpiceLine Rtot=10k wiper=0.25`)
+// are what make one `.subckt` usable twice on a sheet — two potentiometers with
+// their own wiper positions. They live only in `SpiceLine`, so losing that line
+// on save silently resets both pots to the subcircuit's declared defaults, and
+// the sheet still simulates: nothing points at the loss but the numbers.
+ROUNDTRIP_CASES.push({ name: "round-trip: subcircuit instance parameters survive", run: (fail) => {
+  const pins = ["A", "W", "B"];
+  const params = "Rtot=10k wiper=0.25";
+  const comp = createSubcircuitComponent("x1", "X1", 100, 100, ".subckt pot A W B PARAMS: Rtot=1k wiper=0.5\n.ends", pins);
+  comp.params = params;
+  const nodes: Node[] = [{
+    id: "x1", type: "component", position: { x: 100, y: 100 },
+    data: { componentType: "subcircuit", label: "X1", pins, subName: "pot", symbolName: "pot" },
+  }];
+  if (comp.getNetlistLine() !== `X1 0 0 0 pot ${params}`) {
+    fail(`netlist line drops the parameters: ${comp.getNetlistLine()}`);
+  }
+  const asc = LTSpiceExporter.export(nodes, [], "", { components: new Map([["x1", comp]]), nets: new Map() }, []);
+  if (!new RegExp(`^SYMATTR SpiceLine ${params}$`, "m").test(asc)) fail(`SpiceLine not written:\n${asc}`);
+  const back = LTSpiceParser.parse(asc);
+  const got = (back.components[0] as unknown as { params?: string })?.params;
+  if (got !== params) fail(`parameters came back as ${JSON.stringify(got)}, not ${JSON.stringify(params)}`);
+} });
+
 // The IEC/European symbol set (06-2-1_RC_TP2.asc). `Misc\EuropeanResistor` is a
 // plain resistor: it must keep its value (1k591 = 1591 Ω, the SI letter as the
 // decimal point) and its two pins. It has no built-in type, and treating every

@@ -1,5 +1,5 @@
 import type { Node } from "@xyflow/react";
-import { symbolForType, type SymbolNorm } from "@sym/asyParser.js";
+import { symbolByName, symbolForType, type SymbolNorm } from "@sym/asyParser.js";
 import { mapSymbol } from "@sym/AsySymbol.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import { outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
@@ -189,14 +189,27 @@ function digitalPins(data: ComponentNodeData): LocalPin[] {
 export function getLocalPins(data: ComponentNodeData, norm: SymbolNorm = "default"): LocalPin[] {
   const mirrored = !!data.mirrored;
   const flip = (px: number) => (mirrored ? NODE_SIZE - px : px);
-  const sym = symbolForType(data.componentType, norm);
+  // A library part has no symbol *for its type* — it carries its own `.asy` by
+  // name, and its handles are the subcircuit's declared pin names in SpiceOrder
+  // (the same mapping ComponentNode's LibrarySymbolNode draws its handles from).
+  // Left out of here, a `pot` or an `LM317` had no pins as far as the wire tool,
+  // the SVG export and the pin re-seating were concerned: the export drew
+  // neither the part nor any wire touching it, and the wire tool would not snap
+  // to it.
+  const libSym = data.componentType === "subcircuit" && data.symbolName
+    ? symbolByName(data.symbolName, norm)
+    : undefined;
+  const sym = libSym ?? symbolForType(data.componentType, norm);
   if (sym) {
     const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
     const c = NODE_SIZE / 2;
     const rotation = data.rotation ?? 0;
     return mapping.pins.map((pin) => {
       const [px, py] = rotatePoint(flip(pin.px), pin.py, c, c, rotation);
-      return { handleId: handleForOrder(data.componentType, pin.order), order: pin.order, px, py };
+      const handleId = libSym
+        ? (data.pins?.[pin.order - 1] ?? `pin${pin.order}`)
+        : handleForOrder(data.componentType, pin.order);
+      return { handleId, order: pin.order, px, py };
     });
   }
   const digital = data.componentType === "dff" || data.componentType === "logicgate";
@@ -263,7 +276,7 @@ export interface NodePin {
 /** All pin positions for a node in flow coordinates. */
 export function getNodePins(node: Node, norm: SymbolNorm = "default"): NodePin[] {
   const data = node.data as ComponentNodeData;
-  if (!data || data.componentType === "subcircuit") return [];
+  if (!data) return [];
   return getLocalPins(data, norm).map((p) => ({
     nodeId: node.id,
     handleId: p.handleId,

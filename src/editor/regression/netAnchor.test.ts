@@ -1,4 +1,5 @@
 import { useCircuitStore } from "@store/circuitStore.js";
+import { useUIStore } from "@store/uiStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { formatAnchor, isGroundAnchor, anchorsFromNodes, type NetAnchor } from "@core/circuit/netAnchor.js";
 import { resolveAnchors } from "@editor/anchorNets.js";
@@ -238,13 +239,13 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       fail("moving a name leaves the wires alone", `threw: ${(e as Error).message}`);
     }
 
-    // ── A name on a stub belongs to that stub's pin ────────────────────────
-    // A stub hanging off a pin that has no net yet is invisible while the names
-    // are resolved: it belongs to nothing, so it is in none of the routes. A name
-    // sitting exactly on such a stub can therefore be claimed by an unrelated
-    // wire passing a few pixels away — which is what put `Ut` on the op-amp's
-    // *inverting* input in the PT100 schematics, its own stub 0 px away and
-    // invisible, the neighbouring run 4 px away and not.
+    // ── A converted name belongs to the pin it sits on ────────────────────
+    // The converted sheets are where two names land closest together: the
+    // INA333's two inputs are 32 units apart, each with its own name. A name is
+    // resolved by what it lies on, so the two must not swap — which they did
+    // when the converter still hung each name off a 16-unit stub and the stub
+    // was invisible to the resolution (it belonged to no net yet), leaving the
+    // neighbouring input's run 4 px away as the nearest thing to claim it.
     total++;
     try {
       const file = path.resolve("examples/Multisim_converted/1_4_2_PT100-Sensor_Bruecke_mit_INA333.asc");
@@ -270,6 +271,47 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       }
     } catch (e) {
       fail("a name on a stub names that stub's pin", `threw: ${(e as Error).message}`);
+    }
+
+    // ── Delete removes the selected name ───────────────────────────────────
+    // A name is neither a node nor an edge, so `deleteSelected` never saw it and
+    // the Delete key did nothing on one. That is at its worst right after the
+    // wire under a name is deleted: the name correctly stays (a FLAG is a point,
+    // not a property of a wire), Delete is the next key reached for, and with it
+    // dead the label reads as impossible to get rid of.
+    total++;
+    try {
+      const ui = useUIStore;
+      st().clearCircuit();
+      await tick();
+      const id = st().addNetAnchor(160, 160, "VX");
+      ui.getState().setSelectedAnchorId(id);
+      st().deleteSelected();
+      await tick();
+      if (st().netAnchors.some((a) => a.id === id)) fail("Delete removes the selected name", "the name survived");
+      if (ui.getState().selectedAnchorId !== null) fail("Delete removes the selected name", "the selection was left pointing at a deleted name");
+    } catch (e) {
+      fail("Delete removes the selected name", `threw: ${(e as Error).message}`);
+    }
+
+    // …but only what the user is actually pointing at. Clicking a wire does not
+    // clear the name selection, so deleting a wire must not sweep along a name
+    // selected some time earlier.
+    total++;
+    try {
+      const ui = useUIStore;
+      st().clearCircuit();
+      await tick();
+      const id = st().addNetAnchor(160, 160, "VX");
+      ui.getState().setSelectedAnchorId(id);
+      st().setEdges([{ id: "e_sel", source: "a", target: "b", selected: true } as never]);
+      st().deleteSelected();
+      await tick();
+      if (!st().netAnchors.some((a) => a.id === id)) {
+        fail("deleting a wire leaves a selected name alone", "the name went with the wire");
+      }
+    } catch (e) {
+      fail("deleting a wire leaves a selected name alone", `threw: ${(e as Error).message}`);
     }
 
     // ── The shape of an anchor ─────────────────────────────────────────────

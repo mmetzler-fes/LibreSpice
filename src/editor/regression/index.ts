@@ -36,6 +36,7 @@ import { runTerminalCurrentTests } from "../../simulation/regression/terminalCur
 import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasure.test.js";
 import { runDcSweepTests } from "../../simulation/regression/dcSweep.test.js";
 import { runModelTests } from "../../simulation/regression/models.test.js";
+import { runConvertedNetlistTests } from "../../simulation/regression/convertedNetlist.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -78,6 +79,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Proves net anchors carry what the net-label nodes carry (Phase B).
     { name: "Net anchors", ...(await runNetAnchorTests()) },
     { name: "Multisim 14 files", ...(await runMs14Tests()) },
+    { name: "Converted netlists", ...(await runConvertedNetlistTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },

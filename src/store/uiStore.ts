@@ -25,6 +25,13 @@ export interface PendingLibraryPlacement {
   model?: string;
   /** Custom `.asy` symbol to draw a subcircuit with (instead of the generic box). */
   symbolName?: string;
+  /**
+   * Default instance parameters from that symbol's `SYMATTR SpiceLine`
+   * (`Rtot=10k wiper=0.5`). Carried so a freshly placed part arrives with the
+   * values its symbol advertises, rather than with an empty Parameter field the
+   * user has to guess the parameter *names* for.
+   */
+  params?: string;
 }
 
 interface UIState {

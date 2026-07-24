@@ -32,6 +32,13 @@ export interface ComponentDescriptor {
   model?: string;
   /** Ordered pin names (falls back to the symbol's own pins when omitted). */
   pins?: string[];
+  /**
+   * Default instance parameters (`Rtot=10k wiper=0.5`), from the symbol's
+   * `SYMATTR SpiceLine`. They go onto the `X` line of a newly placed part, so a
+   * `.subckt` declared with `params:` is adjustable without the user having to
+   * know its parameter names.
+   */
+  params?: string;
 }
 
 /**

@@ -60,6 +60,13 @@ interface PartType {
    * device with a magnitude.
    */
   attrs?: string[];
+  /**
+   * `SYMATTR SpiceLine` for this instance — the trailing `name=value` list on
+   * the `X` line of a `.subckt` declared with `params:`. Unlike `attrs` it is
+   * built from the part's own parameters, because that is the point: the
+   * potentiometer's track resistance and wiper position differ per instance.
+   */
+  spiceLine?: (p: Params) => string;
 }
 
 interface SwitchSpec {
@@ -75,6 +82,23 @@ interface Ctx {
   pinPos: PinPos;
   used: Set<string>;
   wires: Wire[];
+  /**
+   * Pin bridges, as index spans into `wires` (see `bridgeTo`). Held on the
+   * context rather than locally, because the parts that need them most are the
+   * ones with their own emitter: a gate's pin raster is nothing like ours.
+   */
+  bridges: { from: number; until: number; ends: Pt[] }[];
+  /**
+   * Every terminal any emitter has placed, whether or not Multisim names it.
+   *
+   * `pinPos` cannot serve here: it is keyed by Multisim's own pin ids and so
+   * skips a terminal the file's `connPin` does not mention — and the pruning
+   * below has to know about *all* of them, or it cuts the wire to one and drops
+   * the connection. Filled as the parts are drawn, because the alternative
+   * (reading the emitted SYMBOL lines back) cannot work for the gates, whose
+   * offsets depend on their input count.
+   */
+  terminals: Pt[];
   to: (v: number) => number;
 }
 
@@ -87,6 +111,16 @@ export interface ConversionResult {
   substituted: string[];
   /** Multisim nets the emitted drawing shorted together. */
   shorts: string[];
+  /**
+   * Connections a part type declares that the placed part does not have.
+   *
+   * A name that misses yields no pin, so the wiring on it is dropped without a
+   * word — which is how thirteen op-amps came to have both supply rails left off
+   * and their output pinned to 0 V. Reported rather than assumed correct: the
+   * mapping is a table of names typed by hand against a format that spells them
+   * its own way (`VS+`, not `V+`).
+   */
+  unmapped: string[];
 }
 
 /**
@@ -154,10 +188,33 @@ const TYPES: Record<string, PartType> = {
   PNP: { sym: "pnp", prefix: "Q", pins: ["C", "B", "E"], value: () => "PNP" },
   "JFET N": { sym: "njf", prefix: "J", pins: ["D", "G", "S"], value: () => "NJF" },
 
-  // Multisim's 3-terminal op-amp has no supply pins; the 5-terminal one does.
-  // Both map onto UniversalOpAmp2, whose pin order is In+ In- V+ V- OUT.
-  "3 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", null, null, "OUT"], value: () => "UniversalOpAmp2" },
-  "5 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "V+", "V-", "OUT"], value: () => "UniversalOpAmp2" },
+  // Multisim's 3-terminal op-amp has no supply pins, and so has ours: the ideal
+  // three-terminal part (library/sub/opamp.lib), which both formats have.
+  //
+  // It used to map onto the 5-terminal UniversalOpAmp2 with the supply pins left
+  // unconnected, and that is not a small inaccuracy — `Rvp`/`Rvn` tie an open
+  // rail to ground, so the output clamp became min(max(ng,0),0) and every
+  // converted 3-terminal op-amp sat at 0 V whatever its input did. A voltage
+  // follower on 2.5 V put out 0.25 uV.
+  "3 Terminal Opamp": {
+    sym: "opamp", prefix: "U", forcePrefix: "X", pins: ["IN+", "IN-", "OUT"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel opamp"],
+  },
+  // No `Value`: for a symbol the editor knows, a Value *is* the model name, and
+  // `UniversalOpAmp2` is the symbol's name, not the subcircuit's — that is
+  // `level2`. Written out, every converted op-amp asked ngspice for a subcircuit
+  // that does not exist ("unknown subckt: universalopamp2") and the sheet did not
+  // start at all. Left out, the part keeps its default model, which is how the
+  // hand-drawn examples have always done it.
+  //
+  // Multisim spells the supply connections `VS+`/`VS-`, not `V+`/`V-` — the
+  // INA333 below had it right, this one did not, and a name that does not exist
+  // on the part yields no pin at all. Both rails were then left off the symbol,
+  // so the supply nets never reached it and the model saw 0 V on each: the
+  // output clamp became min(max(ng,0),0) and the part sat at 0 V. 13 op-amps
+  // across the bundled schematics were in that state (see `unmapped` below,
+  // which is there so this cannot be silent again).
+  "5 Terminal Opamp": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "VS+", "VS-", "OUT"], value: () => "" },
   // The LM317 is a library part, not a primitive: the `Ureg` symbol plus the
   // `LM317/TI` subcircuit from library/sub/LM317.lib, which the netlist
   // generator pulls in because the schematic references it by name. Pin order
@@ -192,13 +249,90 @@ const TYPES: Record<string, PartType> = {
     value: () => "", attrs: ["Prefix X", "SpiceModel 74LS93"],
   },
 
-  // Multisim's ideal comparator is an op-amp with no supply pins and a defined
-  // output swing (Output_level, Rise_fall_time). Mapped onto the generic op-amp
-  // it keeps the comparison but not the output levels: the converted stage
-  // swings to whatever its supply rails allow rather than to Output_level, and
-  // the specified edge time is lost. Close enough for a threshold decision,
-  // which is what these circuits use it for.
-  "Ideal Comparator": { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", null, null, "OUT"], value: () => "UniversalOpAmp2" },
+  // Multisim's "Digital Hexadecimal 7-Segment Display" is decoder and display in
+  // one: four binary inputs, no segment pins. `GND`/`VCC` are listed but never
+  // placed, so they are left out here as they are on every other digital part.
+  //
+  // Until now it was skipped outright, which is why four schematics had counter
+  // outputs running into nothing — and in the Dual-Slope ADC a node that only a
+  // gate reads and nothing drives, which ngspice answers with "singular matrix".
+  "Digital Hexadecimal 7-Segment Display": {
+    sym: "seg7hex", prefix: "U", forcePrefix: "X", pins: ["1", "2", "3", "4"],
+    value: () => "seg7hex", attrs: ["Prefix X", "SpiceModel seg7hex"],
+  },
+
+  // The switches, as parts rather than as a pair of parameter resistors.
+  //
+  // Same story as the potentiometer: two resistor bodies took roughly three
+  // times the room of the part they replaced. The two voltage-controlled ones
+  // gain more than room — a resistor cannot follow a gate signal, so their
+  // control input used to be dropped outright and the contacts went static.
+  // Their models keep it (library/sub/vcspst.lib, vcspdt.lib).
+  //
+  // `State` says which way a manual switch was saved; for the changeover it
+  // picks the throw, and `pos` is exactly that index. The rest position is the
+  // first path in Multisim's own order, which is our NC.
+  SPST: {
+    sym: "spst", prefix: "S", forcePrefix: "X", pins: ["1", "2"],
+    value: () => "spst", attrs: ["Prefix X", "SpiceModel spst"],
+    spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}`,
+  },
+  SPDT: {
+    sym: "spdt", prefix: "S", forcePrefix: "X", pins: ["2", "1", "3"],
+    value: () => "spdt", attrs: ["Prefix X", "SpiceModel spdt"],
+    spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}`,
+  },
+  "Voltage Controlled SPST": {
+    sym: "vcspst", prefix: "S", forcePrefix: "X", pins: ["inA", "outA", "ctrlp", "ctrln"],
+    value: () => "vcspst", attrs: ["Prefix X", "SpiceModel vcspst"],
+    spiceLine: switchThresholds,
+  },
+  "Voltage Controlled SPDT": {
+    sym: "vcspdt", prefix: "S", forcePrefix: "X", pins: ["inA", "outA1", "outA2", "ctrlp", "ctrln"],
+    value: () => "vcspdt", attrs: ["Prefix X", "SpiceModel vcspdt"],
+    spiceLine: switchThresholds,
+  },
+
+  // The potentiometer, as one part: the `pot` symbol plus the `pot` subcircuit
+  // from library/sub/pot.lib. It used to be expanded into two stacked resistors
+  // driven by a shared `.param`, which is what SPICE needs but not what fits on
+  // the sheet — two resistor bodies where the source drawing had one part took
+  // roughly three times the room, and on the denser exercise sheets the halves
+  // landed on top of neighbouring parts. Inside a `.subckt` the same two
+  // resistors take no space at all.
+  //
+  // Track resistance and wiper position ride on the instance line, so several
+  // pots on one sheet keep their own settings. `wiper` counts from terminal 1
+  // towards terminal 3, matching Multisim's own model (`posPercent` measured
+  // from T1) — the old expansion had it the other way round, so an imported pot
+  // sat at the mirror image of the position it was saved in.
+  Potentiometer: {
+    sym: "pot", prefix: "R", forcePrefix: "X", pins: ["1", "2", "3"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel pot"],
+    spiceLine: (p) => {
+      const pos = parseFloat(si(p.PosPercent) || "50") / 100;
+      return `Rtot=${si(p.Res) || "10k"} wiper=${Number.isFinite(pos) ? pos : 0.5}`;
+    },
+  },
+
+  // Multisim's ideal comparator has three terminals and carries its output
+  // levels as parameters (`Output_level`, `Rise_fall_time`) rather than on
+  // supply pins — so it maps onto our own three-terminal comparator, which is
+  // built the same way (library/sub/comparator.lib).
+  //
+  // It used to map onto the five-terminal op-amp with the supply pins left
+  // unconnected, which grounded both rails and left the output stuck at 0 V; the
+  // specified output level was lost on top of that. Now the level rides on the
+  // instance, and the edge time with it.
+  //
+  // Multisim states one level and means 0..Output_level: in
+  // `8_2_3_Dual_Slope_ADC` the comparator drives the logic stages, which sit on
+  // 0/5 V. A bipolar output is a matter of setting Vlow by hand.
+  "Ideal Comparator": {
+    sym: "comparator", prefix: "U", forcePrefix: "X", pins: ["IN+", "IN-", "OUT"],
+    value: () => "comparator", attrs: ["Prefix X", "SpiceModel comparator"],
+    spiceLine: (p) => `Vhigh=${si(p.Output_level) || "5"} Vlow=0 Trf=${si(p.Rise_fall_time) || "10n"}`,
+  },
 
   // The INA333 is an instrumentation amplifier, not an op-amp: its gain is set
   // by an external resistor across RG1/RG2 and its output is referred to REF.
@@ -206,7 +340,7 @@ const TYPES: Record<string, PartType> = {
   // converted stage has open-loop gain instead of the gain the circuit set, and
   // REF is lost. It converts so the schematic is complete — the amplification
   // has to be rebuilt by hand.
-  INA333: { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "VS+", "VS-", "OUT"], value: () => "UniversalOpAmp2" },
+  INA333: { sym: "UniversalOpAmp2", prefix: "U", pins: ["IN+", "IN-", "VS+", "VS-", "OUT"], value: () => "" },
 };
 
 /**
@@ -243,20 +377,71 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   pnp: [[64, 0], [0, 48], [64, 96]],
   njf: [[64, 0], [0, 48], [64, 96]],
   UniversalOpAmp2: [[-32, 16], [-32, -16], [0, -32], [0, 32], [32, 0]],
+  // src/sym/opamp.asy, in SpiceOrder: In+, In-, OUT. The same three positions the
+  // 5-pin symbol uses, so a converted sheet keeps its shape either way. The
+  // comparator is drawn from the same geometry (see comparator.asy).
+  opamp: [[-32, 16], [-32, -16], [32, 0]],
+  comparator: [[-32, 16], [-32, -16], [32, 0]],
   // library/sym/Ureg.asy, in SpiceOrder: in, adj, out.
   Ureg: [[-48, -16], [0, 32], [48, -16]],
   // library/sym/SCR.asy, in SpiceOrder: A, G, K.
   SCR: [[0, -64], [48, 40], [0, 64]],
+  // library/sym/pot.asy, in SpiceOrder: A (terminal 1), W (wiper), B (terminal 3).
+  // A and B sit exactly where `res`'s two pins do, so a pot fits the space the
+  // resistor it replaces was drawn in.
+  pot: [[16, 16], [64, 48], [16, 96]],
+  // src/sym/seg7hex.asy, in SpiceOrder: D8 D4 D2 D1 — on Multisim's own raster.
+  seg7hex: [[0, 0], [32, 0], [64, 0], [96, 0]],
+  // The switch family, in SpiceOrder. src/sym/{spst,spdt,vcspst,vcspdt}.asy —
+  // drawn on Multisim's own pin raster, so a converted switch needs no bridge
+  // and the wiring lands straight on the pins.
+  spst: [[0, 0], [112, 0]],
+  spdt: [[0, 0], [112, -48], [112, 0]],
+  vcspst: [[0, 0], [128, 0], [48, 64], [80, 64]],
+  vcspdt: [[0, 0], [128, -16], [128, 16], [48, 80], [80, 80]],
   // library/sym/74LS93.asy, in SpiceOrder: CKA CKB R01 R02 QA QB QC QD.
   "74LS93": [[-48, -48], [-48, -16], [-48, 16], [-48, 48], [48, -48], [48, -16], [48, 16], [48, 48]],
   // D, CLK, SET, RESET, Q, ~Q — the same numbers as ltspiceGeometry's `dff`
   // entry, which is what the editor places the pins on.
+  //
+  // NOTE: these were briefly moved to Multisim's own raster (body 160 wide, the
+  // asynchronous pins 104 out) so a converted flip-flop would need no bridge. It
+  // draws far better — the corpus went from 1056 dead wire ends to 681 — but the
+  // offsets are *our* convention, not LTSpice's, so changing them reinterprets
+  // every `.asc` already saved: `examples/Rahm/6_2_1_Asynchroner_Frequenzteiler_Lsg.asc`
+  // came apart, its wires still drawn to the old positions. A published
+  // schematic that worked has to keep working, so the raster stays.
   "Digital\\dflop": [[-32, -24], [-32, 24], [0, -48], [0, 48], [32, -24], [32, 24]],
 };
 
 // ---------------------------------------------------------------------------
 // Value formatting
 // ---------------------------------------------------------------------------
+
+/**
+ * A parameter Multisim spells with markup in the name.
+ *
+ * Its switch parameters arrive as `V<sub>ON</sub>`, `R<sub>OFF</sub>` and so on —
+ * the subscript of the printed symbol, carried into the key. Read under both the
+ * plain and the tagged spelling so neither a tidied file nor the original is the
+ * one that fails.
+ */
+function param(p: Params, name: string): string {
+  const tagged = name.replace(/^([A-Z])_?(.+)$/, "$1<sub>$2</sub>");
+  return si(p[name] ?? p[tagged] ?? p[name.replace("_", "")] ?? "");
+}
+
+/**
+ * Switching thresholds and contact resistances for a voltage-controlled switch,
+ * as the instance line wants them.
+ *
+ * Multisim states an on and an off threshold; the model turns that pair into
+ * ngspice's centre plus hysteresis, so both numbers travel unchanged.
+ */
+function switchThresholds(p: Params): string {
+  const v = (k: string, d: string) => param(p, k) || d;
+  return `Von=${v("V_ON", "1")} Voff=${v("V_OFF", "0")} Ron=${v("R_ON", "10m")} Roff=${v("R_OFF", "1G")}`;
+}
 
 /** Normalise a Multisim value for SPICE (µ → u, strip blanks). */
 function si(v: unknown): string {
@@ -537,11 +722,52 @@ function gatePinOffsets(n: number): Pt[] {
 }
 
 /**
+ * Bridge a symbol pin to the point Multisim's wiring ends at.
+ *
+ * Routed as an L so it stays on the orthogonal grid, leading with the axis the
+ * pin faces so it leaves the symbol squarely. Recorded as a span in `wires`, so
+ * the withdrawal pass below can take the whole stub back if it turns out to
+ * cross something or to run over a neighbouring pin.
+ */
+function bridgeTo(ctx: Ctx, pin: Pt, target: Pt, siblings: Pt[]): void {
+  if (pin[0] === target[0] && pin[1] === target[1]) return;
+  const from = ctx.wires.length;
+  const dir = outwardDir({ x: pin[0], y: pin[1] }, siblings.map(([x, y]) => ({ x, y })));
+  const alongFlank = dir && (dir.x !== 0 ? pin[0] === target[0] : pin[1] === target[1]);
+  if (alongFlank) {
+    const mx = pin[0] + dir!.x * LEAD, my = pin[1] + dir!.y * LEAD;
+    ctx.wires.push([pin[0], pin[1], mx, my]);
+    if (dir!.x !== 0) {
+      ctx.wires.push([mx, my, mx, target[1]]);
+      ctx.wires.push([mx, target[1], target[0], target[1]]);
+    } else {
+      ctx.wires.push([mx, my, target[0], my]);
+      ctx.wires.push([target[0], my, target[0], target[1]]);
+    }
+  } else if (dir?.y) {
+    ctx.wires.push([pin[0], pin[1], pin[0], target[1]]);
+    ctx.wires.push([pin[0], target[1], target[0], target[1]]);
+  } else {
+    ctx.wires.push([pin[0], pin[1], target[0], pin[1]]);
+    ctx.wires.push([target[0], pin[1], target[0], target[1]]);
+  }
+  ctx.bridges.push({ from, until: ctx.wires.length, ends: [pin, target] });
+}
+
+/**
  * Emit a logic gate.
  *
- * Anchored on its output, because that pin exists on every gate and is the one
- * the following stage is wired to; the inputs then fall out of the symbol's own
- * geometry and the net-list reconciliation labels whatever does not line up.
+ * Fitted over *all* its pins, like every other part, and anchored on the input
+ * column rather than on the output. Both halves of that matter:
+ *
+ *   - The inputs are where the fit is exact. Our gate spaces them 16 apart and
+ *     so does Multisim, so one orientation puts every input on its wire and
+ *     leaves only the output to bridge. Anchored on the output instead — as this
+ *     did — the whole column lands 56 units off, and that was before mirroring.
+ *   - `R0` was written unconditionally, so a gate Multisim had mirrored (its
+ *     matrix carries `a = -1`) came out facing the wrong way and its inputs
+ *     ended up 200 units from their wires. Unconnected ports read as ground, so
+ *     the gate then computed with zeros and said nothing about it.
  */
 function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
@@ -550,13 +776,20 @@ function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx)
   const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
 
   const offs = gatePinOffsets(spec.ins.length);
-  const outLocal = part.pins["Y"];
-  const outAbs: Pt = outLocal ? scaled(applyMatrix(part.matrix, outLocal), ctx.to) : [0, 0];
-  const origin: Pt = [outAbs[0] - offs[offs.length - 1][0], outAbs[1] - offs[offs.length - 1][1]];
+  const conns = [...spec.ins, "Y"];
+  const want: (Pt | null)[] = conns.map((c) => {
+    const local = part.pins[c];
+    return local ? scaled(applyMatrix(part.matrix, local), ctx.to) : null;
+  });
+  // Anchor on the first input that exists; the output is the fallback for a
+  // gate whose inputs the file does not place.
+  const anchorIdx = want.findIndex((p) => p !== null);
+  if (anchorIdx === -1) return;
+  const { deg, mirrored, str, origin } = fitOrientation(offs, want, anchorIdx);
 
   const symName = `Digital\\${GATE_SYMBOL[spec.gate] ?? spec.gate}`;
   const pinNames = [...spec.ins.map((_, i) => `In${i + 1}`), "Out"];
-  symbolLines.push(`SYMBOL ${symName} ${origin[0]} ${origin[1]} R0`);
+  symbolLines.push(`SYMBOL ${symName} ${origin[0]} ${origin[1]} ${str}`);
   symbolLines.push(`SYMATTR InstName ${name}`);
   symbolLines.push(`SYMATTR Value ${spec.gate.toUpperCase()}`);
   symbolLines.push(
@@ -564,8 +797,21 @@ function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx)
     `vth=${LOGIC_THRESHOLD};vhigh=${LOGIC_HIGH};pins=${pinNames.join(",")}`,
   );
 
-  spec.ins.forEach((conn, i) => at(conn, [origin[0] + offs[i][0], origin[1] + offs[i][1]]));
-  at("Y", outAbs);
+  const pinPts: Pt[] = offs.map((o) => {
+    const r = rotate(o, deg, mirrored);
+    return [origin[0] + r[0], origin[1] + r[1]] as Pt;
+  });
+  // With the fit anchored on the input column every input lands on its own wire,
+  // so in practice only the output is left to bridge, and only by the difference
+  // between the two tools' body widths. Leaving even that out is worse — the
+  // reconciliation then has to name more islands, and the corpus goes from three
+  // shorted schematics to five.
+  conns.forEach((c, i) => {
+    at(c, pinPts[i]);
+    ctx.terminals.push(pinPts[i]);
+    const target = want[i];
+    if (target) bridgeTo(ctx, pinPts[i], target, pinPts);
+  });
 }
 
 /**
@@ -599,6 +845,16 @@ const ffPins = (kind: string): { conn: string; off: Pt }[] =>
  *
  * Anchored on Q, the pin that exists on every flip-flop and that the following
  * stage is wired to.
+ *
+ * NOTE: fitting this over all six pins the way `emitGate` now is — with the
+ * orientation and the mirror taken from Multisim's matrix — was tried and taken
+ * back. It draws better on paper (80 fewer invented net names across the corpus,
+ * and the shift register goes from 177 dead wire ends to 117), but it moves the
+ * part far enough that `6_2_1_Asynchroner_Frequenzteiler_Lsg` stops simulating
+ * at all: ngspice reports a singular matrix and the operating point never
+ * settles. A schematic that draws better and no longer runs is the worse of the
+ * two, so the flip-flop keeps the single anchor until the placement can be moved
+ * without breaking the net it lands on.
  */
 function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
@@ -625,8 +881,10 @@ function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
 
   // Multisim spells the complement "~Q" on some symbols and "Qneg" on others.
   for (const { conn, off } of pins) {
+    const at: Pt = [origin[0] + off[0], origin[1] + off[1]];
     const id = part.connPin[conn] ?? (conn === "~Q" ? part.connPin["Qneg"] : undefined);
-    if (id !== undefined) pinPos[`${part.guid}/${id}`] = [origin[0] + off[0], origin[1] + off[1]];
+    if (id !== undefined) pinPos[`${part.guid}/${id}`] = at;
+    ctx.terminals.push(at);
   }
 }
 
@@ -636,8 +894,15 @@ function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
  * Both have a single pin in Multisim and are implicitly referenced to ground, so
  * the source's negative terminal gets its own ground flag rather than being left
  * floating — which ngspice would reject as an open circuit.
+ *
+ * That invented terminal needs somewhere to go. Emitted at a fixed `R0` it sat
+ * 80 units below the output pin, and where the drawn wiring also left the pin
+ * downwards it landed *on that wire* — grounding the output and shorting the
+ * source it belongs to (`2_0_Disjunktive_Normalform_Lsg`: three inputs of the
+ * logic all pinned to 0, and ngspice rejecting the sources). So the source is
+ * turned to point its ground away from its own wiring.
  */
-function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx): void {
+function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx, sch: MsSchematic): void {
   const { symbolLines, pinPos, flags, used } = ctx;
   const name = uniqueName(`V${part.refdes.prefix || "DG"}`, part.refdes.number, used);
   const p = part.params;
@@ -660,15 +925,35 @@ function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx): 
   const outAbs: Pt = local ? scaled(applyMatrix(part.matrix, local), ctx.to) : [0, 0];
 
   const VS = PIN_OFFSETS.voltage;
-  const origin: Pt = [outAbs[0] - VS[0][0], outAbs[1] - VS[0][1]];
-  symbolLines.push(`SYMBOL voltage ${origin[0]} ${origin[1]} R0`);
+  // Every segment the sheet draws, in LTSpice units — what the ground terminal
+  // has to keep clear of.
+  const drawn: Wire[] = [];
+  for (const w of sch.wires) {
+    for (let i = 0; i + 1 < w.path.length; i++) {
+      drawn.push([ctx.to(w.path[i][0]), ctx.to(w.path[i][1]), ctx.to(w.path[i + 1][0]), ctx.to(w.path[i + 1][1])]);
+    }
+  }
+  // R0 first, so a source with nothing in the way keeps the upright shape these
+  // sheets were drawn with; the turns are only reached when it is in the way.
+  const deg = [0, 180, 90, 270].find((d) => {
+    const o: Pt = [outAbs[0] - rotate(VS[0], d, false)[0], outAbs[1] - rotate(VS[0], d, false)[1]];
+    const r = rotate(VS[1], d, false);
+    const g: Pt = [o[0] + r[0], o[1] + r[1]];
+    return !drawn.some((w) => onSegment(g, w));
+  }) ?? 0;
+
+  const plus = rotate(VS[0], deg, false);
+  const origin: Pt = [outAbs[0] - plus[0], outAbs[1] - plus[1]];
+  symbolLines.push(`SYMBOL voltage ${origin[0]} ${origin[1]} R${deg}`);
   symbolLines.push(`SYMATTR InstName ${name}`);
   symbolLines.push(`SYMATTR Value ${value}`);
 
-  const minus: Pt = [origin[0] + VS[1][0], origin[1] + VS[1][1]];
+  const off = rotate(VS[1], deg, false);
+  const minus: Pt = [origin[0] + off[0], origin[1] + off[1]];
   flags.push(`FLAG ${minus[0]} ${minus[1]} 0`);
   const id = part.connPin[conn];
   if (id !== undefined) pinPos[`${part.guid}/${id}`] = outAbs;
+  ctx.terminals.push(outAbs, minus);
 }
 
 // ---------------------------------------------------------------------------
@@ -692,15 +977,11 @@ export const R_OPEN = "1G";
  * their contacts become static — see the note this produces in the report.
  */
 const SWITCHES: Record<string, SwitchSpec> = {
-  SPST: { paths: [["1", "2"]], stateDrivesPath: false },
-  // Pin 3 sits alone on one side of the symbol and is the common terminal;
-  // connections "1" and "3" are the two throws.
-  SPDT: { paths: [["2", "1"], ["2", "3"]], stateDrivesPath: true },
+  // The only one left on the resistor stand-in. It is not a contact but a
+  // transistor used as one, and its "control" is a base drive rather than a
+  // gate signal — a switch model with a threshold would say something about it
+  // that Multisim does not.
   "Transistor Switch": { paths: [["pos", "neg"]], drop: ["control"], stateDrivesPath: false },
-  "Voltage Controlled SPST": { paths: [["inA", "outA"]], drop: ["ctrlp", "ctrln"], stateDrivesPath: false },
-  "Voltage Controlled SPDT": {
-    paths: [["inA", "outA1"], ["inA", "outA2"]], drop: ["ctrlp", "ctrln"], stateDrivesPath: true,
-  },
 };
 
 /**
@@ -745,71 +1026,10 @@ function emitSwitch(part: MsPart, spec: SwitchSpec, ctx: Ctx): string[] {
     if (i === 0) at(from, top);
     else ctx.wires.push([anchor[0], anchor[1], top[0], top[1]]);
     at(to, bottom);
+    ctx.terminals.push(top, bottom);
   });
 
   return spec.drop ?? [];
-}
-
-// ---------------------------------------------------------------------------
-// Potentiometer
-// ---------------------------------------------------------------------------
-
-/**
- * Expand a potentiometer into the two series resistors SPICE needs.
- *
- * There is no pot primitive: the track becomes an upper and a lower resistor
- * meeting at the wiper. Driving both from one wiper-position parameter keeps
- * them summing to the track resistance, so the pot can still be swept from a
- * single `.param` — the point of the exercise sheets it appears on. The `+1n`
- * guard keeps either half from collapsing to a 0 Ω node at the end stops, which
- * ngspice rejects as a voltage-source loop.
- *
- * Names are derived from the pot's refdes because a schematic may hold several
- * pots, and one shared `T1`/`R0` would tie them all to the same position.
- */
-function emitPotentiometer(part: MsPart, ctx: Ctx): void {
-  const { symbolLines, directives, pinPos, used } = ctx;
-
-  // A pot's refdes already carries an R prefix ("R4", "Rp"), so use it as is.
-  const base = uniqueName(part.refdes.prefix || "Rp", part.refdes.number, used);
-
-  const total = si(part.params.Res) || "1k";
-  const pos = parseFloat(part.params.PosPercent ?? "50") / 100;
-
-  const tName = `T_${base}`;
-  const rName = `R_${base}`;
-  const upper = `${base}a`;
-  const lower = `${base}b`;
-  directives.push(
-    `.param ${tName}=${Number.isFinite(pos) ? pos : 0.5}`,
-    `.param ${rName}=${total}`,
-    `.param ${upper}=(1-${tName})*${rName}+1n`,
-    `.param ${lower}=${tName}*${rName}+1n`,
-  );
-
-  // Stack the two halves along the track, anchored where the pot's first
-  // terminal sat. They need not line up with the old wiring — the net-list
-  // reconciliation below labels them onto the right nets either way.
-  const svgPins = part.pinsById;
-  const end1: Pt = svgPins["1"] ? scaled(applyMatrix(part.matrix, svgPins["1"]), ctx.to) : [0, 0];
-  const RES = PIN_OFFSETS.res;
-  const span = RES[1][1] - RES[0][1];
-  const originA: Pt = [end1[0] - RES[0][0], end1[1] - RES[0][1]];
-  const originB: Pt = [originA[0], originA[1] + span];
-
-  symbolLines.push(`SYMBOL res ${originA[0]} ${originA[1]} R0`);
-  symbolLines.push(`SYMATTR InstName ${upper}`);
-  symbolLines.push(`SYMATTR Value {${upper}}`);
-  symbolLines.push(`SYMBOL res ${originB[0]} ${originB[1]} R0`);
-  symbolLines.push(`SYMATTR InstName ${lower}`);
-  symbolLines.push(`SYMATTR Value {${lower}}`);
-
-  // Terminal 1 → top of the upper half, wiper → the shared node, terminal 3 →
-  // bottom of the lower half. Keyed by symbol pin id, as the net list is.
-  const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
-  at("1", [originA[0] + RES[0][0], originA[1] + RES[0][1]]);
-  at("2", [originB[0] + RES[0][0], originB[1] + RES[0][1]]);
-  at("3", [originB[0] + RES[1][0], originB[1] + RES[1][1]]);
 }
 
 // ---------------------------------------------------------------------------
@@ -858,31 +1078,17 @@ function wireGroups(wires: Wire[], points: Pt[]): Union {
 }
 
 /**
- * Length of the stub between a component pin and a net label placed on it — one
- * visible grid square.
+ * How far a pin bridge steps out sideways before turning — one visible grid
+ * square, so the stub leaves the symbol instead of running flush along its edge.
  *
- * The editor no longer leaves a lead of its own (a name is an anchor and simply
- * sits on the pin), but a converted file still gets one: it is written for
- * LTSpice as much as for us, and there a flag on a pin with no wire between them
- * reads as a terminal rather than a labelled net.
+ * A net label needs no such lead: it is a coordinate and simply sits on the pin
+ * (see `reconcile`).
  */
 const LEAD = 16;
 /**
- * Shortest a lead may be shrunk to when the preferred one is blocked: 0.3 cm at
- * the editor's 96 dpi, rounded up to LTSpice's 4-unit grid. Below this the
- * connector's tag sits on whatever it connects to — two of them on one point
- * draw on top of each other.
- */
-const MIN_LEAD = 12;
-
-/**
- * Which way a lead should point to get *out* of the part, or null when there is
- * no sensible direction.
- *
- * Taken from the pin's position relative to the centre of its own part's pins,
- * which the `guid/pinid` key makes available without threading a direction
- * through every emitter. The dominant axis wins, so the stub stays orthogonal.
- * A one-pin part (a ground connector) has no such centre and gets no lead.
+ * Which way a lead should point to get *out* of the part, from the pin's
+ * position relative to the centre of its own part's pins. The dominant axis
+ * wins, so the stub stays orthogonal.
  */
 function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
   const prefix = pinKey.slice(0, pinKey.lastIndexOf("/") + 1);
@@ -896,41 +1102,11 @@ function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
   return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
 }
 
-/**
- * Where a label's lead should end, or null when nothing is free.
- *
- * The preferred spot is `LEAD` out along the pin's own axis. If that is taken
- * the length is varied (never below {@link MIN_LEAD}) and then the other three
- * directions are tried, so a crowded pin still gets a real stub instead of the
- * label dropping back onto the terminal.
- */
-function leadTip(p: Pt, dir: Pt | null, pinPos: PinPos, wires: Wire[], placed: Pt[]): Pt | null {
-  if (!dir) return null;
-  const free = (q: Pt) => !occupied(q, pinPos, wires) && !placed.some((r) => r[0] === q[0] && r[1] === q[1]);
-  const dirs: Pt[] = [dir, [-dir[0], -dir[1]], [dir[1], dir[0]], [-dir[1], -dir[0]]];
-  for (const d of dirs) {
-    for (let len = LEAD; len >= MIN_LEAD; len -= 4) {
-      const q: Pt = [p[0] + d[0] * len, p[1] + d[1] * len];
-      if (free(q)) return q;
-    }
-    for (let len = LEAD + 4; len <= LEAD + 32; len += 4) {
-      const q: Pt = [p[0] + d[0] * len, p[1] + d[1] * len];
-      if (free(q)) return q;
-    }
-  }
-  return null;
-}
-
-/** True when a point already carries a pin or lies anywhere on a wire. */
-function occupied(p: Pt, pinPos: PinPos, wires: Wire[]): boolean {
-  for (const q of Object.values(pinPos)) if (q[0] === p[0] && q[1] === p[1]) return true;
-  for (const [x1, y1, x2, y2] of wires) {
-    const on = x1 === x2
-      ? p[0] === x1 && p[1] >= Math.min(y1, y2) && p[1] <= Math.max(y1, y2)
-      : y1 === y2 && p[1] === y1 && p[0] >= Math.min(x1, x2) && p[0] <= Math.max(x1, x2);
-    if (on) return true;
-  }
-  return false;
+/** True when a point lies on an axis-aligned segment, endpoints included. */
+function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
+  return x1 === x2
+    ? p[0] === x1 && p[1] >= Math.min(y1, y2) && p[1] <= Math.max(y1, y2)
+    : y1 === y2 && p[1] === y1 && p[0] >= Math.min(x1, x2) && p[0] <= Math.max(x1, x2);
 }
 
 /**
@@ -980,16 +1156,45 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
     }
     // One island means the wires already join every pin on this net.
     if (islands.size < 2) continue;
-    for (const { p, key: pinKey } of islands.values()) {
-      const tip = leadTip(p, leadDirection(pinKey, pinPos), pinPos, wires, placed);
-      if (tip) {
-        wires.push([p[0], p[1], tip[0], tip[1]]);
-        placed.push(tip);
-        out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
-      } else {
-        placed.push(p);
-        out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
+    for (const [, { p, key: pinKey }] of islands) {
+      // A pin with no wire on it needs one. A name binds to the *net under it*,
+      // and a net is made of wires (see anchorNets/resolveAnchor) — so a name
+      // dropped on a bare terminal reaches nothing and the pin stays floating.
+      // That is not hypothetical: emitted without this, 106 gate inputs across
+      // six schematics fell back to ground, because a gate's pins routinely line
+      // up with no wire at all (see emitGate).
+      //
+      // One grid square, out of the part, and only where it is load-bearing.
+      if (!wires.some((w) => onSegment(p, w))) {
+        const d = leadDirection(pinKey, pinPos);
+        if (d) {
+          const tip: Pt = [p[0] + d[0] * LEAD, p[1] + d[1] * LEAD];
+          if (!placed.some((q) => q[0] === tip[0] && q[1] === tip[1])) {
+            wires.push([p[0], p[1], tip[0], tip[1]]);
+            placed.push(tip);
+            out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
+            continue;
+          }
+        }
       }
+
+      // Otherwise the name goes *on* the pin: no stub, and nothing joined to it.
+      //
+      // This used to draw a 16-unit lead and hang the flag off its far end, on
+      // the grounds that LTSpice reads a flag sitting directly on a pin as a
+      // terminal rather than as a net name. It does not — `InvSummierverstaerker.asc`
+      // is an LTSpice-authored file with its ±15 V flags straight on the source
+      // pins, and the connectivity suite exists because of it.
+      //
+      // What the lead did instead was rebuild the model the editor moved away
+      // from. A name is a coordinate: it owns no pin and no wire, and dragging it
+      // moves nothing but itself. Hung on a stub, the stub stayed behind when the
+      // name was dragged, and the stub's far end came back from the parser as a
+      // junction — 878 of the 953 names in the converted sheets sat on one,
+      // against 38% in the hand-drawn ones, and those sheets carried ten times
+      // the junctions per file.
+      placed.push(p);
+      out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
     }
   }
   return out;
@@ -1005,26 +1210,36 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
  * Removing the segment leaves its net split, which the net-list reconciliation
  * then rejoins with a label; a label connects by name and cannot cross anything.
  */
-function cutCrossings(wires: Wire[], junctions: Pt[]): Wire[] {
-  const marked = new Set(junctions.map((p) => key(p)));
+/**
+ * Where two axis-aligned segments cross without meeting end to end, or null.
+ *
+ * A shared endpoint is a corner of one routed path, not a crossing — two of the
+ * four endpoints landing on the point is what tells the two apart.
+ */
+function crossingPoint(a: Wire, b: Wire): Pt | null {
+  const aVert = a[0] === a[2], bVert = b[0] === b[2];
+  if (aVert === bVert) return null;
+  const [v, h] = aVert ? [a, b] : [b, a];
+  const x = v[0], y = h[1];
+  const onV = y >= Math.min(v[1], v[3]) && y <= Math.max(v[1], v[3]);
+  const onH = x >= Math.min(h[0], h[2]) && x <= Math.max(h[0], h[2]);
+  if (!onV || !onH) return null;
+  const ends = [[v[0], v[1]], [v[2], v[3]], [h[0], h[1]], [h[2], h[3]]]
+    .filter((p) => p[0] === x && p[1] === y).length;
+  return ends >= 2 ? null : [x, y];
+}
+
+function cutCrossings(wires: Wire[], junctions: Pt[], alsoMarked: Set<string> = new Set()): Wire[] {
+  const marked = new Set([...junctions.map((p) => key(p)), ...alsoMarked]);
   const drop = new Set<number>();
 
   for (let i = 0; i < wires.length; i++) {
     for (let k = i + 1; k < wires.length; k++) {
       if (drop.has(i) || drop.has(k)) continue;
       const a = wires[i], b = wires[k];
-      const aVert = a[0] === a[2], bVert = b[0] === b[2];
-      if (aVert === bVert) continue;
-      const [v, h, hIdx] = aVert ? [a, b, k] : [b, a, i];
-      const x = v[0], y = h[1];
-      const onV = y >= Math.min(v[1], v[3]) && y <= Math.max(v[1], v[3]);
-      const onH = x >= Math.min(h[0], h[2]) && x <= Math.max(h[0], h[2]);
-      if (!onV || !onH || marked.has(key([x, y]))) continue;
-      // A shared endpoint is a corner of one routed path, not a crossing.
-      const ends = [[v[0], v[1]], [v[2], v[3]], [h[0], h[1]], [h[2], h[3]]]
-        .filter((p) => p[0] === x && p[1] === y).length;
-      if (ends >= 2) continue;
-      drop.add(hIdx);
+      const at = crossingPoint(a, b);
+      if (!at || marked.has(key(at))) continue;
+      drop.add(a[0] === a[2] ? k : i);
     }
   }
   return wires.filter((_, i) => !drop.has(i));
@@ -1073,8 +1288,24 @@ export function convert(sch: MsSchematic): ConversionResult {
   const skipped: string[] = [];
   /** Parts replaced by a stand-in rather than converted one-to-one. */
   const substituted: string[] = [];
+  /** Declared connection names the placed part turned out not to have. */
+  const unmapped: string[] = [];
 
   const wires: Wire[] = [];
+  /**
+   * Which stretches of `wires` are pin bridges (see below), as index spans.
+   *
+   * Whether a bridge is worth drawing cannot be decided when it is drawn — the
+   * wiring it might run into is not read until later. So it is written in place,
+   * keeping the order of the list, and taken out again further down if need be:
+   * `cutCrossings` walks the list in order and a wire it has already dropped
+   * stops taking part, so reordering the list quietly changes which segment
+   * survives at every other crossing on the sheet.
+   */
+  const bridges: { from: number; until: number; ends: Pt[] }[] = [];
+  /** Every terminal placed on the sheet (see Ctx.terminals). */
+  const terminals: Pt[] = [];
+
   const flags: string[] = [];
   const symbolLines: string[] = [];
   /** SPICE directives the conversion itself needs (pot parameters, …). */
@@ -1092,7 +1323,7 @@ export function convert(sch: MsSchematic): ConversionResult {
     const num = part.refdes.number;
     if (num === null || num === undefined) continue;
     const prefix = TYPES[name]?.forcePrefix
-      || (SWITCHES[name] || name === "Potentiometer" ? "R" : null)
+      || (SWITCHES[name] ? "R" : null)  // the transistor switch, still a resistor
       || (name === "Digital Constant" || name === "Digital Clock" ? `V${part.refdes.prefix ?? "DG"}` : null)
       || part.refdes.prefix || TYPES[name]?.prefix;
     if (prefix) used.add(`${prefix}${num}`);
@@ -1102,12 +1333,7 @@ export function convert(sch: MsSchematic): ConversionResult {
   for (const part of sch.parts) {
     const bp = { name: part.typeName };
 
-    const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, to };
-
-    if (bp.name === "Potentiometer") {
-      emitPotentiometer(part, ctx);
-      continue;
-    }
+    const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, bridges, terminals, to };
 
     if (GATES[bp.name]) {
       emitGate(part, GATES[bp.name], ctx);
@@ -1129,7 +1355,7 @@ export function convert(sch: MsSchematic): ConversionResult {
     }
 
     if (bp.name === "Digital Constant" || bp.name === "Digital Clock") {
-      emitDigitalSource(part, bp.name === "Digital Clock" ? "clock" : "constant", ctx);
+      emitDigitalSource(part, bp.name === "Digital Clock" ? "clock" : "constant", ctx, sch);
       substituted.push(`${bp.name} (als Spannungsquelle)`);
       continue;
     }
@@ -1153,6 +1379,15 @@ export function convert(sch: MsSchematic): ConversionResult {
     const isIec = /:IEC:/.test(part.symbolDescription);
     const symName = isIec && type.euro ? type.euro : type.sym;
     const useOffsets = PIN_OFFSETS[symName] ?? offsets;
+
+    // A declared name the part does not carry: say so. Silently, this drops
+    // every wire on that pin.
+    for (const conn of type.pins) {
+      if (conn !== null && !(conn in part.pins)) {
+        const note = `${bp.name}: Anschluss ${conn} gibt es nicht (vorhanden: ${part.connNames.join(", ")})`;
+        if (!unmapped.includes(note)) unmapped.push(note);
+      }
+    }
 
     // Where each pin sits on the Multisim sheet, in LTSpice coordinates.
     const want: (Pt | null)[] = [];
@@ -1178,11 +1413,15 @@ export function convert(sch: MsSchematic): ConversionResult {
     const flat = part.params;
     const value = type.value(flat);
     if (value) symbolLines.push(`SYMATTR Value ${value}`);
+    const spiceLine = type.spiceLine?.(flat);
+    if (spiceLine) symbolLines.push(`SYMATTR SpiceLine ${spiceLine}`);
     for (const a of type.attrs ?? []) symbolLines.push(`SYMATTR ${a}`);
 
     // Where LTSpice's pin spacing differs from Multisim's, the Multisim wire
     // still ends at the original point — bridge the gap with a stub so the net
-    // stays connected instead of silently breaking.
+    // stays connected instead of silently breaking. Collected rather than drawn:
+    // whether a stub is worth having depends on the wiring around it, which is
+    // not read until below (see `bridges`).
     // Every pin of this part, so a stub can be told which way leads *out* of the
     // symbol (see outwardAxis) rather than along its flank.
     const pinPts: Pt[] = useOffsets
@@ -1202,38 +1441,11 @@ export function convert(sch: MsSchematic): ConversionResult {
       const conn = type.pins[i];
       const pid = conn === null ? undefined : part.connPin[conn];
       if (pid !== undefined) pinPos[`${part.guid}/${pid}`] = [ax, ay];
+      ctx.terminals.push([ax, ay]);
       const target = want[i];
       if (!target) continue;
       if (ax !== target[0] || ay !== target[1]) {
-        // Route the stub as an L so it stays on the orthogonal grid rather than
-        // cutting diagonally across the sheet — leading with the axis the pin
-        // faces, so it leaves the symbol squarely. Led with a fixed horizontal
-        // leg, the supply stubs of an op-amp (whose pins face up and down) ran
-        // sideways along the top and bottom edges and then down the flank,
-        // straight across both inputs.
-        const dir = outwardDir({ x: ax, y: ay }, pinPts.map(([x, y]) => ({ x, y })));
-        const alongFlank = dir && (dir.x !== 0 ? ax === target[0] : ay === target[1]);
-        if (alongFlank) {
-          // The Multisim point lies straight off the *side* of the pin, so an L
-          // has no corner to place and the whole stub would run flush against
-          // the symbol's edge. Step out perpendicular first, then come back:
-          // a small jog, but the wire visibly leaves the part.
-          const mx = ax + dir!.x * LEAD, my = ay + dir!.y * LEAD;
-          wires.push([ax, ay, mx, my]);
-          if (dir!.x !== 0) {
-            wires.push([mx, my, mx, target[1]]);
-            wires.push([mx, target[1], target[0], target[1]]);
-          } else {
-            wires.push([mx, my, target[0], my]);
-            wires.push([target[0], my, target[0], target[1]]);
-          }
-        } else if (dir?.y) {
-          wires.push([ax, ay, ax, target[1]]);
-          wires.push([ax, target[1], target[0], target[1]]);
-        } else {
-          wires.push([ax, ay, target[0], ay]);
-          wires.push([target[0], ay, target[0], target[1]]);
-        }
+        bridgeTo(ctx, [ax, ay], target, pinPts);
       }
     }
   }
@@ -1256,11 +1468,85 @@ export function convert(sch: MsSchematic): ConversionResult {
   }
 
   // --- wires --------------------------------------------------------------
+  // Taken over verbatim (scaled). Moving each end onto our own pin instead — the
+  // converter knows both coordinates — was built and reverted: it does fix the
+  // ends (the corpus went from 641 dead ends to 520) but it pulls the *paths*
+  // apart, because two wires that met at a Multisim pin no longer meet once each
+  // is moved to a different one of our pins. Net labels rose from 1242 to 1308,
+  // a source lost its terminal and a name stopped binding.
+  //
+  // The idea is right and the half-measure is not: it needs the wires *routed*
+  // between our pins, with Multisim's path as the guide, rather than the old
+  // endpoints nudged. That is a router, and `sch.nets` already holds the
+  // authority it would route from.
   for (const w of sch.wires) {
     const path = w.path;
     for (let i = 0; i + 1 < path.length; i++) {
       wires.push([to(path[i][0]), to(path[i][1]), to(path[i + 1][0]), to(path[i + 1][1])]);
     }
+  }
+
+  // --- take back the pin bridges that run into something -------------------
+  // A stub is a shortcut, not an obligation: everything it would connect is
+  // reachable by name through the reconciliation below. So one that crosses
+  // drawn wiring is withdrawn — as a whole, since half a stub connects nothing
+  // and just leaves a spur pointing at the part.
+  //
+  // The op-amp is why. Multisim's INA333 has IN+ above IN-, our symbol has them
+  // the other way round, so the stub reaching down to the old IN- point ran
+  // straight through the wire on IN+. Both were then cut as crossings, and what
+  // was left on the sheet was a hook curling out of one input towards the other
+  // — the wiring read as wrong even though the net list was right.
+  //
+  // Crossings *between* bridges are not counted: two of them meeting is the same
+  // pin spacing problem seen twice, and withdrawing both would take out wiring
+  // that nothing was wrong with.
+  //
+  // Running over somebody else's *pin* counts too, and is the worse of the two:
+  // a crossing is at least visible, but a stub laid across a neighbouring
+  // terminal welds two nets together silently. The 74LS93's four Q outputs are
+  // 16 units apart in Multisim and 96 apart on our symbol, so the stub from one
+  // of them ran along the row of the others.
+  const marked = new Set(sch.junctions.map((j) => key([to(j[0]), to(j[1])])));
+  const inBridge = new Set<number>();
+  for (const b of bridges) for (let i = b.from; i < b.until; i++) inBridge.add(i);
+  const dropped = new Set<number>();
+  for (const b of bridges) {
+    const own = new Set(b.ends.map(key));
+    let bad = false;
+    for (let i = b.from; i < b.until && !bad; i++) {
+      const s = wires[i];
+      for (let k = 0; k < wires.length && !bad; k++) {
+        if (inBridge.has(k)) continue;
+        const at = crossingPoint(s, wires[k]);
+        // Touching the very wire the stub was built to reach is not a crossing
+        // but the connection itself: the stub commonly meets it at a corner, and
+        // a corner counts as a crossing by the plain geometric test.
+        if (at && !marked.has(key(at)) && !onSegment(b.ends[1], wires[k])) bad = true;
+      }
+      for (const p of Object.values(pinPos)) {
+        if (!own.has(key(p)) && onSegment(p, s)) { bad = true; break; }
+      }
+    }
+    if (bad) for (let i = b.from; i < b.until; i++) dropped.add(i);
+    // A surviving stub reaches its target by *tapping* the wire that ends there,
+    // usually meeting it at one of its own corners. To `cutCrossings` that reads
+    // as a crossing — neither run stops at the point, so it would cut the wire
+    // and split the very net the stub was drawn to keep whole. It is a junction,
+    // and this is where we say so: the schematic then shows a wire arriving at
+    // the pin instead of stopping a grid square short of it with a net label
+    // either side (1_2_PT100-Sensor_mit_OPV, on the inverting input).
+    else {
+      for (let i = b.from; i < b.until; i++) {
+        marked.add(key([wires[i][0], wires[i][1]]));
+        marked.add(key([wires[i][2], wires[i][3]]));
+      }
+    }
+  }
+  if (dropped.size) {
+    const kept = wires.filter((_, i) => !dropped.has(i));
+    wires.length = 0;
+    wires.push(...kept);
   }
 
   // --- close gaps against the authoritative net list ----------------------
@@ -1270,10 +1556,61 @@ export function convert(sch: MsSchematic): ConversionResult {
   // one. Rather than guess at extra routing, reconcile geometry against the net
   // list and bridge whatever is still split with an LTSpice net label — which
   // connects by name and so cannot introduce a false crossing.
-  const routed = cutCrossings(wires, sch.junctions.map((j): Pt => [to(j[0]), to(j[1])]));
+  const routed = cutCrossings(wires, sch.junctions.map((j): Pt => [to(j[0]), to(j[1])]), marked);
   wires.length = 0;
   wires.push(...routed);
   flags.push(...reconcile(sch.nets, pinPos, wires, flags));
+
+  // --- prune what reaches nothing -----------------------------------------
+  // A wire end that meets no terminal, no other wire and no name connects
+  // nothing. It is the stump of a connection the conversion could not draw, and
+  // the net it belonged to has been rejoined by name above — so the stump costs
+  // only clarity, and a sheet full of leads running into blank space reads as
+  // broken even where it is not.
+  //
+  // Two things make this safe, and both were missing in the attempts that put
+  // terminals on ground: the protected points come from `terminals`, which every
+  // emitter fills as it draws (so a pin Multisim does not name still counts),
+  // and a segment carrying a name is never cut, because the name binds to its net
+  // *through* that segment.
+  //
+  // Repeated, because removing a stub exposes the corner behind it.
+  {
+    const held = new Set<string>(terminals.map(key));
+    for (const f of flags) {
+      const m = /^FLAG (-?\d+) (-?\d+)/.exec(f);
+      if (m) held.add(key([Number(m[1]), Number(m[2])]));
+    }
+    for (const p of Object.values(pinPos)) held.add(key(p));
+    for (;;) {
+      const deg = new Map<string, number>();
+      for (const [x1, y1, x2, y2] of wires) {
+        for (const k of [key([x1, y1]), key([x2, y2])]) deg.set(k, (deg.get(k) ?? 0) + 1);
+      }
+      const loose = (p: Pt) => {
+        const k = key(p);
+        if ((deg.get(k) ?? 0) !== 1 || held.has(k)) return false;
+        // A T is held: another wire runs through the point rather than ending on it.
+        return !wires.some((w) =>
+          onSegment(p, w) && key([w[0], w[1]]) !== k && key([w[2], w[3]]) !== k);
+      };
+      // A stub is only cut where it does not strand the terminal it hangs on.
+      // Cutting the last wire off a pin leaves it on no net at all, and a source
+      // whose two terminals are then both "no net" reads to ngspice as shorted —
+      // it refuses to start, where before it merely delivered nothing. So the
+      // terminal keeps one lead and the sheet keeps a short stub there.
+      const strands = (held_end: Pt) => (deg.get(key(held_end)) ?? 0) <= 1;
+      const keep = wires.filter((w) => {
+        const a: Pt = [w[0], w[1]], b: Pt = [w[2], w[3]];
+        if (loose(b) && !strands(a)) return false;
+        if (loose(a) && !strands(b)) return false;
+        return true;
+      });
+      if (keep.length === wires.length) break;
+      wires.length = 0;
+      wires.push(...keep);
+    }
+  }
 
   // --- free-standing text -------------------------------------------------
   const texts: string[] = [];
@@ -1314,5 +1651,6 @@ export function convert(sch: MsSchematic): ConversionResult {
     skipped: [...new Set(skipped)],
     substituted: [...new Set(substituted)],
     shorts: findShorts(sch.nets, pinPos, cleanWires, flags),
+    unmapped,
   };
 }

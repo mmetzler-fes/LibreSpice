@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Node, Edge } from "@xyflow/react";
-import { symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
+import { symbolByName, symbolForType, symbolBounds, type SymbolNorm } from "@sym/asyParser.js";
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
@@ -61,7 +61,16 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
   // running into it already show the connection, so it draws nothing.
   if (type === "junction") return null;
 
-  if (type === "subcircuit") {
+  // A library part draws its own `.asy`, exactly as the canvas does (see
+  // ComponentNode's LibrarySymbolNode) — and through the same `mapSymbol`, so
+  // the drawing lands on the pins the wires were routed to. Only a part whose
+  // symbol is missing falls back to the named box, which is all a `.subckt`
+  // dropped in without artwork can be drawn as.
+  const libSym = type === "subcircuit" && data.symbolName
+    ? symbolByName(data.symbolName, norm)
+    : undefined;
+
+  if (type === "subcircuit" && !libSym) {
     return (
       <g transform={`translate(${x} ${y})`} color="#334155">
         <rect x={10} y={4} width={NODE_SIZE - 20} height={NODE_SIZE - 8} rx={4} fill="#f8fafc" stroke="currentColor" strokeWidth={1.6} />
@@ -70,7 +79,7 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
     );
   }
 
-  const sym = symbolForType(type, norm);
+  const sym = libSym ?? symbolForType(type, norm);
   // Native-scale mapping (margin 0, grid-snapped) — identical to the editor node
   // and to getNodePins, so the drawn symbol lands exactly on its pins (and thus
   // on the wire endpoints). A fit-to-box mapping would shrink/offset it.
@@ -129,7 +138,7 @@ function SymbolNode({ node, norm }: { node: Node; norm: SymbolNorm }) {
       {showCaption && (
         <text x={labelPos.x} y={labelPos.y} textAnchor={labelPos.textAnchor} dominantBaseline={labelPos.baseline} fontSize={LABEL_FONT_SIZE} fontFamily="monospace" fill="#374151">{data.label}</text>
       )}
-      {showCaption && data.valueLabel && (
+      {showCaption && data.valueLabel && !libSym && (
         <text x={valuePos.x} y={valuePos.y} textAnchor={valuePos.textAnchor} dominantBaseline={valuePos.baseline} fontSize={VALUE_FONT_SIZE} fontFamily="monospace" fill="#6b7280">{data.valueLabel}</text>
       )}
     </g>

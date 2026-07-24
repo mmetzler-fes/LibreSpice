@@ -60,8 +60,12 @@ function subcircuitAttrs(comp: any, data: { subName?: string; pins?: string[]; l
     String(comp?.spiceModel ?? "").match(/\.subckt\s+(\S+)/i)?.[1] ||
     "";
   const pins = data.pins ?? comp?.portNames ?? [];
+  // Instance parameters go back where they came from: `SpiceLine`, LTSpice's own
+  // slot for the trailing `name=value` list on an `X` line.
+  const params = String(comp?.params ?? "").trim();
   return {
     ...(subckt ? { value: subckt } : {}),
+    ...(params ? { spiceLine: params } : {}),
     ...(pins.length ? { extra: `pins=${pins.join(",")}` } : {}),
   };
 }

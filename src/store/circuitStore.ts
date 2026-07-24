@@ -979,6 +979,23 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     }
     if (changed) {
       setTimeout(() => rebuildConnections(), 0);
+      return;
+    }
+
+    // A name is the third thing that can be selected, and the only one Delete
+    // never reached: it is neither a node nor an edge, so nothing above saw it
+    // and the key quietly did nothing. That is worst right after deleting the
+    // wire a name was lying on — the name stays, correctly (a `FLAG` is a point,
+    // not a property of a wire), but Delete is exactly the key reached for next,
+    // and with it dead the label read as undeletable.
+    //
+    // Only when nothing else went: selecting a wire does not clear the name
+    // selection, so a name left selected from earlier must not be swept along
+    // with the wire the user actually meant to delete.
+    const anchorId = useUIStore.getState().selectedAnchorId;
+    if (anchorId && get().netAnchors.some((a) => a.id === anchorId)) {
+      get().removeNetAnchor(anchorId);
+      useUIStore.getState().setSelectedAnchorId(null);
     }
   },
 

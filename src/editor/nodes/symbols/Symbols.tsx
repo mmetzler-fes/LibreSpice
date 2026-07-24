@@ -157,6 +157,14 @@ export const LogicGateSymbol = ({ gate = "and", inputs = 2 }: { gate?: string; i
  * part and carries an inversion bubble on a falling-edge one, which is the only
  * visual difference between the two.
  */
+/**
+ * D flip-flop / T flip-flop / D latch, drawn to Multisim's pin raster.
+ *
+ * The pin positions are a compatibility surface — they decide where a saved
+ * `.asc` puts its terminals — so the drawing follows them rather than the other
+ * way round. See the note in MultisimConverter's PIN_OFFSETS for the attempt to
+ * move both onto Multisim's raster, and why it was reverted.
+ */
 export const DFlipFlopSymbol = ({ edge = "rising", asyncPolarity = "high", kind = "dff" }: { edge?: string; asyncPolarity?: string; kind?: string }) => {
   const latch = kind === "dlatch";
   const falling = edge === "falling";
@@ -225,3 +233,56 @@ export const GroundSymbol = () => (
     <line x1="-4" y1="12" x2="4" y2="12" stroke="currentColor" strokeWidth="2" />
   </g>
 );
+
+/**
+ * Hexadecimal seven-segment display, lit from a simulation result.
+ *
+ * The first part on the sheet that reads a result rather than only a property.
+ * That is a line the project had not crossed — a component was a netlist line
+ * and static artwork, and everything showing a *measurement* lived in an overlay
+ * (the data flags). It is crossed here on purpose and only here: an indicator is
+ * a part whose whole job is to be read, and drawing it dark would be drawing it
+ * wrong.
+ *
+ * `value` is the decoded nibble, or null when there is nothing to show — no run
+ * yet, or an input on no net. Dark segments stay drawn in outline so the part
+ * keeps its shape either way.
+ */
+const SEG7_PATTERNS: Record<number, string> = {
+  //        abcdefg
+  0x0: "1111110", 0x1: "0110000", 0x2: "1101101", 0x3: "1111001",
+  0x4: "0110011", 0x5: "1011011", 0x6: "1011111", 0x7: "1110000",
+  0x8: "1111111", 0x9: "1111011", 0xa: "1110111", 0xb: "0011111",
+  0xc: "1001110", 0xd: "0111101", 0xe: "1001111", 0xf: "1000111",
+};
+
+/** Segment rectangles in the symbol's own frame: a, b, c, d, e, f, g. */
+const SEG7_BARS: [number, number, number, number][] = [
+  [30, -116, 36, 8],  // a  top
+  [64, -110, 8, 34],  // b  upper right
+  [64, -68, 8, 34],   // c  lower right
+  [30, -36, 36, 8],   // d  bottom
+  [24, -68, 8, 34],   // e  lower left
+  [24, -110, 8, 34],  // f  upper left
+  [30, -76, 36, 8],   // g  middle
+];
+
+export const SevenSegmentSymbol = ({ value, lit = "#e11d48" }: { value: number | null; lit?: string }) => {
+  const pattern = value === null ? null : SEG7_PATTERNS[value & 0xf];
+  return (
+    <g>
+      <rect x={0} y={-128} width={96} height={112} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      {SEG7_BARS.map(([x, y, w, h], i) => (
+        <rect
+          key={i} x={x} y={y} width={w} height={h}
+          fill={pattern && pattern[i] === "1" ? lit : "none"}
+          stroke="currentColor" strokeWidth="1"
+          opacity={pattern && pattern[i] === "1" ? 1 : 0.35}
+        />
+      ))}
+      {[0, 32, 64, 96].map((x) => (
+        <line key={x} x1={x} y1={0} x2={x} y2={-16} stroke="currentColor" strokeWidth="1.5" />
+      ))}
+    </g>
+  );
+};

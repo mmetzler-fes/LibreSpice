@@ -1,0 +1,17 @@
+* Einfacher Schalter (SPST), handbetaetigt.
+*
+* Die Stellung ist Eigenschaft der Instanz, nicht der Beschaltung: ein
+* handbetaetigter Schalter hat kein Steuersignal. Umgelegt wird er, indem `pos`
+* geaendert wird - im Eigenschaften-Fenster, ohne den Schaltplan anzufassen.
+*
+*   pos = 1 : geschlossen (wie gezeichnet, Ruhelage eines Schliessers)
+*   pos = 0 : offen
+*
+* Reine Arithmetik, damit der Ausdruck ohne Fallunterscheidung auskommt:
+* ngspice wertet `.param` frueh und nicht mit dem vollen Funktionsumfang der
+* B-Quelle aus.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt spst A B PARAMS: pos=1 Ron=10m Roff=1G
+R1 A B {Ron + (1-pos)*Roff}
+.ends spst

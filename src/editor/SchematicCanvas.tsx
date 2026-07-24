@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ComponentNode } from "./nodes/ComponentNode.js";
-import { WireEdge, WireOverlay, type WireData, orthoVertices, projectToSegment, type FlowPoint } from "./WireTool.js";
+import { WireEdge, WireOverlay, type WireData, type WireEnds, orthoVertices, projectToSegment, type FlowPoint } from "./WireTool.js";
 import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.js";
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { NetAnchorLayer } from "./NetAnchorLayer.js";
@@ -254,6 +254,7 @@ function CanvasInner() {
         const id = nextComponentId("subckt", useCircuitStore.getState().nodes.map((n) => n.id));
         const label = getNextLabel("subcircuit", existingLabels());
         const component = createSubcircuitComponent(id, label, x, y, placement.raw ?? "", placement.pins ?? []);
+        if (placement.params) component.params = placement.params;
         if (placementRotation) component.rotate(placementRotation as 90 | 180 | 270);
         const node: Node = {
           id,
@@ -393,18 +394,44 @@ function CanvasInner() {
   }, [deleteSelected, reactFlowInstance]);
 
   const onCreateWire = useCallback(
-    (connection: Connection, data: WireData) => {
-      const id = `wire_${connection.source}-${connection.sourceHandle}__${connection.target}-${connection.targetHandle}_${wireCounter++}`;
-      const edge: Edge = { id, ...connection, type: "wire", data };
+    (connection: Connection & WireEnds, data: WireData) => {
+      // An end that docked onto nothing gets a junction there. A junction is the
+      // missing pin — it draws nothing, carries one port, and is exactly what the
+      // importer already puts at the free end of an imported wire — so a wire
+      // drawn in free space is the same object as one that arrived in a file, and
+      // needs no second implementation of anything a wire can do.
+      const made: { component: ReturnType<typeof createSpiceComponent>; node: Node }[] = [];
+      const dock = (at: FlowPoint | undefined, side: "source" | "target") => {
+        if (!at) return {};
+        const id = nextComponentId("junction", [...nodes.map((n) => n.id), ...made.map((m) => m.node.id)]);
+        const x = at.x - NODE_SIZE / 2;
+        const y = at.y - NODE_SIZE / 2;
+        made.push({
+          component: createSpiceComponent("junction", id, "", x, y),
+          node: { id, type: "component", position: { x, y }, data: { componentType: "junction", label: "" } },
+        });
+        return side === "source"
+          ? { source: id, sourceHandle: "j" }
+          : { target: id, targetHandle: "j" };
+      };
+      const conn: Connection = {
+        ...connection,
+        ...dock(connection.sourceFree, "source"),
+        ...dock(connection.targetFree, "target"),
+      } as Connection;
+      for (const m of made) addComponent(m.component, m.node);
+
+      const id = `wire_${conn.source}-${conn.sourceHandle}__${conn.target}-${conn.targetHandle}_${wireCounter++}`;
+      const edge: Edge = { id, ...conn, type: "wire", data };
       setEdges(addEdge(edge, edges));
-      if (connection.source && connection.sourceHandle && connection.target && connection.targetHandle) {
+      if (conn.source && conn.sourceHandle && conn.target && conn.targetHandle) {
         try {
-          connectPorts(`${connection.source}-${connection.sourceHandle}`, `${connection.target}-${connection.targetHandle}`);
+          connectPorts(`${conn.source}-${conn.sourceHandle}`, `${conn.target}-${conn.targetHandle}`);
         } catch { /* visual-only */ }
       }
       regenerateNetlist();
     },
-    [edges, setEdges, connectPorts, regenerateNetlist],
+    [edges, nodes, setEdges, addComponent, connectPorts, regenerateNetlist],
   );
 
   const onNodeClick: NodeMouseHandler = useCallback(

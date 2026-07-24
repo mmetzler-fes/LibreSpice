@@ -180,6 +180,17 @@ export class OpAmp extends SpiceComponent {
 export class CustomSubcircuit extends SpiceComponent {
   spiceModel: string;
   portNames: string[];
+  /**
+   * Instance parameters for the `X` line, as SPICE spells them
+   * (`Rtot=10k wiper=0.5`) — LTSpice's `SYMATTR SpiceLine`, which is where a
+   * symbol declares its defaults and where a `.asc` carries the edited values.
+   *
+   * Without this a `.subckt` with `params:` could only ever run on its defaults,
+   * so a sheet with two potentiometers had one wiper position between them. It
+   * is kept as the raw string rather than a parsed map because the values are
+   * SPICE expressions ({R1*2}, a `.param` name), not numbers.
+   */
+  params: string;
 
   constructor(
     id: string,
@@ -187,10 +198,12 @@ export class CustomSubcircuit extends SpiceComponent {
     position?: Point,
     spiceModel = "",
     portNames: string[] = ["in", "out", "gnd"],
+    params = "",
   ) {
     super(id, label, position);
     this.spiceModel = spiceModel;
     this.portNames = portNames;
+    this.params = params;
     // The base constructor calls createPorts() before portNames is assigned, so
     // the real ports are (re)built here once portNames is known.
     this.ports.length = 0;
@@ -213,23 +226,26 @@ export class CustomSubcircuit extends SpiceComponent {
   getNetlistLine(): string {
     const nodes = this.ports.map((p) => this.nodeOrGnd(p.netId)).join(" ");
     const subcktName = this.spiceModel.split("\n")[0]?.match(/\.subckt\s+(\S+)/i)?.[1] ?? "UNKNOWN";
-    return `${this.label} ${nodes} ${subcktName}`;
+    const params = this.params.trim();
+    return `${this.label} ${nodes} ${subcktName}${params ? ` ${params}` : ""}`;
   }
 
   getProperties(): Property[] {
     return [
       { key: "label", label: "Reference", value: this.label, type: "string" },
       { key: "spiceModel", label: "SPICE Model", value: this.spiceModel, type: "string" },
+      { key: "params", label: "Parameter", value: this.params, type: "string" },
     ];
   }
 
   setProperty(key: string, value: string | number): void {
     if (key === "label") this.label = String(value);
     if (key === "spiceModel") this.spiceModel = String(value);
+    if (key === "params") this.params = String(value);
   }
 
   clone(): CustomSubcircuit {
-    const c = new CustomSubcircuit(this.id, this.label, { ...this.position }, this.spiceModel, [...this.portNames]);
+    const c = new CustomSubcircuit(this.id, this.label, { ...this.position }, this.spiceModel, [...this.portNames], this.params);
     c.rotation = this.rotation;
     return c;
   }

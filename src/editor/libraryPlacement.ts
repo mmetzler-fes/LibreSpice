@@ -50,6 +50,7 @@ export function placementForDescriptor(
         pins: d.pins ?? entry.pins,
         raw: entry.raw,
         symbolName: d.symbol,
+        ...(d.params ? { params: d.params } : {}),
       };
     }
     if (entry?.kind === "model") {

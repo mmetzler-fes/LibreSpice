@@ -186,7 +186,8 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
       const model = sym.attrs["SpiceModel"] || sym.attrs["Value"] || sym.attrs["Value2"];
       if (!prefix || !model || !available.has(model.toLowerCase())) continue;
       const pins = [...sym.pins].sort((a, b) => a.order - b.order).map((p) => p.name);
-      autoDescriptors.push({ name, symbol: name, prefix, model, pins });
+      const params = [sym.attrs["SpiceLine"], sym.attrs["SpiceLine2"]].filter(Boolean).join(" ").trim();
+      autoDescriptors.push({ name, symbol: name, prefix, model, pins, ...(params ? { params } : {}) });
     }
 
     set({

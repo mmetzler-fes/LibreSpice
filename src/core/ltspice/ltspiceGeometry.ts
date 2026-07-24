@@ -29,7 +29,13 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
   voltage: "vsource", current: "isource",
-  opamp: "opamp", opamp2: "opamp", universalopamp: "opamp", universalopamp2: "opamp",
+  // `opamp2` and the UniversalOpAmp names are the *five*-terminal part, the one
+  // with supply pins. LTSpice's plain `opamp` is the three-terminal ideal one and
+  // is deliberately absent here: it has its own `.asy` and `.subckt` (see
+  // library/sub/opamp.lib), so it resolves as a library part with the three pins
+  // its symbol declares. Listed here it came back as the five-terminal type, and
+  // the two supply pins it does not have took their wires with them.
+  opamp2: "opamp", universalopamp: "opamp", universalopamp2: "opamp",
   // LTSpice's Digital library; the exact gate comes from our own attribute.
   and: "logicgate", or: "logicgate", nand: "logicgate", nor: "logicgate",
   xor: "logicgate", xnor: "logicgate", inv: "logicgate", buf: "logicgate",
@@ -130,6 +136,10 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   ],
   // D flip-flop, mirroring DFlipFlop.createPorts: data in and clock on the left,
   // Q and ~Q on the right, the asynchronous pins above and below.
+  // These numbers are a compatibility surface, not a free choice: they decide
+  // where a *saved* `.asc` puts its flip-flop pins, so moving them re-reads every
+  // schematic already on disk. Tried once and reverted — see the note in
+  // MultisimConverter's PIN_OFFSETS.
   dff: [
     { handle: "d", dx: -32, dy: -24 },
     { handle: "clk", dx: -32, dy: 24 },

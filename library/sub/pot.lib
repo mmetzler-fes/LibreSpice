@@ -1,0 +1,23 @@
+* Potentiometer — ein Bauteil statt zweier Widerstaende.
+*
+* SPICE kennt kein Poti, also ist es ein Zweiwiderstands-Teiler; der Punkt ist
+* nur, dass die beiden Widerstaende *innerhalb* des Subcircuits liegen. Auf dem
+* Blatt bleibt es damit ein Symbol mit drei Anschluessen, und die Schleifer-
+* stellung ist ein Parameter der Instanz statt zweier gekoppelter .param-Zeilen
+* daneben.
+*
+*   A  o---[ Rtot*w ]---o---[ Rtot*(1-w) ]---o  B
+*                       |
+*                       o W  (Schleifer)
+*
+* `wiper` zaehlt von A nach B, wie Multisims eigenes Modell (posPercent von T1
+* aus). Geklemmt wird auf 1e-7 .. 1-1e-7: bei genau 0 oder 1 wird eine Haelfte
+* zu 0 Ohm, und einen widerstandslosen Zweig quittiert ngspice je nach Umgebung
+* mit einer Spannungsquellen-Schleife statt mit einem Ergebnis.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt pot A W B PARAMS: Rtot=10k wiper=0.5
+.param w = min(max(wiper, 1e-7), 0.9999999)
+R1 A W {Rtot*w}
+R2 W B {Rtot*(1-w)}
+.ends pot

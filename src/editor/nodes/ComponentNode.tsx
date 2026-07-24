@@ -3,6 +3,9 @@ import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
+import { useSimulationStore } from "@store/simulationStore.js";
+import { usePlotStore } from "@simulation/plotStore.js";
+import { evalDataFlagAt } from "@core/circuit/dataExpr.js";
 import type { AsySymbol } from "@sym/asyParser.js";
 import {
   ResistorSymbol,
@@ -21,6 +24,7 @@ import {
   LogicGateSymbol,
   DFlipFlopSymbol,
   GroundSymbol,
+  SevenSegmentSymbol,
 } from "./symbols/Symbols.js";
 import { symbolForType, symbolByName, symbolBounds } from "@sym/asyParser.js";
 import { mapSymbol, AsyGeometry } from "@sym/AsySymbol.js";
@@ -716,7 +720,15 @@ function NetTerminalNode({ nodeId, data, selected }: { nodeId: string; data: Com
  * Selected, it shows a small ring — otherwise a junction picked with the pointer
  * would give no sign of having been picked.
  */
-function JunctionNode({ selected }: { selected?: boolean }) {
+/**
+ * A junction draws nothing at all — not even when selected.
+ *
+ * It is a place where a wire ends or wires meet, not a part: the wires running
+ * into it already show the connection. A ring around it read as a terminal of
+ * something, and on the free end of a wire it looked like a component the user
+ * had not asked for. Only parts get a circle.
+ */
+function JunctionNode() {
   const c = NODE_SIZE / 2;
   return (
     <div style={{ ...NO_NATIVE_DRAG, position: "relative", width: NODE_SIZE, height: NODE_SIZE }}>
@@ -725,11 +737,6 @@ function JunctionNode({ selected }: { selected?: boolean }) {
         isConnectable={false} isConnectableStart={false} isConnectableEnd={false}
         style={{ ...HANDLE_STYLE, left: c, top: c, transform: "translate(-50%, -50%)", opacity: 0 }}
       />
-      {selected && (
-        <svg width={NODE_SIZE} height={NODE_SIZE} style={{ overflow: "visible", position: "absolute", inset: 0 }}>
-          <circle cx={c} cy={c} r={4} fill="none" stroke="#2563eb" strokeWidth={2} />
-        </svg>
-      )}
     </div>
   );
 }
@@ -739,13 +746,20 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
   const pal = useTheme();
   const nodeData = data as ComponentNodeData;
   if (nodeData.componentType === "junction") {
-    return <JunctionNode selected={selected} />;
+    return <JunctionNode />;
   }
   if (nodeData.componentType === "netlabel" || nodeData.componentType === "netconnector") {
     return <NetTerminalNode nodeId={id} data={nodeData} selected={selected} />;
   }
   if (nodeData.componentType === "subcircuit") {
     const libSym = nodeData.symbolName ? symbolByName(nodeData.symbolName, symbolNorm) : undefined;
+    // The display draws what it reads, so it cannot come out of a `.asy`: the
+    // format has no filled polygon, and the digit is not a property of the part
+    // but of the run. It keeps its `.asy` for pins, geometry and netlist, and
+    // only the drawing is its own (see SevenSegmentNode).
+    if (libSym && nodeData.symbolName === "seg7hex") {
+      return <SevenSegmentNode sym={libSym} data={nodeData} nodeId={id} selected={selected} />;
+    }
     if (libSym) {
       return <LibrarySymbolNode sym={libSym} data={nodeData} nodeId={id} selected={selected} />;
     }
@@ -863,3 +877,83 @@ export const ComponentNode = memo(({ id, data, selected }: NodeProps) => {
 });
 
 ComponentNode.displayName = "ComponentNode";
+
+/**
+ * Above this an input counts as a logic one. The same 2.5 V the converted gates
+ * and flip-flops use, so a display reads the levels its drivers produce.
+ */
+const SEG7_THRESHOLD = 2.5;
+
+/**
+ * The hexadecimal display: a library part whose face shows the nibble on its
+ * four inputs at the oscilloscope's cursor.
+ *
+ * Handles, geometry and netlist come from the `.asy` exactly as for any other
+ * library part (LibrarySymbolNode); only the artwork is replaced, because a
+ * digit is a reading and not a drawing.
+ *
+ * Which instant is read: the measurement cursor when one is set, otherwise the
+ * last sample of the run — never the RMS the data flags use, which for a logic
+ * level is a number that was never true at any moment.
+ */
+function SevenSegmentNode({
+  sym, data, nodeId, selected,
+}: { sym: AsySymbol; data: ComponentNodeData; nodeId: string; selected?: boolean }) {
+  const rotation = data.rotation ?? 0;
+  const mirrored = !!data.mirrored;
+  const pins = data.pins ?? [];
+  const pal = useTheme();
+  const mapping = mapSymbol(sym, NODE_SIZE, 0, GRID, true);
+  const center = NODE_SIZE / 2;
+  const circuit = useCircuitStore((s) => s.circuit);
+  const result = useSimulationStore((s) => s.result);
+  const cursorTime = usePlotStore((s) => s.cursorTime);
+  useCircuitStore((s) => s.netVersion);
+
+  // The nibble on the four inputs, MSB first — D8 D4 D2 D1, the order the
+  // symbol declares and the converter wires.
+  const value = useMemo(() => {
+    if (!result) return null;
+    const comp = circuit.components.get(nodeId);
+    if (!comp) return null;
+    let n = 0;
+    for (const [i, handle] of ["D8", "D4", "D2", "D1"].entries()) {
+      const port = comp.ports.find((p) => p.id === `${nodeId}-${handle}`);
+      const netId = port?.netId;
+      // An input on no net reads low, which is what an open decoder input does.
+      if (!netId) continue;
+      const label = netId === "0" ? "0" : (circuit.nets.get(netId)?.nodeLabel ?? netId);
+      const v = evalDataFlagAt(`V(${label})`, result, cursorTime);
+      if (v !== null && v > SEG7_THRESHOLD) n |= 1 << (3 - i);
+    }
+    return n;
+  }, [result, cursorTime, circuit, nodeId]);
+
+  return (
+    <div style={{ position: "relative", width: NODE_SIZE, height: NODE_SIZE, cursor: "pointer" }}>
+      {mapping.pins.map((pin) => {
+        const handleId = pins[pin.order - 1] ?? `pin${pin.order}`;
+        const [hx, hy] = rotatePoint(mirrored ? NODE_SIZE - pin.px : pin.px, pin.py, center, center, rotation);
+        return (
+          <Handle
+            key={handleId} type="source" position={Position.Top} id={handleId}
+            isConnectable={false} isConnectableStart={false} isConnectableEnd={false}
+            style={{ ...HANDLE_STYLE, left: hx, top: hy, transform: "translate(-50%, -50%)" }}
+          />
+        );
+      })}
+      <svg
+        width={NODE_SIZE} height={NODE_SIZE}
+        style={{
+          color: selected ? "#2563eb" : pal.symStroke,
+          overflow: "visible",
+          transform: `${rotation ? `rotate(${rotation}deg) ` : ""}${mirrored ? "scaleX(-1)" : ""}`.trim() || undefined,
+        }}
+      >
+        <g transform={`translate(${mapping.map(0, 0)[0]}, ${mapping.map(0, 0)[1]}) scale(${mapping.scale})`}>
+          <SevenSegmentSymbol value={value} />
+        </g>
+      </svg>
+    </div>
+  );
+}

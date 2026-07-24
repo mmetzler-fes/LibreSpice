@@ -675,6 +675,18 @@ export class LTSpiceParser {
       ? createSubcircuitComponent(sym.id, label, nodeX, nodeY, "", subPins ?? [])
       : createSpiceComponent(cType, sym.id, label, nodeX, nodeY);
 
+    // A library part's instance parameters (`Rtot=10k wiper=0.5`) ride in
+    // `SpiceLine`, which is LTSpice's own slot for them and the only place a
+    // `.asc` records what a `.subckt` with `params:` was called with. Read as a
+    // string, unparsed: these are SPICE expressions, and the netlist line wants
+    // them back verbatim. The symbol's own default is *not* substituted here —
+    // a file that left the line out gets the subcircuit's declared defaults,
+    // which is what LTSpice does too.
+    if (cType === "subcircuit") {
+      const line = [sym.attrs["SpiceLine"], sym.attrs["SpiceLine2"]].filter(Boolean).join(" ").trim();
+      if (line) (comp as any).params = line;
+    }
+
     // Preserve LTSpice waveform specs verbatim (PULSE/SINE/PWL/EXP/SFFM) so
     // `{param}` expressions and unit suffixes survive to the netlist. ngspice
     // uses SIN, not LTSpice's SINE. This takes precedence over the best-effort

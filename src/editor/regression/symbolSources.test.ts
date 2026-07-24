@@ -74,6 +74,30 @@ const CASES: Case[] = [
     },
   },
   {
+    // The op-amps are not the only symbol that exists twice. Any part the
+    // library serves *and* the bundle draws (the potentiometer, the changeover
+    // switch) has the same trap: the served copy is what a dropped-in `.asc`
+    // resolves against, the bundled copy is what the canvas draws, and a pin
+    // moved in one of them rewires the part in exactly one of the two places.
+    name: "any symbol present in both trees is the same file",
+    run: async (fail) => {
+      const { fs, path, proc } = await nodeApi();
+      const byBase = async (dir: string) => {
+        const m = new Map<string, string>();
+        for (const f of await asyFiles(dir)) m.set(path.basename(f), f);
+        return m;
+      };
+      const bundled = await byBase("src/sym");
+      const served = await byBase("library/sym");
+      for (const [name, a] of bundled) {
+        const b = served.get(name);
+        if (!b) continue;
+        const read = (f: string) => fs.readFileSync(path.resolve(proc.cwd(), f), "latin1");
+        if (read(a) !== read(b)) fail(`${name} differs between src/sym and library/sym`);
+      }
+    },
+  },
+  {
     name: "no shipped symbol carries LTspice's own text",
     run: async (fail) => {
       const { fs } = await nodeApi();

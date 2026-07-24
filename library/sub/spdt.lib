@@ -1,0 +1,20 @@
+* Wechselschalter (SPDT) — Stellung als Parameter, nicht als Steuerspannung.
+*
+* Ein handbetaetigter Umschalter hat kein Steuersignal; seine Stellung ist eine
+* Eigenschaft der Instanz. Deshalb zwei Widerstaende, die `pos` gegenlaeufig
+* zwischen Ron und Roff schaltet, statt zweier spannungsgesteuerter Schalter mit
+* zwei zusaetzlichen Anschluessen, die im Schaltplan irgendwo angeklemmt werden
+* muessten.
+*
+*   pos = 0 : COM–NC geschlossen (Ruhelage, wie gezeichnet)
+*   pos = 1 : COM–NO geschlossen
+*
+* Die Rechnung ist reine Arithmetik (Ron + pos*Roff), damit sie ohne Fallunter-
+* scheidung im Parameter-Ausdruck auskommt: ngspice wertet `.param` frueh und
+* nicht mit dem vollen Funktionsumfang der B-Quelle aus.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt spdt COM NC NO PARAMS: pos=0 Ron=10m Roff=1G
+R1 COM NC {Ron + pos*Roff}
+R2 COM NO {Ron + (1-pos)*Roff}
+.ends spdt

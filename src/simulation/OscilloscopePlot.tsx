@@ -1112,6 +1112,16 @@ function PlotPanelView(props: PlotPanelViewProps) {
     return () => ro.disconnect();
   }, []);
 
+  // Publish the cursor's instant so the schematic can read it. The gesture stays
+  // here — the store only carries the number — and a display on the sheet then
+  // shows the value at exactly the point the cursor sits on (see
+  // SevenSegmentNode). Cleared on unmount, so a closed panel leaves no ghost.
+  const setCursorTime = usePlotStore((s) => s.setCursorTime);
+  useEffect(() => {
+    setCursorTime(cursor ? cursor.t : null);
+  }, [cursor, setCursorTime]);
+  useEffect(() => () => setCursorTime(null), [setCursorTime]);
+
   // Drop the cursor / stamps whose probe leaves this panel.
   useEffect(() => {
     if (cursor && !traces.includes(cursor.trace)) setCursor(null);

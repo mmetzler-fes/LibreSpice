@@ -212,6 +212,33 @@ export function evalDataFlag(expr: string, result: SimulationResult): number | n
   }
 }
 
+/**
+ * An expression's value at one instant, rather than collapsed over the whole run.
+ *
+ * `evalDataFlag` reduces a transient series to its RMS, which is the right
+ * reading for a voltmeter and the wrong one for anything that shows a *state* —
+ * a logic level is high or low at a moment, and its RMS is neither. This is that
+ * reading: the sample nearest `t`, or the last one when no cursor is set.
+ */
+export function evalDataFlagAt(expr: string, result: SimulationResult, t: number | null): number | null {
+  try {
+    const val = evalExpr(expr, result);
+    if (typeof val === "number") return val;
+    if (val.length === 0) return null;
+    const time = result.time;
+    if (t === null || !time || time.length < 2) return val[val.length - 1];
+    // Nearest sample: the cursor sits on a drawn point, so interpolating would
+    // invent a value between two the run never produced.
+    let best = 0;
+    for (let i = 1; i < time.length && i < val.length; i++) {
+      if (Math.abs(time[i] - t) < Math.abs(time[best] - t)) best = i;
+    }
+    return val[best] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── formatting ───────────────────────────────────────────────────────────────
 const PREFIXES = [
   { e: 9, s: "G" }, { e: 6, s: "M" }, { e: 3, s: "k" }, { e: 0, s: "" },

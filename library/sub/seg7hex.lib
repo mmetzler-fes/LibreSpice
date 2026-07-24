@@ -1,0 +1,30 @@
+* Hexadezimale 7-Segment-Anzeige, vier Binaereingaenge.
+*
+* Multisims Bauteil heisst zwar "7-Segment Display", hat aber keine sieben
+* Segmentanschluesse: es ist Dekoder und Anzeige in einem. Vier Bit hinein, eine
+* Ziffer 0..F dargestellt. Die physische Anzeige mit A..G und COM ist ein
+* anderes Bauteil.
+*
+* Pins (SpiceOrder 1..4):  1 = D8 (MSB)  2 = D4  3 = D2  4 = D1 (LSB)
+* Die Wertigkeit ist der Verdrahtung im Original entnommen: im Dual-Slope-ADC
+* haengt Anschluss 1 am QD des 74LS93 und Anschluss 4 an dessen QA.
+*
+* Elektrisch ist das Bauteil nichts als eine Last. Genau das fehlte bisher: ohne
+* die Anzeige endet die Zaehlerleitung im Nichts, und ein Knoten, den nur ein
+* Gatter liest, macht die Matrix singulaer - ngspice bricht dann mit
+* "singular matrix" ab, statt zu rechnen.
+*
+* Hochohmig wie ein CMOS-Dekodereingang: 1 MOhm belastet keine Treiberstufe
+* nennenswert, gibt dem Knoten aber den Gleichstrompfad, den er braucht.
+*
+* Was die Anzeige *zeigt*, steht nicht hier. Eine Ziffer ist kein Strom, sondern
+* eine Ablesung - sie wird aus den vier Eingangsspannungen gezeichnet (siehe
+* SevenSegmentSymbol), so wie ein Messwert im Schaltplan angezeigt wird.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt seg7hex D8 D4 D2 D1 PARAMS: Rin=1Meg
+R8 D8 0 {Rin}
+R4 D4 0 {Rin}
+R2 D2 0 {Rin}
+R1 D1 0 {Rin}
+.ends seg7hex

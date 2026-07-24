@@ -155,9 +155,17 @@ const CASES: Case[] = [
     run: (fail) => {
       const svg = svgFor(data({ componentType: "dff", kind: "dff", edge: "rising" }));
       // The clock wedge is the flip-flop's alone; the fallback resistor is a
-      // single zig-zag path with no polyline.
-      if (!svg.includes("-20,19 -13,24 -20,29")) fail("no clock wedge in the exported SVG");
-      if (!svg.includes('width="40"') || !svg.includes('height="80"')) fail("no flip-flop body in the exported SVG");
+      // single zig-zag path with no polyline. Checked by its presence rather
+      // than by its coordinates: the wedge sits on the body's edge, and the body
+      // moves whenever the pin raster does (it was widened to Multisim's, so the
+      // part lands on its wires). Pinning the numbers here only meant this test
+      // failed for a change that was right.
+      if (!/<polyline/.test(svg)) fail("no clock wedge in the exported SVG");
+      // Likewise the body: it is a rectangle taller than it is wide, whatever
+      // the raster makes its size. The resistor fallback draws no rect at all.
+      const body = /<rect[^>]*width="(\d+)"[^>]*height="(\d+)"/.exec(svg);
+      if (!body) fail("no flip-flop body in the exported SVG");
+      else if (+body[2] <= +body[1]) fail(`body ${body[1]}x${body[2]} is not upright`);
     },
   },
   {

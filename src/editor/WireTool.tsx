@@ -187,11 +187,30 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   );
 }
 
-/** A wire endpoint target: either a component pin or a tap onto an existing wire. */
+/**
+ * A wire endpoint: a component pin, a tap onto an existing wire, or a bare point
+ * on the sheet.
+ *
+ * The third is what lets a wire be drawn in free space, as Multisim does. It
+ * carries no node yet — the canvas makes a junction there when the wire is
+ * created, which is the same part the importer already puts at the free end of
+ * an imported wire, so there is one kind of wire and one kind of free end
+ * however it got onto the sheet.
+ */
+/**
+ * The extra half of a connection for an end that docks onto nothing: the point
+ * the wire stops at. The canvas turns each into a junction (see onCreateWire).
+ */
+export interface WireEnds {
+  sourceFree?: FlowPoint;
+  targetFree?: FlowPoint;
+}
+
 interface WireTarget {
-  kind: "pin" | "wire";
-  nodeId: string;
-  handleId: string;
+  kind: "pin" | "wire" | "free";
+  /** Null for `free`: there is no node until the wire is committed. */
+  nodeId?: string | null;
+  handleId?: string | null;
   point: FlowPoint;
 }
 
@@ -212,7 +231,7 @@ interface WireOverlayProps {
   wrapperRef: RefObject<HTMLDivElement | null>;
   nodes: Node[];
   edges: Edge[];
-  onCreateWire: (connection: Connection, data: WireData) => void;
+  onCreateWire: (connection: Connection & WireEnds, data: WireData) => void;
 }
 
 /**
@@ -285,6 +304,23 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     draggingRef.current = false; segDirRef.current = null; pointsRef.current = [];
   };
 
+  /**
+   * Hand the finished wire over, whatever its two ends turned out to be.
+   * `waypoints` are the interior bends; the endpoints come from the targets.
+   */
+  const finish = (end: WireTarget, waypoints: FlowPoint[]) => {
+    if (!startTarget) return;
+    onCreateWire(
+      { ...sourceHalf(startTarget), ...targetHalf(end) } as Connection & WireEnds,
+      {
+        waypoints,
+        sourceTap: startTarget.kind === "wire" ? startTarget.point : undefined,
+        targetTap: end.kind === "wire" ? end.point : undefined,
+      },
+    );
+    reset();
+  };
+
   /** Dominant axis of a delta: the direction an orthogonal segment would lead. */
   const dirOf = (dx: number, dy: number): "h" | "v" => (Math.abs(dx) >= Math.abs(dy) ? "h" : "v");
 
@@ -304,39 +340,40 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     }
     const wire = findWire(flow);
     if (wire) return { cursor: wire.point, target: wire };
-    return { cursor: { x: snap(flow.x), y: snap(flow.y) }, target: null };
+    const free = { x: snap(flow.x), y: snap(flow.y) };
+    return { cursor: free, target: { kind: "free", point: free } };
   };
 
-  const sameTarget = (a: WireTarget, b: WireTarget) => a.nodeId === b.nodeId && a.handleId === b.handleId;
+  const sameTarget = (a: WireTarget, b: WireTarget) =>
+    a.kind === "free" || b.kind === "free"
+      ? a.kind === b.kind && a.point.x === b.point.x && a.point.y === b.point.y
+      : a.nodeId === b.nodeId && a.handleId === b.handleId;
+
+  /** The connection half for one endpoint; `free` hands the point over instead. */
+  const sourceHalf = (t: WireTarget): Partial<Connection> & WireEnds =>
+    t.kind === "free"
+      ? { sourceFree: t.point }
+      : { source: t.nodeId ?? undefined, sourceHandle: t.handleId ?? undefined };
+  const targetHalf = (t: WireTarget): Partial<Connection> & WireEnds =>
+    t.kind === "free"
+      ? { targetFree: t.point }
+      : { target: t.nodeId ?? undefined, targetHandle: t.handleId ?? undefined };
 
   // ── Mouse: click to dock, click for each 90° bend, click to close. ──────────
   const commit = (cursor: FlowPoint, hoverTarget: WireTarget | null) => {
     if (!startTarget) {
-      // First tap must dock onto a pin or an existing wire.
+      // A wire may start anywhere: on a pin, on another wire, or on bare sheet.
       if (hoverTarget) { setStartTarget(hoverTarget); setPoints([hoverTarget.point]); }
       return;
     }
-    if (hoverTarget && !sameTarget(hoverTarget, startTarget)) {
-      // Closing the connection on a second pin/wire.
-      // Interior bend points only (start point is provided by the port/tap).
-      const waypoints = points.slice(1);
-      onCreateWire(
-        {
-          source: startTarget.nodeId,
-          sourceHandle: startTarget.handleId,
-          target: hoverTarget.nodeId,
-          targetHandle: hoverTarget.handleId,
-        },
-        {
-          waypoints,
-          sourceTap: startTarget.kind === "wire" ? startTarget.point : undefined,
-          targetTap: hoverTarget.kind === "wire" ? hoverTarget.point : undefined,
-        },
-      );
-      reset();
+    if (hoverTarget && hoverTarget.kind !== "free" && !sameTarget(hoverTarget, startTarget)) {
+      // Closing the connection on a pin or another wire.
+      finish(hoverTarget, points.slice(1));
       return;
     }
-    // Add a 90° bend at the current cursor position.
+    // On bare sheet a click is a 90° bend — the wire is still being drawn, and
+    // ending it there is the double-click (see `handleDoubleClick`), which is
+    // the gesture Multisim uses for the same thing.
     setPoints((prev) => [...prev, { x: cursor.x, y: cursor.y }]);
   };
 
@@ -347,7 +384,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
   // to close the wire with exactly those bends.
   const touchDown = (e: React.PointerEvent) => {
     const { cursor: c, target } = resolve(e.clientX, e.clientY);
-    if (!target) return; // a wire must start on a pin or an existing wire
+    if (!target) return;
     setStartTarget(target);
     setPoints([target.point]);
     pointsRef.current = [target.point];
@@ -398,12 +435,26 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
         const degenerate = (elbow.x === L.x && elbow.y === L.y) || (elbow.x === P.x && elbow.y === P.y);
         if (!degenerate) waypoints = [...waypoints, elbow];
       }
-      onCreateWire(
-        { source: startTarget.nodeId, sourceHandle: startTarget.handleId, target: target.nodeId, targetHandle: target.handleId },
-        { waypoints, sourceTap: startTarget.kind === "wire" ? startTarget.point : undefined, targetTap: target.kind === "wire" ? target.point : undefined },
-      );
+      finish(target, waypoints);
+      return;
     }
-    reset(); // released off a target → discard the in-progress wire
+    reset();
+  };
+
+  /**
+   * Double-click ends a wire where it is, on bare sheet — Multisim's gesture for
+   * the same thing, and the only way to finish a wire that docks onto nothing.
+   * A single click there is a bend, so the two cannot be the same event.
+   */
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (!startTarget) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const { cursor: c } = resolve(e.clientX, e.clientY);
+    // The double-click's first half already dropped a bend at this point; the
+    // wire ends here, so that bend is the endpoint and must not be a waypoint too.
+    const pts = points.filter((q, i) => i === 0 || q.x !== c.x || q.y !== c.y);
+    finish({ kind: "free", point: c }, pts.slice(1));
   };
 
   const handleDown = (e: React.PointerEvent) => {
@@ -462,6 +513,7 @@ export function WireOverlay({ wrapperRef, nodes, edges, onCreateWire }: WireOver
     <div
       onPointerMove={handleMove}
       onPointerDown={handleDown}
+      onDoubleClick={handleDoubleClick}
       onPointerUp={handleUp}
       onContextMenu={handleContextMenu}
       onPointerLeave={() => { if (!draggingRef.current) { setCursor(null); setHoverTarget(null); } }}

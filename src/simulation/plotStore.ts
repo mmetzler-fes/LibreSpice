@@ -60,6 +60,17 @@ interface PlotState {
   hiddenExpressions: string[];
   /** LTSpice "Sync. Horiz. Axes": all panels share one x-axis range. */
   syncX: boolean;
+  /**
+   * Where the oscilloscope's measurement cursor sits on the x-axis, or null when
+   * none is set.
+   *
+   * It lives here rather than inside the plot because the *schematic* reads it:
+   * a seven-segment display shows the digit at the cursor's instant, so moving
+   * the cursor moves the reading. The plot owns the gesture, the store carries
+   * the number.
+   */
+  cursorTime: number | null;
+  setCursorTime: (t: number | null) => void;
   /** Render the diagram (and its .svg export) on a white background. */
   svgLight: boolean;
 }
@@ -129,6 +140,8 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
   expressions: [],
   hiddenExpressions: [],
   syncX: false,
+  cursorTime: null,
+  setCursorTime: (t) => set({ cursorTime: t }),
   svgLight: false,
 
   addPanel: () => set((s) => ({ panels: [...s.panels, { id: newPanelId() }] })),

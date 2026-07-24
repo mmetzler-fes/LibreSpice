@@ -124,6 +124,19 @@ function buildReport(results) {
   for (const r of sh) L.push(`  ${r.name}\n        ${r.shorts.join(", ")}`);
   L.push("");
 
+  // --- 5. connection names the part does not have ---
+  const un = results.filter((r) => r.unmapped?.length);
+  L.push("5. NICHT GEFUNDENE ANSCHLUSSNAMEN");
+  L.push("-".repeat(60));
+  L.push("");
+  L.push("  Die Zuordnungstabelle nennt einen Anschluss, den das Bauteil in der");
+  L.push("  Datei nicht hat. Der Pin bleibt dann unbeschaltet und jede Leitung");
+  L.push("  darauf faellt weg - lautlos, deshalb steht es hier.");
+  L.push("");
+  if (!un.length) L.push("  keine");
+  for (const r of un) L.push(`  ${r.name}\n        ${r.unmapped.join("\n        ")}`);
+  L.push("");
+
   return L.join("\n");
 }
 
@@ -151,14 +164,14 @@ function main() {
     const name = basename(f, ".msjs");
     try {
       const buf = readFileSync(join(inDir, f));
-      const { asc, skipped, substituted, shorts } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
+      const { asc, skipped, substituted, shorts, unmapped } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
       writeFileSync(join(outDir, `${name}.asc`), asc, "latin1");
       ok++;
-      results.push({ name, skipped, substituted, shorts });
+      results.push({ name, skipped, substituted, shorts, unmapped });
       if (skipped.length) gaps.push(`  ${name}: ${skipped.join(", ")}`);
       if (shorts.length) shorted.push(`  ${name}: ${shorts.join(", ")}`);
     } catch (e) {
-      results.push({ name, skipped: [], substituted: [], shorts: [], error: e.message });
+      results.push({ name, skipped: [], substituted: [], shorts: [], unmapped: [], error: e.message });
       gaps.push(`  ${name}: FEHLER ${e.message}`);
     }
   }

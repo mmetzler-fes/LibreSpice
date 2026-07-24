@@ -1,0 +1,35 @@
+* Idealer Operationsverstaerker mit drei Anschluessen.
+*
+* Kein Versorgungsanschluss, also auch keine Begrenzung: der Ausgang folgt der
+* Eingangsdifferenz, so weit die Schaltung ihn treibt. Genau dafuer gibt es das
+* Bauteil — fuer die Rechnung am gegengekoppelten Verstaerker, wo die Rails nur
+* Ballast waeren. Wer eine Begrenzung braucht (Komparator, Uebersteuerung),
+* nimmt den fuenfpoligen UniversalOpAmp2 und klemmt seine Rails an.
+*
+* Pins (SpiceOrder 1..3):  1 = In+   2 = In-   3 = OUT
+*
+* Ein Pol, sonst nichts: Leerlaufverstaerkung Avol und ein dominanter Pol, so
+* dass das Verstaerkungs-Bandbreite-Produkt GBW herauskommt, plus ein endlicher
+* Ausgangswiderstand Rout. Damit ist die Rueckkopplungsschleife stabil
+* rechenbar; ein Verstaerker ganz ohne Pol laesst jede Schleife auf einmal
+* umschlagen und ngspice die Konvergenz verlieren.
+*
+* Bewusst *kein* Eingangsoffset, anders als beim fuenfpoligen Modell. Der sitzt
+* dort, damit ein Astabiler von selbst anschwingt — was Rails voraussetzt, an
+* denen der Ausgang haengenbleibt. Ohne Rails liefe derselbe Offset mal Avol ins
+* Nichts, und ein ideales Bauteil soll nichts mitbringen, was man nicht bestellt.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt opamp 1 2 3 PARAMS: Avol=1Meg GBW=10Meg Rout=100
+.param Gm=1m
+.param Rgain={Avol/Gm}
+.param Cpole={Gm/(2*3.141592653589793*GBW)}
+* Hochohmiger Differenzeingang -> Steilheit -> Knoten mit dem dominanten Pol.
+Rin 1 2 1G
+G1 0 ng 1 2 {Gm}
+R1 ng 0 {Rgain}
+C1 ng 0 {Cpole}
+* Der Ausgang ist der Polknoten hinter dem Ausgangswiderstand, ungeklemmt.
+Eout no 0 ng 0 1
+Ro no 3 {Rout}
+.ends opamp
