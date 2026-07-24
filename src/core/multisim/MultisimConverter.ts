@@ -112,6 +112,21 @@ export interface ConversionResult {
   /** Multisim nets the emitted drawing shorted together. */
   shorts: string[];
   /**
+   * What a router would need, and nothing the conversion itself uses.
+   *
+   * The `.asc` above copies Multisim's wire geometry; this is the alternative
+   * that geometry stands in for — where our own terminals ended up, grouped by
+   * the net Multisim says they belong to, plus the boxes a route would have to
+   * keep out of. Exported so a router can be built and *measured* against the
+   * corpus without the conversion depending on it (see scripts/route-prototype.mjs).
+   */
+  placement: {
+    /** Each Multisim net as the points our parts actually put on the sheet. */
+    nets: { name: string; pts: Pt[] }[];
+    /** Symbol bounding boxes, as [x1, y1, x2, y2]. */
+    bodies: Wire[];
+  };
+  /**
    * Connections a part type declares that the placed part does not have.
    *
    * A name that misses yields no pin, so the wiring on it is dropped without a
@@ -1102,6 +1117,35 @@ function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
   return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
 }
 
+/**
+ * The bounding box of every placed symbol, from the emitted SYMBOL lines.
+ *
+ * A router has to keep its wires off the part bodies, not only off other wires.
+ * Read back rather than collected while emitting, because it is wanted only by
+ * the prototype and nothing in the conversion depends on it.
+ */
+function symbolBodies(symbolLines: string[]): Wire[] {
+  const out: Wire[] = [];
+  for (const l of symbolLines) {
+    const m = /^SYMBOL (\S+) (-?\d+) (-?\d+) (\S+)$/.exec(l);
+    if (!m) continue;
+    const offs = PIN_OFFSETS[m[1]];
+    if (!offs?.length) continue;
+    const deg = Number(m[4].slice(1)) || 0;
+    const mir = m[4].startsWith("M");
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const o of offs) {
+      if (!o) continue;
+      const r = rotate(o, deg, mir);
+      const x = Number(m[2]) + r[0], y = Number(m[3]) + r[1];
+      x1 = Math.min(x1, x); y1 = Math.min(y1, y);
+      x2 = Math.max(x2, x); y2 = Math.max(y2, y);
+    }
+    if (Number.isFinite(x1)) out.push([x1, y1, x2, y2]);
+  }
+  return out;
+}
+
 /** True when a point lies on an axis-aligned segment, endpoints included. */
 function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
   return x1 === x2
@@ -1652,5 +1696,12 @@ export function convert(sch: MsSchematic): ConversionResult {
     substituted: [...new Set(substituted)],
     shorts: findShorts(sch.nets, pinPos, cleanWires, flags),
     unmapped,
+    placement: {
+      nets: sch.nets.map((n) => ({
+        name: n.name ?? "",
+        pts: n.pins.map((q) => pinPos[`${q.component}/${q.pin}`]).filter((q): q is Pt => !!q),
+      })).filter((n) => n.pts.length >= 2),
+      bodies: symbolBodies(symbolLines),
+    },
   };
 }

@@ -258,13 +258,13 @@ const SEG7_PATTERNS: Record<number, string> = {
 
 /** Segment rectangles in the symbol's own frame: a, b, c, d, e, f, g. */
 const SEG7_BARS: [number, number, number, number][] = [
-  [30, -116, 36, 8],  // a  top
-  [64, -110, 8, 34],  // b  upper right
-  [64, -68, 8, 34],   // c  lower right
-  [30, -36, 36, 8],   // d  bottom
-  [24, -68, 8, 34],   // e  lower left
-  [24, -110, 8, 34],  // f  upper left
-  [30, -76, 36, 8],   // g  middle
+  [32, -116, 32, 8],  // a  top
+  [66, -108, 8, 30],  // b  upper right
+  [66, -66, 8, 30],   // c  lower right
+  [32, -36, 32, 8],   // d  bottom
+  [22, -66, 8, 30],   // e  lower left
+  [22, -108, 8, 30],  // f  upper left
+  [32, -76, 32, 8],   // g  middle
 ];
 
 export const SevenSegmentSymbol = ({ value, lit = "#e11d48" }: { value: number | null; lit?: string }) => {
@@ -272,12 +272,14 @@ export const SevenSegmentSymbol = ({ value, lit = "#e11d48" }: { value: number |
   return (
     <g>
       <rect x={0} y={-128} width={96} height={112} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      {/* Filled, never outlined. Seven stroked rectangles overlap at every corner
+          and read as a heap of boxes rather than a digit; filled, the dark ones
+          simply recede and the lit ones make the numeral. */}
       {SEG7_BARS.map(([x, y, w, h], i) => (
         <rect
-          key={i} x={x} y={y} width={w} height={h}
-          fill={pattern && pattern[i] === "1" ? lit : "none"}
-          stroke="currentColor" strokeWidth="1"
-          opacity={pattern && pattern[i] === "1" ? 1 : 0.35}
+          key={i} x={x} y={y} width={w} height={h} rx={2}
+          fill={pattern && pattern[i] === "1" ? lit : "currentColor"}
+          opacity={pattern && pattern[i] === "1" ? 1 : 0.12}
         />
       ))}
       {[0, 32, 64, 96].map((x) => (
