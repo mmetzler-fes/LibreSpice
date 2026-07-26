@@ -176,5 +176,45 @@ export async function runMs14Tests(): Promise<TestReport> {
     fail("an impossible dictionary size is rejected", "no error raised");
   } catch { /* expected */ }
 
+  // ── the behavioural sources' node names ──────────────────────────────────
+  // An ABM source states its value as an expression over the circuit's nodes,
+  // and Multisim writes it in *its* node names. Two things have to hold, and
+  // neither announces itself when it does not: the names have to be translated
+  // the way every other net is, and the nets they name have to be labelled on
+  // the sheet — a numbered net is otherwise left unlabelled wherever the wiring
+  // already joins it, the netlist calls it something of its own, and the
+  // expression reads a node nobody has. No error anywhere, just a source that
+  // sits at zero.
+  total++;
+  {
+    const name = "a behavioural source reads nodes the sheet actually carries";
+    const file = path.join(root, "Node and Net Fundamentals", "Simple Net Current Problem Ver 2.ms14");
+    try {
+      const buf = fs.readFileSync(file);
+      const res = convert(ms14ToSchematic(readMs14(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
+      const specs = res.asc.split("\n").filter((l: string) => /^SYMATTR Value [VI] = /.test(l));
+      const problems: string[] = [];
+      if (specs.length < 3) problems.push(`only ${specs.length} behavioural sources`);
+      // Multisim's bare numbers must not survive: `V(6,8)` is not a node here.
+      for (const spec of specs) {
+        if (/[VI]\(\s*\d/.test(spec)) problems.push(`untranslated node name: ${spec}`);
+      }
+      // Every node an expression names has to be a label on the sheet.
+      const labels = new Set(
+        res.asc.split("\n").flatMap((l: string) => /^FLAG -?\d+ -?\d+ (.+)$/.exec(l)?.[1].trim() ?? []));
+      for (const spec of specs) {
+        for (const m of spec.matchAll(/\bV\s*\(([^)]*)\)/gi)) {
+          for (const a of m[1].split(",")) {
+            const n = a.trim();
+            if (n !== "0" && !labels.has(n)) problems.push(`${n} is read but never labelled`);
+          }
+        }
+      }
+      if (problems.length) fail(name, problems.join("; "));
+    } catch (e) {
+      fail(name, `threw: ${(e as Error).message}`);
+    }
+  }
+
   return { total, passed: total - failures.length, failures };
 }

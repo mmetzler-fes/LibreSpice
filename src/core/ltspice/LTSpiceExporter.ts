@@ -29,13 +29,19 @@ interface Pt { x: number; y: number }
 interface SymAttrs { value?: string; value2?: string; spiceLine?: string; extra?: string }
 
 /** LTSpice source spec. Same fields as the netlist, but LTSpice spells it SINE, not SIN. */
-function sourceSpec(c: any): string {
+function sourceSpec(c: any, isCurrent = false): string {
   if (c.rawSpec) return String(c.rawSpec).replace(/^(\s*)sin(?=\s*\()/i, "$1SINE");
   // SINE's Ncycles is an LTSpice-only 7th field; ngspice's SIN takes six. It is
   // persisted in the LibreSpice attribute instead, so re-importing our own file
   // doesn't smuggle a 7th field into the netlist via the verbatim rawSpec.
   if (c.sourceType === "Sine") {
     return `SINE(${c.sOffset} ${c.sAmpl} ${c.sFreq} ${c.sTd} ${c.sTheta} ${c.sPhi})`;
+  }
+  // A behavioural source's whole definition is its expression, and it has to come
+  // back as one: `V = …` in the Value is what tells the reader this is a `B`
+  // device and not a source with a number.
+  if (c.sourceType === "Behavioral") {
+    return `${isCurrent ? "I" : "V"} = ${String(c.bExpr ?? "").trim()}`;
   }
   if (c.sourceType === "Pulse") {
     const ncyc = c.pNp > 0 ? ` ${c.pNp}` : "";
@@ -117,7 +123,7 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
   }
 
   if (comp.sourceType !== undefined) {
-    const a: SymAttrs = { value: sourceSpec(comp) };
+    const a: SymAttrs = { value: sourceSpec(comp, type === "isource") };
     if (comp.acAmplitude) a.value2 = `AC ${comp.acAmplitude}`;
     const par: string[] = [];
     if (comp.seriesR > 0) par.push(`Rser=${comp.seriesR}`);

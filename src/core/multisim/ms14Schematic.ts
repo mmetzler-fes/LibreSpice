@@ -143,6 +143,19 @@ function catalogue(el: El): string[] {
   return (strings?.kids ?? []).map((i) => text(i.attrs.Value));
 }
 
+/**
+ * A part's *string* parameters, which a template indexes as `%Sn`.
+ *
+ * A separate list from the numeric one and easy to miss: they sit side by side
+ * under the same `CiaParamList`. Only the behavioural sources use it, and for
+ * them it holds the whole part — the expression.
+ */
+function stringValues(el: El): string[] {
+  const list = firstOf(el, "CiaParamList");
+  const strings = list?.kids.find((k) => k.tag === "strings");
+  return (strings?.kids ?? []).map((i) => text(i.attrs.Value));
+}
+
 /** A part's parameter values, in the order `#n` indexes them. */
 function paramValues(el: El): string[] {
   const list = firstOf(el, "CiaParamList");
@@ -219,6 +232,12 @@ const TYPES: Record<string, {
 
   D_FF: { name: "D Flip-Flop" },
   JK_FF: { name: "JK Flip-Flop" },
+
+  // The behavioural sources: a value stated as an expression over the circuit
+  // rather than as a waveform. Their parameter is a string, not a number (see
+  // stringValues), and the node names in it are rewritten by the converter.
+  ABM_VOLTAGE: { name: "Behavioral Voltage Source" },
+  ABM_CURRENT: { name: "Behavioral Current Source" },
   VOLTAGE_CONTROLLED_VOLTAGE_SOURCE: { name: "Voltage Controlled Voltage Source", params: { Gain: 1 } },
 
   // Multisim 14 names the instrumentation amplifier after the ordering code; the
@@ -427,6 +446,7 @@ export function ms14ToSchematic(xml: string): MsSchematic {
 
     const ms14Type = catalogue(def)[1] ?? "";
     const slots = paramValues(def);
+    const strings = stringValues(def);
     const refdes = text(def.attrs.LocalName);
 
     // Pins: the connector inside a pin holds the point, and it is symbol-local —
@@ -521,6 +541,10 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       if (v !== undefined && v !== "") params[name] = v;
     }
     Object.assign(params, derived(ms14Type, slots));
+    // A behavioural source *is* its expression (`%S0` in its template), and it
+    // still speaks Multisim's node names here — the converter translates them,
+    // because only it knows what the nets end up being called.
+    if (/^ABM_(VOLTAGE|CURRENT)$/.test(ms14Type) && strings[0]) params.Expression = strings[0];
 
     // Multisim 14 writes the refdes as one string ("R1", "Uh"), where Live keeps
     // the prefix and the number apart. Split it the way Live would.

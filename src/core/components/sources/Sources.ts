@@ -19,7 +19,13 @@ export abstract class Source extends SpiceComponent {
   }
 }
 
-export type VSourceType = "DC" | "Sine" | "Pulse" | "PWL";
+export type VSourceType = "DC" | "Sine" | "Pulse" | "PWL" | "Behavioral";
+
+/**
+ * The default expression of a behavioural source: a plain copy of another node,
+ * so a freshly placed one is a valid circuit element rather than a syntax error.
+ */
+const DEFAULT_EXPR = "V(in)";
 
 /**
  * Both Unicode micro signs — U+00B5 MICRO SIGN and U+03BC GREEK SMALL LETTER MU
@@ -63,6 +69,13 @@ export class VoltageSource extends Source {
    * measurement file cannot silently drop it.
    */
   pwlRepeat = false;
+  /**
+   * Behavioural expression: what this source's value *is*, as a function of the
+   * circuit around it (`(4*V(1,2))-V(2,3)`, `2*I(V7)`). ngspice evaluates it
+   * every step, which is what makes it a dependent source without a fixed gain
+   * — Multisim calls the same part ABM.
+   */
+  bExpr = DEFAULT_EXPR;
   // Parasitics (shared by all source types)
   seriesR = 0; parallelC = 0; showParasitics: "yes" | "no" = "no";
   /**
@@ -83,6 +96,10 @@ export class VoltageSource extends Source {
    * voltage source (`VUB1`).
    */
   protected vref(): string {
+    // A behavioural source is ngspice's `B` device, not `V`: the letter *is* the
+    // device type, so the reference has to change with the waveform and not just
+    // the spec after it.
+    if (this.sourceType === "Behavioral") return /^b/i.test(this.label) ? this.label : `B${this.label}`;
     return /^v/i.test(this.label) ? this.label : `V${this.label}`;
   }
 
@@ -96,6 +113,8 @@ export class VoltageSource extends Source {
         return `PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
       case "PWL":
         return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
+      case "Behavioral":
+        return `V = ${normalizeMicro(this.bExpr.trim())}`;
       default:
         return `DC ${this.dcValue}${this.acAmplitude ? ` AC ${this.acAmplitude}` : ""}`;
     }
@@ -120,7 +139,7 @@ export class VoltageSource extends Source {
   getProperties(): Property[] {
     const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse", "PWL"] },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse", "PWL", "Behavioral"] },
     ];
     if (this.sourceType === "Sine") {
       props.push(
@@ -143,6 +162,8 @@ export class VoltageSource extends Source {
         { key: "pPer", label: "Tperiod", value: this.pPer, unit: "s", type: "number" },
         { key: "pNp", label: "Ncycles", value: this.pNp, type: "number" },
       );
+    } else if (this.sourceType === "Behavioral") {
+      props.push({ key: "bExpr", label: "Expression V = …", value: this.bExpr, type: "string" });
     } else if (this.sourceType === "PWL") {
       props.push(
         { key: "pwlPoints", label: "Points (t v t v …)", value: this.pwlPoints, type: "string" },
@@ -172,6 +193,7 @@ export class VoltageSource extends Source {
     switch (key) {
       case "label": this.label = String(value); break;
       case "sourceType": this.sourceType = String(value) as VSourceType; break;
+      case "bExpr": this.bExpr = String(value); break;
       case "dcValue": this.dcValue = num; break;
       case "acAmplitude": this.acAmplitude = num; break;
       case "pV1": this.pV1 = num; break;
@@ -200,7 +222,7 @@ export class VoltageSource extends Source {
   /** All waveform fields, not just the ones the current sourceType shows. */
   serialize(): Record<string, string | number> {
     return {
-      label: this.label, sourceType: this.sourceType,
+      label: this.label, sourceType: this.sourceType, bExpr: this.bExpr,
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
@@ -214,7 +236,7 @@ export class VoltageSource extends Source {
   clone(): VoltageSource {
     const v = new VoltageSource(this.id, this.label, { ...this.position }, this.dcValue);
     Object.assign(v, {
-      sourceType: this.sourceType, acAmplitude: this.acAmplitude,
+      sourceType: this.sourceType, acAmplitude: this.acAmplitude, bExpr: this.bExpr,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
       pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat,
@@ -226,7 +248,7 @@ export class VoltageSource extends Source {
 }
 
 export class CurrentSource extends Source {
-  sourceType: "DC" | "Sine" | "PWL" = "DC";
+  sourceType: "DC" | "Sine" | "PWL" | "Behavioral" = "DC";
   // Sine parameters (offset/amplitude/frequency mirror the voltage source).
   sOffset = 0; sAmpl = 1e-3; sFreq = 50; sTd = 0; sTheta = 0; sPhi = 0;
   /** PWL breakpoints as `time value` pairs, e.g. `0 0 5m 10m 15m 10m 20m 0`. */
@@ -235,6 +257,8 @@ export class CurrentSource extends Source {
   pwlRepeat = false;
   /** Verbatim SPICE spec (e.g. an imported `SIN(0 1.414 50)`), see VoltageSource.rawSpec. */
   rawSpec = "";
+  /** Behavioural expression; see VoltageSource.bExpr. */
+  bExpr = DEFAULT_EXPR;
 
   constructor(id: string, label: string, position?: Point, dcValue = 1e-3) {
     super(id, label, position, dcValue);
@@ -249,21 +273,25 @@ export class CurrentSource extends Source {
     if (this.sourceType === "PWL") {
       return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
     }
+    if (this.sourceType === "Behavioral") return `I = ${normalizeMicro(this.bExpr.trim())}`;
     return `DC ${this.dcValue} AC ${this.acAmplitude}`;
   }
 
   getNetlistLine(): string {
     const p = this.nodeOrGnd(this.ports[0].netId);
     const n = this.nodeOrGnd(this.ports[1].netId);
-    // ngspice keys the device type off the first letter (see VoltageSource.vref).
-    const ref = /^i/i.test(this.label) ? this.label : `I${this.label}`;
+    // ngspice keys the device type off the first letter (see VoltageSource.vref);
+    // a behavioural source is a `B` device whichever quantity it delivers.
+    const ref = this.sourceType === "Behavioral"
+      ? (/^b/i.test(this.label) ? this.label : `B${this.label}`)
+      : (/^i/i.test(this.label) ? this.label : `I${this.label}`);
     return `${ref} ${p} ${n} ${this.spec()}`;
   }
 
   getProperties(): Property[] {
     const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "PWL"] },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "PWL", "Behavioral"] },
     ];
     if (this.sourceType === "Sine") {
       props.push(
@@ -274,6 +302,8 @@ export class CurrentSource extends Source {
         { key: "sTheta", label: "Theta", value: this.sTheta, unit: "1/s", type: "number" },
         { key: "sPhi", label: "Phi", value: this.sPhi, unit: "°", type: "number" },
       );
+    } else if (this.sourceType === "Behavioral") {
+      props.push({ key: "bExpr", label: "Expression I = …", value: this.bExpr, type: "string" });
     } else if (this.sourceType === "PWL") {
       props.push(
         { key: "pwlPoints", label: "Points (t i t i …)", value: this.pwlPoints, type: "string" },
@@ -295,8 +325,9 @@ export class CurrentSource extends Source {
     switch (key) {
       case "label": this.label = String(value); break;
       case "sourceType":
-        this.sourceType = value === "Sine" || value === "PWL" ? value : "DC";
+        this.sourceType = value === "Sine" || value === "PWL" || value === "Behavioral" ? value : "DC";
         break;
+      case "bExpr": this.bExpr = String(value); break;
       case "dcValue": this.dcValue = num; break;
       case "acAmplitude": this.acAmplitude = num; break;
       case "sOffset": this.sOffset = num; break;
@@ -313,7 +344,7 @@ export class CurrentSource extends Source {
   /** All waveform fields, not just the ones the current sourceType shows. */
   serialize(): Record<string, string | number> {
     return {
-      label: this.label, sourceType: this.sourceType,
+      label: this.label, sourceType: this.sourceType, bExpr: this.bExpr,
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
@@ -326,7 +357,7 @@ export class CurrentSource extends Source {
   clone(): CurrentSource {
     const i = new CurrentSource(this.id, this.label, { ...this.position }, this.dcValue);
     Object.assign(i, {
-      acAmplitude: this.acAmplitude, sourceType: this.sourceType,
+      acAmplitude: this.acAmplitude, sourceType: this.sourceType, bExpr: this.bExpr,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq,
       sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi,
       pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat,

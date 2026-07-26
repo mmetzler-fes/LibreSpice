@@ -800,6 +800,16 @@ export class LTSpiceParser {
       // PWL carries an arbitrary number of breakpoints, so it is kept as the
       // text between the parentheses rather than parsed into fixed fields —
       // that preserves SI suffixes and `{param}` expressions exactly.
+      // A behavioural source states an expression instead of a waveform, and it
+      // is recognised by exactly that: a leading `V =` / `I =`. Kept as written —
+      // the expression is the part, and re-deriving it from fields would be
+      // parsing SPICE arithmetic for no gain.
+      const beh = valueStr.match(/^\s*[VI]\s*=\s*(.+)$/is);
+      if (beh) {
+        c.sourceType = "Behavioral";
+        c.bExpr = beh[1].trim();
+      }
+
       const pwl = valueStr.match(/^\s*pwl\s*\(([^)]*)\)/i);
       if (pwl) {
         c.sourceType = "PWL";
@@ -837,8 +847,10 @@ export class LTSpiceParser {
         if (f[5] !== undefined) c.pPw = f[5];
         if (f[6] !== undefined) c.pPer = f[6];
         if (f[7] !== undefined) c.pNp = f[7];
-      } else if (!/\(/.test(valueStr)) {
+      } else if (!beh && !/\(/.test(valueStr)) {
         // Plain DC level ("5", "DC 5", "DC 5 AC 1"), possibly with only an AC spec.
+        // Not for a behavioural source: an expression without a bracket in it
+        // ("V = 2*a") looks exactly like one and would be read as a number.
         c.sourceType = "DC";
         if (valueStr) c.dcValue = parseDC(valueStr);
       }

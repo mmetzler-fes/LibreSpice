@@ -214,6 +214,20 @@ const TYPES: Record<string, PartType> = {
   "Arbitrary Voltage Source": { sym: "voltage", prefix: "V", pins: ["1", "2"], value: pwl },
   "Arbitrary Current Source": { sym: "current", prefix: "I", pins: ["1", "2"], value: pwl },
 
+  // The behavioural sources: the same two symbols, with an expression where a
+  // waveform would be. `V = …` in the Value is what makes the source a `B`
+  // device on the way to the netlist (see Sources.ts) — and it has to be forced
+  // to a `B` refdes too, or ngspice reads the leading V as a plain source and
+  // rejects the expression.
+  "Behavioral Voltage Source": {
+    sym: "voltage", prefix: "V", forcePrefix: "B", pins: ["1", "2"],
+    value: (p) => `V = ${p.Expression ?? "0"}`,
+  },
+  "Behavioral Current Source": {
+    sym: "current", prefix: "I", forcePrefix: "B", pins: ["1", "2"],
+    value: (p) => `I = ${p.Expression ?? "0"}`,
+  },
+
   // A lamp is a plain resistor to SPICE. Multisim rates it by voltage and power
   // rather than resistance, so derive R = U²/P — the hot-filament value, which
   // is what these circuits switch. Its refdes prefix is forced to R because
@@ -1228,7 +1242,7 @@ function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
  * another pin or on an existing wire is dropped back onto the pin, since a stub
  * into an occupied point would invent a connection Multisim never had.
  */
-function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[], bodies: Wire[]): string[] {
+function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[], bodies: Wire[], named: Set<string>): string[] {
   // Ground already has FLAGs from the connector symbols; take their points into
   // account so a grounded pin isn't labelled a second time under another name.
   const flagPts: Pt[] = [];
@@ -1255,14 +1269,19 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
     const netName = net.name ?? "";
     const ground = netName === "0";
     const numbered = /^\d+$/.test(netName);
-    const name = numbered ? (ground ? "0" : `N${netName}`) : netName;
+    const name = ourNetName(netName);
     // A net Multisim *named* is one the original drawing showed a name for, via a
     // connector symbol — `+Ub`, `-Ub`, `Ut`. Those connectors are not carried over
     // (see the connector note in `convert`), so the name has to come from here,
     // and it is written whether or not the wiring needs it: without that the sheet
     // loses the label the reader recognises it by, and a supply net with one pin
     // on it loses the node as well.
-    const shown = ground || (netName !== "" && !numbered);
+    // A behavioural source's expression names its nodes, and a name only reaches
+    // a node if the sheet carries it: a numbered net is otherwise left unlabelled
+    // where the wiring already joins it, and the netlist then calls it something
+    // of its own. The expression would go on reading `V(N2)` at a node nobody
+    // calls N2 — no error anywhere, just a source stuck at zero.
+    const shown = ground || (netName !== "" && !numbered) || named.has(netName);
     // A net the original *did* connect, but of which we placed a single pin: the
     // other end is a part that could not be converted (see `skipped`/`unmapped`),
     // or a pin a stand-in does not have — the transistor switch loses its control
@@ -1347,6 +1366,50 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
 }
 
 /**
+ * What a Multisim net is called here.
+ *
+ * Multisim numbers the nets it was not given a name for, and a bare number is no
+ * node name for us, so it gets an `N` in front — except node 0, which is ground
+ * in both. Named for its own sake because a *second* reader of it appeared: a
+ * behavioural source states its expression in terms of node names
+ * (`(4*V(1,2))-V(2,3)`), and those have to be the same names the rest of the
+ * sheet ends up with, or the expression quietly reads nodes that do not exist.
+ */
+function ourNetName(netName: string): string {
+  if (netName === "0") return "0";
+  return /^\d+$/.test(netName) ? `N${netName}` : netName;
+}
+
+/**
+ * A behavioural source's expression, in this schematic's node names.
+ *
+ * `V(1,2)` and `I(vV7)` are Multisim's own — its numbered nets and its refdes for
+ * a source, with the device letter stuck on the front. Both have counterparts
+ * here and neither survives being copied verbatim: the nets are renamed on the
+ * way out, and a current is read through whatever *we* called that source.
+ *
+ * Anything else in the expression is arithmetic and passes through untouched. A
+ * reference that matches nothing is left as it stands rather than guessed at —
+ * ngspice then names it in its own error, which is more use than a silent
+ * substitution.
+ */
+function abmExpression(expr: string, nets: MsNet[]): string {
+  const known = new Set(nets.map((n) => n.name ?? ""));
+  return expr
+    // V(a) and V(a,b): every argument is a node.
+    .replace(/\bV\s*\(([^)]*)\)/gi, (whole, args: string) => {
+      const parts = args.split(",").map((a) => a.trim());
+      if (!parts.every((a) => known.has(a))) return whole;
+      return `V(${parts.map(ourNetName).join(",")})`;
+    })
+    // I(…) reads a current through a source. Multisim writes the refdes with its
+    // device letter stuck on the front ("vV7" is the source V7); the refdes
+    // itself survives the conversion — they are all reserved before any part is
+    // named — so dropping that one leading letter is the whole translation.
+    .replace(/\bI\s*\(\s*([vi])([VI]\w*)\s*\)/g, (_whole, _lead: string, ref: string) => `I(${ref})`);
+}
+
+/**
  * Report Multisim nets that the emitted schematic has shorted together.
  *
  * Multisim marks a connection with an explicit junction, so two of its wires may
@@ -1426,6 +1489,15 @@ export function convert(sch: MsSchematic): ConversionResult {
   }
 
   const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, terminals, instances, grounds, to };
+
+  // A behavioural source's expression names nodes, and those names are ours to
+  // decide (see ourNetName) — so it is translated here, where the net list is,
+  // rather than in the reader, which cannot know.
+  for (const part of sch.parts) {
+    if (part.params.Expression) {
+      part.params = { ...part.params, Expression: abmExpression(part.params.Expression, sch.nets) };
+    }
+  }
 
   // --- placed parts -------------------------------------------------------
   for (const part of sch.parts) {
@@ -1608,7 +1680,19 @@ export function convert(sch: MsSchematic): ConversionResult {
   // Whatever the router could not draw without touching another net is joined by
   // name instead — a label connects without geometry and so cannot short
   // anything. This is also where ground gets its symbols, one per pin.
-  flags.push(...reconcile(sch.nets, pinPos, wires, flags, bodies));
+  // Nets a behavioural expression reads by name; they have to be labelled on the
+  // sheet or the name reaches nothing (see reconcile).
+  const namedByExpr = new Set<string>();
+  for (const part of sch.parts) {
+    for (const m of (part.params.Expression ?? "").matchAll(/\bV\s*\(([^)]*)\)/gi)) {
+      for (const a of m[1].split(",")) {
+        const n = a.trim();
+        // Back to Multisim's spelling: that is what the net list is keyed on.
+        if (/^N\d+$/.test(n)) namedByExpr.add(n.slice(1));
+      }
+    }
+  }
+  flags.push(...reconcile(sch.nets, pinPos, wires, flags, bodies, namedByExpr));
 
   // --- prune what reaches nothing -----------------------------------------
   // A wire end that meets no terminal, no other wire and no name connects
