@@ -2,7 +2,7 @@ import type { Node } from "@xyflow/react";
 import { symbolByName, symbolForType, type SymbolNorm } from "@sym/asyParser.js";
 import { mapSymbol } from "@sym/AsySymbol.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
-import { outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
+import { outwardAxis, outwardDir, type Axis, type Pt, type RouteHints, type Box } from "@core/geometry/ortho.js";
 
 /** Editor node box size in px (also the React Flow node footprint). */
 export const NODE_SIZE = 80;
@@ -256,6 +256,16 @@ export function pinOutwardAxis(node: Node, handleId: string, norm: SymbolNorm = 
   return outwardAxis({ x: pin.px, y: pin.py }, pins.map((p) => ({ x: p.px, y: p.py })));
 }
 
+/** The same, as a unit step: which way leads out of the part (see outwardDir). */
+export function pinOutwardDir(node: Node, handleId: string, norm: SymbolNorm = "default"): Pt | undefined {
+  const data = node.data as ComponentNodeData;
+  if (!data) return undefined;
+  const pins = getLocalPins(data, norm);
+  const pin = pins.find((p) => p.handleId === handleId);
+  if (!pin) return undefined;
+  return outwardDir({ x: pin.px, y: pin.py }, pins.map((p) => ({ x: p.px, y: p.py })));
+}
+
 /**
  * Route hints for one wire, from the parts its two ends sit on. The single place
  * that decides this, so the canvas, the SVG export and the `.asc` exporter all
@@ -274,10 +284,59 @@ export function edgeRouteHints(
     const node = nodes.find((n) => n.id === id);
     return node ? pinOutwardAxis(node, handle, norm) : undefined;
   };
+  const dir = (id?: string, handle?: string | null) => {
+    if (!id || !handle) return undefined;
+    const node = nodes.find((n) => n.id === id);
+    return node ? pinOutwardDir(node, handle, norm) : undefined;
+  };
   return {
     startAxis: d?.sourceTap ? undefined : axis(edge.source, edge.sourceHandle),
     endAxis: d?.targetTap ? undefined : axis(edge.target, edge.targetHandle),
+    startDir: d?.sourceTap ? undefined : dir(edge.source, edge.sourceHandle),
+    endDir: d?.targetTap ? undefined : dir(edge.target, edge.targetHandle),
+    obstacles: nodeBodies(nodes, norm),
   };
+}
+
+/**
+ * How far a part's body reaches past its terminals, across the line they sit on.
+ *
+ * A two-terminal part's pins share one coordinate, so the box they span is a line
+ * with no width — nothing a route could run "through". The drawn body does have
+ * width, and this is it, near enough: a resistor is about 16 px across, a source
+ * 40, and a route pushed 10 px clear of the terminal line is out of both.
+ */
+const BODY_HALF = 10;
+
+/**
+ * The parts' bodies, as boxes a wire should not be routed through.
+ *
+ * Taken from the terminals rather than from the artwork: every part has pins in
+ * the same coordinate system, whether it is drawn from an `.asy`, from a
+ * hand-coded symbol or not yet drawn at all. The box is the span of the pins,
+ * widened only where that span is flat — along the pins' own line it must stay
+ * exact, or a wire arriving at a terminal the proper way would count as running
+ * into the part.
+ *
+ * Parts with a single pin (ground, a name, a junction) have no body to speak of
+ * and are left out; a wire is meant to reach those.
+ */
+export function nodeBodies(nodes: Node[], norm: SymbolNorm = "default"): Box[] {
+  const out: Box[] = [];
+  for (const n of nodes) {
+    const pins = getNodePins(n, norm);
+    if (pins.length < 2) continue;
+    const xs = pins.map((p) => p.x), ys = pins.map((p) => p.y);
+    const x1 = Math.min(...xs), x2 = Math.max(...xs);
+    const y1 = Math.min(...ys), y2 = Math.max(...ys);
+    out.push({
+      x1: x1 === x2 ? x1 - BODY_HALF : x1,
+      x2: x1 === x2 ? x2 + BODY_HALF : x2,
+      y1: y1 === y2 ? y1 - BODY_HALF : y1,
+      y2: y1 === y2 ? y2 + BODY_HALF : y2,
+    });
+  }
+  return out;
 }
 
 export interface NodePin {

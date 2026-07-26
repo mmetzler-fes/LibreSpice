@@ -952,16 +952,26 @@ function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx): 
 function seatDigitalGrounds(ctx: Ctx): void {
   const VS = PIN_OFFSETS.voltage;
   for (const g of ctx.grounds) {
-    const taken = new Set(ctx.terminals.map(key));
     const seats = [0, 180, 90, 270].map((deg) => {
       const plus = rotate(VS[0], deg, false);
       const origin: Pt = [g.out[0] - plus[0], g.out[1] - plus[1]];
       const off = rotate(VS[1], deg, false);
       return { deg, origin, minus: [origin[0] + off[0], origin[1] + off[1]] as Pt };
     });
-    // All four occupied happens on a sheet whose sources sit on top of each other;
-    // upright is then the least confusing of four wrong answers.
-    const seat = seats.find((s) => !taken.has(key(s.minus))) ?? seats[0];
+    // Clear of every other terminal, and by more than a hair: a name binds to the
+    // pin it is *nearest*, within half a grid step, and our own pin centres sit up
+    // to 8 units off the file's for a source. A ground flag 16 units from a
+    // neighbouring output is therefore already a coin toss — and losing it grounds
+    // that output. Multisim stacks its digital constants 32 apart, so this is not
+    // a corner case: it is the shift registers.
+    //
+    // All four seats crowded happens on a sheet whose sources sit on top of each
+    // other; upright is then the least confusing of four wrong answers.
+    const clearance = (p: Pt) => Math.min(
+      ...ctx.terminals.map((t) => Math.abs(t[0] - p[0]) + Math.abs(t[1] - p[1])), Infinity);
+    const seat = seats.find((s) => clearance(s.minus) >= 24)
+      ?? seats.find((s) => clearance(s.minus) > 0)
+      ?? seats[0];
     ctx.symbolLines[g.symbol] = `SYMBOL voltage ${seat.origin[0]} ${seat.origin[1]} R${seat.deg}`;
     ctx.flags[g.flag] = `FLAG ${seat.minus[0]} ${seat.minus[1]} 0`;
     ctx.terminals.push(seat.minus);
@@ -1118,18 +1128,39 @@ function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
 }
 
 /**
+ * How far a part's body reaches past its terminals, across the line they sit on.
+ *
+ * A two-terminal part's pins share one coordinate, so the box they span is a line
+ * with no width — and a line is nothing a route can be *inside* of, so every test
+ * against it passes and the router happily draws through the symbol. One grid
+ * square either side is about the width these symbols are drawn at (a resistor's
+ * body is 32 wide, a source 40 across).
+ */
+const BODY_HALF = GRID;
+
+/**
  * The bounding box of every placed symbol, from the emitted SYMBOL lines.
  *
  * A router has to keep its wires off the part bodies, not only off other wires.
- * Read back rather than collected while emitting, because it is wanted only by
- * the prototype and nothing in the conversion depends on it.
+ * Read back rather than collected while emitting, because the pin offsets are
+ * exactly what the SYMBOL line already says.
  */
 function symbolBodies(symbolLines: string[]): Wire[] {
   const out: Wire[] = [];
-  for (const l of symbolLines) {
-    const m = /^SYMBOL (\S+) (-?\d+) (-?\d+) (\S+)$/.exec(l);
+  for (let i = 0; i < symbolLines.length; i++) {
+    const m = /^SYMBOL (\S+) (-?\d+) (-?\d+) (\S+)$/.exec(symbolLines[i]);
     if (!m) continue;
-    const offs = PIN_OFFSETS[m[1]];
+    // A gate's pin count is a property, not a table: its offsets are spread over
+    // the input column and a three-input gate is half as tall again as a
+    // two-input one. Read against the fixed table, the body came out too small,
+    // and the router laid corners inside gates it thought it was going round.
+    let offs = PIN_OFFSETS[m[1]];
+    for (let j = i + 1; j < symbolLines.length && /^SYMATTR /.test(symbolLines[j]); j++) {
+      const g = /^SYMATTR LibreSpice .*\bpins=([^;]+)/.exec(symbolLines[j]);
+      if (g && /^Digital\\(and|or|nand|nor|xor|xnor|inv|buf)$/.test(m[1])) {
+        offs = gatePinOffsets(g[1].split(",").length - 1);
+      }
+    }
     if (!offs?.length) continue;
     const deg = Number(m[4].slice(1)) || 0;
     const mir = m[4].startsWith("M");
@@ -1141,7 +1172,12 @@ function symbolBodies(symbolLines: string[]): Wire[] {
       x1 = Math.min(x1, x); y1 = Math.min(y1, y);
       x2 = Math.max(x2, x); y2 = Math.max(y2, y);
     }
-    if (Number.isFinite(x1)) out.push([x1, y1, x2, y2]);
+    if (!Number.isFinite(x1)) continue;
+    // Flat in one direction means a two-pin part standing along that line; give
+    // it the width it is drawn with, or nothing can be "through" it.
+    if (x1 === x2) { x1 -= BODY_HALF; x2 += BODY_HALF; }
+    if (y1 === y2) { y1 -= BODY_HALF; y2 += BODY_HALF; }
+    out.push([x1, y1, x2, y2]);
   }
   return out;
 }

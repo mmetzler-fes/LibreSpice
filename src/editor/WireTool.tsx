@@ -7,7 +7,7 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { getNodePins, pinOutwardAxis, GRID, PX_PER_CM, type NodePin } from "./pinGeometry.js";
+import { getNodePins, edgeRouteHints, GRID, PX_PER_CM, type NodePin } from "./pinGeometry.js";
 import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/geometry/ortho.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
@@ -136,12 +136,6 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
     return pin ? { x: pin.x, y: pin.y } : null;
   };
 
-  const axisAt = (nodeId?: string, handleId?: string | null): Axis | undefined => {
-    if (!nodeId || !handleId) return undefined;
-    const node = nodes.find((n) => n.id === nodeId);
-    return node ? pinOutwardAxis(node, handleId, symbolNorm) : undefined;
-  };
-
   const stored = (data?.waypoints as FlowPoint[] | undefined) ?? [];
   // While a point of this wire is being dragged the route is drawn through it,
   // and only the release writes it down.
@@ -153,10 +147,11 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   const start = sourceTap ?? pinCenter(source, sourceHandleId) ?? { x: sourceX, y: sourceY };
   const end = targetTap ?? pinCenter(target, targetHandleId) ?? { x: targetX, y: targetY };
   // An end that taps a wire is not on a pin, so it contributes no direction.
-  const verts = orthoVertices([start, ...waypoints, end], {
-    startAxis: sourceTap ? undefined : axisAt(source, sourceHandleId),
-    endAxis: targetTap ? undefined : axisAt(target, targetHandleId),
-  });
+  // One place decides how a wire is routed, for the canvas and both exports
+  // alike (see edgeRouteHints) — with the taps taken off the ends here, since
+  // React Flow hands them to this component and not to the store.
+  const hints = edgeRouteHints(nodes, { source, sourceHandle: sourceHandleId, target, targetHandle: targetHandleId, data }, symbolNorm);
+  const verts = orthoVertices([start, ...waypoints, end], hints);
   const path = "M " + verts.map((p) => `${p.x} ${p.y}`).join(" L ");
 
   // The name of this wire's net, shown *only* while the wire is selected.

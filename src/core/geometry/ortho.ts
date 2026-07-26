@@ -41,43 +41,137 @@ export function outwardDir(pin: Pt, siblings: Pt[]): Pt | undefined {
     : { x: 0, y: Math.sign(dy) };
 }
 
+/** A part's body, as a box a wire should not be routed through. */
+export interface Box { x1: number; y1: number; x2: number; y2: number }
+
 /** Preferred leaving axis at each end of a wire; either may be unknown. */
 export interface RouteHints {
   startAxis?: Axis;
   endAxis?: Axis;
+  /**
+   * Which way is *out* of the part at each end, as a unit step.
+   *
+   * The axis alone does not say which of the two directions leads away from the
+   * symbol, and that is what a wire needs to know to leave a pin without cutting
+   * back through the part it is leaving: a gate's input faces left, and a leg
+   * that starts by stepping right runs the length of the gate's own body.
+   */
+  startDir?: Pt;
+  endDir?: Pt;
+  /**
+   * Part bodies the route should avoid running through.
+   *
+   * A wire that crosses a symbol is not wrong — nothing is connected by it — but
+   * it reads as if it were, and the piece inside the body is invisible: an
+   * arriving wire looks like it stops at the symbol's edge. Where a route has a
+   * choice of shapes, this decides between them.
+   */
+  obstacles?: Box[];
+}
+
+/** Does a segment run through a body, rather than merely touch its edge? */
+function entersBody(a: Pt, b: Pt, box: Box): boolean {
+  return Math.max(a.x, b.x) > box.x1 && Math.min(a.x, b.x) < box.x2
+      && Math.max(a.y, b.y) > box.y1 && Math.min(a.y, b.y) < box.y2;
+}
+
+/** How many times a path runs through a part body. */
+function bodyHits(path: Pt[], from: Pt, obstacles: Box[]): number {
+  let n = 0;
+  let prev = from;
+  for (const p of path) {
+    for (const box of obstacles) if (entersBody(prev, p, box)) n++;
+    prev = p;
+  }
+  return n;
 }
 
 /**
  * Route one leg between two points with right angles.
  *
  * With no hint the longer side leads, which is the old behaviour. A hint pins
- * the leg to leave (or arrive) along the pin's own axis. When both ends want the
- * *same* axis a single corner cannot satisfy them, so the leg takes a Z: out
- * along the axis, across, and back in along it. That is what keeps a wire off
- * the flank of a symbol whose pins face the same way, which is exactly the
- * op-amp's two inputs.
+ * the leg to leave (or arrive) along the pin's own axis.
+ *
+ * Every case offers more than one legal shape, and `obstacles` is what decides
+ * between them: the first shape that runs through no part body wins, and where
+ * every shape does, the one the hints asked for. A wire through a symbol is the
+ * one kind of route a reader cannot follow — the piece inside the body is drawn
+ * over by the symbol, so the wire appears to stop at its edge.
  */
-function leg(a: Pt, b: Pt, startAxis?: Axis, endAxis?: Axis): Pt[] {
+function leg(
+  a: Pt, b: Pt,
+  startAxis?: Axis, endAxis?: Axis,
+  obstacles?: Box[], startDir?: Pt, endDir?: Pt,
+): Pt[] {
   if (a.x === b.x || a.y === b.y) return [b];
 
-  if (startAxis && endAxis) {
-    if (startAxis === endAxis) {
-      const mid = startAxis === "x"
-        ? { x: Math.round((a.x + b.x) / 2), y: 0 }
-        : { x: 0, y: Math.round((a.y + b.y) / 2) };
-      return startAxis === "x"
-        ? [{ x: mid.x, y: a.y }, { x: mid.x, y: b.y }, b]
-        : [{ x: a.x, y: mid.y }, { x: b.x, y: mid.y }, b];
-    }
-    // Different axes: one corner satisfies both ends at once.
-    return startAxis === "x" ? [{ x: b.x, y: a.y }, b] : [{ x: a.x, y: b.y }, b];
+  /** The shape the hints ask for, and the ones to fall back on, best first. */
+  const shapes: Pt[][] = [];
+  const cornerX = [{ x: b.x, y: a.y }, b];   // along x first
+  const cornerY = [{ x: a.x, y: b.y }, b];   // along y first
+  const zAt = (axis: Axis, at: number): Pt[] => axis === "x"
+    ? [{ x: at, y: a.y }, { x: at, y: b.y }, b]
+    : [{ x: a.x, y: at }, { x: b.x, y: at }, b];
+
+  if (startAxis && endAxis && startAxis === endAxis) {
+    // Both ends want the same axis: a single corner cannot satisfy them, so the
+    // leg takes a Z — out along the axis, across, and back in along it. That is
+    // what keeps a wire off the flank of a symbol whose pins face the same way,
+    // which is exactly the op-amp's two inputs.
+    //
+    // Where the crossing goes is free, and that is the room this has to dodge a
+    // body: halfway is the tidy default, but the crossing can also be pushed
+    // just past either end, which is what takes the wire around the part instead
+    // of down through it.
+    const [pa, pb] = startAxis === "x" ? [a.x, b.x] : [a.y, b.y];
+    const step = pb >= pa ? GRID_STEP : -GRID_STEP;
+    shapes.push(zAt(startAxis, Math.round((pa + pb) / 2)));
+    shapes.push(zAt(startAxis, pb + step), zAt(startAxis, pa - step));
+    shapes.push(cornerX, cornerY);
+  } else if (startAxis && endAxis) {
+    // Different axes: one corner satisfies both ends at once. The other corner
+    // is still a legal wire, and better than one drawn through a symbol.
+    shapes.push(startAxis === "x" ? cornerX : cornerY);
+    shapes.push(startAxis === "x" ? cornerY : cornerX);
+  } else {
+    const axis = startAxis
+      ?? (endAxis ? (endAxis === "x" ? "y" : "x") : undefined)
+      ?? (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "x" : "y");
+    shapes.push(axis === "x" ? cornerX : cornerY, axis === "x" ? cornerY : cornerX);
   }
 
-  const axis = startAxis
-    ?? (endAxis ? (endAxis === "x" ? "y" : "x") : undefined)
-    ?? (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "x" : "y");
-  return axis === "x" ? [{ x: b.x, y: a.y }, b] : [{ x: a.x, y: b.y }, b];
+  if (!obstacles?.length) return shapes[0];
+
+  // Last resort: step clear of the part first, then route from there. Only the
+  // *direction* out of a pin can do this — a leg that merely honours the pin's
+  // axis is free to set off into the symbol it is leaving, which is how a wire
+  // ends up running the length of its own gate before turning round.
+  const CLEAR = 16;
+  const stepOut = (p: Pt, dir: Pt): Pt => ({ x: p.x + dir.x * CLEAR, y: p.y + dir.y * CLEAR });
+  if (endDir) {
+    const c = stepOut(b, endDir);
+    if (c.x !== a.x && c.y !== a.y) {
+      shapes.push([{ x: c.x, y: a.y }, c, b], [{ x: a.x, y: c.y }, c, b]);
+    } else {
+      shapes.push([c, b]);
+    }
+  }
+  if (startDir) {
+    const c = stepOut(a, startDir);
+    if (c.x !== b.x && c.y !== b.y) {
+      shapes.push([c, { x: c.x, y: b.y }, b], [c, { x: b.x, y: c.y }, b]);
+    } else {
+      shapes.push([c, b]);
+    }
+  }
+
+  // The first shape that clears every body; the preferred one if none does, so a
+  // part boxed in on all sides still gets its wire.
+  return shapes.find((path) => bodyHits(path, a, obstacles) === 0) ?? shapes[0];
 }
+
+/** How far past an end a Z-bend's crossing is pushed to clear a body. */
+const GRID_STEP = 16;
 
 /**
  * Expand a vertex list into an orthogonal path. The hints apply to the first and
@@ -90,7 +184,14 @@ export function orthoVertices(points: Pt[], hints: RouteHints = {}): Pt[] {
   const last = points.length - 1;
   for (let i = 1; i <= last; i++) {
     const a = out[out.length - 1];
-    out.push(...leg(a, points[i], i === 1 ? hints.startAxis : undefined, i === last ? hints.endAxis : undefined));
+    out.push(...leg(
+      a, points[i],
+      i === 1 ? hints.startAxis : undefined,
+      i === last ? hints.endAxis : undefined,
+      hints.obstacles,
+      i === 1 ? hints.startDir : undefined,
+      i === last ? hints.endDir : undefined,
+    ));
   }
   return out;
 }
