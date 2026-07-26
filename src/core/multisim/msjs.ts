@@ -122,6 +122,8 @@ export function msjsToSchematic(doc: any): MsSchematic {
     .map((t: any) => ({ text: textValue[t.guid], position: [t.matrix?.e ?? 0, t.matrix?.f ?? 0] as Pt }));
 
   return {
+    // Live draws one grid square per unit; ours is 16.
+    unit: 16,
     parts,
     connectors: (sheet.connectors ?? []).map((c: any) => ({
       guid: c.guid, kind: c.component, matrix: c.matrix ?? {},

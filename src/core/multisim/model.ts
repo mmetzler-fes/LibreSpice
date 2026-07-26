@@ -101,6 +101,16 @@ export interface MsNet {
 
 /** A whole schematic, ready to convert. */
 export interface MsSchematic {
+  /**
+   * LTSpice units per unit of this file, so the converter can scale it.
+   *
+   * The two formats do not draw on the same grid, and neither draws on ours:
+   * Multisim Live puts one grid square in one unit, Multisim 14 in nine. Left to
+   * the converter this was a constant, and every `.ms14` came out nine times too
+   * large — with the parts still their own size, which is how a sheet ends up
+   * with its symbols scattered like dust.
+   */
+  unit: number;
   parts: MsPart[];
   connectors: MsConnector[];
   wires: MsWire[];

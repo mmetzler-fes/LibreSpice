@@ -714,20 +714,31 @@ function rotate([x, y]: Pt, deg: number, mirrored: boolean): Pt {
  * exercises these come from, but it means a circuit relying on gate delay (a
  * ring oscillator, a race) will not behave as it did in Multisim.
  */
-const GATES: Record<string, { gate: string; ins: string[] }> = {
+const SINGLE_GATES: Record<string, { gate: string; ins: string[] }> = {
   Inverter: { gate: "not", ins: ["A"] },
   Buffer: { gate: "buffer", ins: ["A"] },
-  "2-Input AND": { gate: "and", ins: ["A", "B"] },
-  "3-Input AND": { gate: "and", ins: ["A", "B", "C"] },
-  "4-Input AND": { gate: "and", ins: ["A", "B", "C", "D"] },
-  "2-Input OR": { gate: "or", ins: ["A", "B"] },
-  "3-Input OR": { gate: "or", ins: ["A", "B", "C"] },
-  "4-Input OR": { gate: "or", ins: ["A", "B", "C", "D"] },
-  "5-Input OR": { gate: "or", ins: ["A", "B", "C", "D", "E"] },
-  "2-Input NAND": { gate: "nand", ins: ["A", "B"] },
-  "2-Input NOR": { gate: "nor", ins: ["A", "B"] },
-  "2-Input XOR": { gate: "xor", ins: ["A", "B"] },
 };
+
+/**
+ * Multisim names a gate by its input count and its function ("3-Input NAND"),
+ * and the two are independent: our own gate takes any number of inputs, so
+ * spelling out every combination only decides which of them we happen to accept.
+ * The list did decide that, and a five-input AND — the sort of thing a decoder
+ * is built from — came out as a part we had no entry for.
+ */
+const GATES: Record<string, { gate: string; ins: string[] }> = new Proxy(SINGLE_GATES, {
+  get(target, key: string) {
+    if (key in target) return target[key];
+    const m = /^(\d+)-Input (AND|OR|NAND|NOR|XOR|XNOR)$/.exec(key);
+    if (!m) return undefined;
+    const n = Number(m[1]);
+    // A, B, C … as far as the count goes; Multisim names them the same way.
+    return { gate: m[2].toLowerCase(), ins: Array.from({ length: n }, (_, i) => String.fromCharCode(65 + i)) };
+  },
+  has(target, key: string) {
+    return key in target || /^\d+-Input (AND|OR|NAND|NOR|XOR|XNOR)$/.test(key);
+  },
+});
 
 /** LTSpice's Digital library spells NOT and Buffer differently. */
 const GATE_SYMBOL: Record<string, string> = { not: "inv", buffer: "buf" };
@@ -1386,7 +1397,9 @@ export function convert(sch: MsSchematic): ConversionResult {
   /** `<part guid>/<conn name>` → the pin's final LTSpice position. */
   const pinPos: PinPos = {};
 
-  const to = (v: number) => Math.round(v * GRID);
+  // The file's own grid, in our units. Rounded to the LTSpice grid afterwards so
+  // parts and wire ends land on it whatever the source drew on.
+  const to = (v: number) => Math.round((v * sch.unit) / GRID) * GRID;
 
   // Reserve every refdes Multisim spelled out, so auto-numbering cannot take a
   // name a later part already claims.

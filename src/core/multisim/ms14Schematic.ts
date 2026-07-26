@@ -163,7 +163,13 @@ function paramValues(el: El): string[] {
  * the converter as a part it cannot place, which is the same treatment an unknown
  * Live part gets.
  */
-const TYPES: Record<string, { name: string; params?: Record<string, number> }> = {
+const TYPES: Record<string, {
+  name: string;
+  params?: Record<string, number>;
+  fixed?: Record<string, string>;
+  /** Connections this part spells differently from the type it maps onto. */
+  conns?: Record<string, string>;
+}> = {
   RESISTOR_VIRTUAL: { name: "Resistor", params: { Resistance: 1 } },
   RESISTOR: { name: "Resistor", params: { Resistance: 1 } },
   CAPACITOR_VIRTUAL: { name: "Capacitor", params: { Capacitance: 1 } },
@@ -196,15 +202,61 @@ const TYPES: Record<string, { name: string; params?: Record<string, number> }> =
   MMBF4393LT1G: { name: "JFET N" },
 
   NOT: { name: "Inverter" },
-  AND2: { name: "2-Input AND" },
-  AND3: { name: "3-Input AND" },
-  AND4: { name: "4-Input AND" },
-  OR2: { name: "2-Input OR" },
-  OR3: { name: "3-Input OR" },
-  XOR2: { name: "2-Input XOR" },
+  BUFFER: { name: "Buffer" },
+
+  // An SR latch is the storage cell without its clock: our flip-flop already
+  // asserts on SET and RESET whatever the clock does, so wiring S and R to those
+  // and leaving the data and clock pins open *is* the latch. It is a stand-in —
+  // the part comes out with two pins it did not have — and the conversion says so.
+  SR_FF: { name: "D Flip-Flop", conns: { S: "SET", R: "RESET" } },
 
   POTENTIOMETER_VIRTUAL: { name: "Potentiometer", params: { Resistance: 5, Key: 3 } },
+
+  D_FF: { name: "D Flip-Flop" },
+
+  // Measuring instruments are not parts of the circuit, but leaving them out
+  // takes their node with them. Each becomes the thing SPICE measures with: an
+  // ammeter is a source of 0 V (the classic current probe, and it even reads out
+  // as I(V…)), a voltmeter the high resistance it is.
+  AMMETER_H: { name: "DC Voltage", fixed: { DC_mag: "0" } },
+  AMMETER_V: { name: "DC Voltage", fixed: { DC_mag: "0" } },
+  VOLTMETER_H: { name: "Resistor", fixed: { Resistance: "10Meg" } },
+  VOLTMETER_V: { name: "Resistor", fixed: { Resistance: "10Meg" } },
 };
+
+/**
+ * The 74xx logic packages, by the gate one of their sections is.
+ *
+ * A package holds four (or six) gates and Multisim places one *section* at a
+ * time, so what is on the sheet is a gate — with its pins named for the section
+ * it belongs to (`1A`, `1B`, `1Y` for the first). Which gate the package is, is
+ * the only thing that has to be looked up; how many inputs it has, the placed
+ * section says itself.
+ *
+ * The supply pins are shared by every section and drawn on none of them, so they
+ * arrive without a position (see the pin loop) and are simply not placed.
+ */
+const LOGIC_ICS: Record<string, string> = {
+  "7400N": "NAND", "7402N": "NOR", "7404N": "Inverter", "7408N": "AND", "7432N": "OR",
+  "7428N": "NOR", "74LS04D": "Inverter", "74LS27N": "NOR", "74S11N": "AND", "74F11D": "AND",
+};
+
+/** The Live name of a gate with `n` inputs, as the converter's table spells it. */
+function gateName(kind: string, n: number): string {
+  if (kind === "Inverter" || kind === "Buffer") return kind;
+  return `${n}-Input ${kind}`;
+}
+
+/**
+ * Multisim's measuring probes: a name on a node, not a part.
+ *
+ * A probe has one pin and no model — it marks a node the author wanted to watch.
+ * Carried over as a part it would be a terminal connected to nothing; carried
+ * over as nothing, the node it marks loses the one thing about it worth keeping.
+ * So the probe is dropped and its *name* goes onto its net, which is what the
+ * converted schematic then shows as a label.
+ */
+const PROBES = /^PROBE(_|$)/;
 
 /**
  * Parameters this type states differently from the way SPICE wants them.
@@ -234,6 +286,17 @@ const CONNECTORS: Record<string, string> = {
   V_REF2: "V_REF2",
 };
 
+/** Rename one connection of a part, keeping every table that mentions it in step. */
+function rename(
+  from: string, to: string,
+  pins: Record<string, Pt>, connPin: Record<string, string>, connNames: string[],
+): void {
+  if (pins[from]) { pins[to] = pins[from]; delete pins[from]; }
+  if (connPin[from]) { connPin[to] = connPin[from]; delete connPin[from]; }
+  const i = connNames.indexOf(from);
+  if (i >= 0) connNames[i] = to;
+}
+
 /** The transform an object carries, in the converter's matrix vocabulary. */
 function matrixOf(attrs: Record<string, string>): Record<string, number> {
   const n = (k: string, d: number) => {
@@ -250,9 +313,8 @@ function matrixOf(attrs: Record<string, string>): Record<string, number> {
 /**
  * The neutral schematic a Multisim 14 document describes.
  *
- * Coordinates stay in the file's own units, as with the Live reader — the
- * converter scales. Multisim 14 draws on a 9-unit grid where Live uses 1, so the
- * two differ by a factor the converter applies via `GRID`.
+ * Coordinates stay in the file's own units, as with the Live reader; the
+ * schematic says what one of them is worth (`unit`) and the converter scales.
  */
 export function ms14ToSchematic(xml: string): MsSchematic {
   const doc = parseMs14Xml(xml);
@@ -283,6 +345,8 @@ export function ms14ToSchematic(xml: string): MsSchematic {
   // their ports — so a part can be assembled from both halves at once.
   const parts: MsPart[] = [];
   const connectors: MsConnector[] = [];
+  /** Port a probe was attached to → the probe's name (see PROBES). */
+  const probeNames = new Map<string, string>();
   for (const sym of walk(doc)) {
     if (sym.tag !== "CIITSymbolComp") continue;
     const defId = sym.attrs.CiComponent;
@@ -325,6 +389,12 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       matrix ??= matrixOf(pin.attrs);
     }
 
+    // A probe is dropped, and its name noted for the net it sat on (see PROBES).
+    if (PROBES.test(ms14Type)) {
+      for (const portId of Object.values(connPin)) probeNames.set(portId, refdes);
+      continue;
+    }
+
     // Ground and the supply rails are parts in this format and symbols on the
     // sheet for us, exactly as in the Live reader.
     const kind = CONNECTORS[ms14Type];
@@ -343,8 +413,31 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       continue;
     }
 
+    // A gate is named by its function and its input count in both worlds, only
+    // spelled differently: `AND3` here, "3-Input AND" there.
+    const gate = /^(AND|OR|NAND|NOR|XOR|XNOR)(\d+)$/.exec(ms14Type);
+    let typeName = TYPES[ms14Type]?.name ?? (gate ? `${gate[2]}-Input ${gate[1]}` : ms14Type);
+
+    // Connections the mapped-to type spells differently (an SR latch's S and R
+    // are our flip-flop's asynchronous SET and RESET).
+    for (const [from, to] of Object.entries(TYPES[ms14Type]?.conns ?? {})) {
+      rename(from, to, pins, connPin, connNames);
+    }
+
+    // A 74xx section is a gate, and its pins carry the section number. Strip it,
+    // so the connections are the `A`, `B`, `Y` the converter's gate table names —
+    // each section is its own placed part, so two of them cannot collide.
+    if (LOGIC_ICS[ms14Type]) {
+      for (const conn of [...connNames]) {
+        const m = /^\d+([A-Z]+)$/.exec(conn);
+        if (!m || m[1] === conn) continue;
+        rename(conn, m[1], pins, connPin, connNames);
+      }
+      typeName = gateName(LOGIC_ICS[ms14Type], connNames.filter((c) => c !== "Y").length);
+    }
+
     const mapped = TYPES[ms14Type];
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = { ...mapped?.fixed };
     for (const [name, slot] of Object.entries(mapped?.params ?? {})) {
       const v = slots[slot];
       if (v !== undefined && v !== "") params[name] = v;
@@ -357,7 +450,7 @@ export function ms14ToSchematic(xml: string): MsSchematic {
 
     parts.push({
       guid: defId!,
-      typeName: mapped?.name ?? ms14Type,
+      typeName,
       refdes: { prefix: rd[1] || undefined, number: rd[2] || null },
       matrix: matrix ?? matrixOf(sym.attrs),
       pins,
@@ -372,7 +465,12 @@ export function ms14ToSchematic(xml: string): MsSchematic {
   }
 
   // ── nets ─────────────────────────────────────────────────────────────────
-  const nets: MsNet[] = [];
+  // Nets are collected by name, not one per node object: Multisim 14 keeps a
+  // *node per sheet region* and calls every one of them "0", so a file has half a
+  // dozen ground nodes that are one net. Two nets with the same name are the same
+  // net — that is what a name is for — and left apart the conversion connects
+  // each of them separately and none of them to the others.
+  const byName = new Map<string, MsNet>();
   for (const [, obj] of byCiId) {
     if (obj.tag !== "CiNode") continue;
     const list = obj.kids.find((k) => k.tag === "Ports");
@@ -382,8 +480,18 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       const port = id ? ports.get(id) : undefined;
       if (port) pins.push({ component: port.component, pin: id! });
     }
-    if (pins.length) nets.push({ name: text(obj.attrs.LocalName), pins });
+    if (!pins.length) continue;
+    // A net Multisim only numbered, but which carried a probe, takes the probe's
+    // name: that is what the author called the node, and a numbered net comes out
+    // of the conversion as `N5`. A name the file gave the net itself always wins.
+    const named = text(obj.attrs.LocalName);
+    const probe = pins.map((q) => probeNames.get(q.pin)).find(Boolean);
+    const name = probe && /^\d+$/.test(named) ? probe : named;
+    const known = byName.get(name);
+    if (known) known.pins.push(...pins);
+    else byName.set(name, { name, pins });
   }
+  const nets = [...byName.values()];
 
   // ── wires ────────────────────────────────────────────────────────────────
   // One `CIITLinkComp` is one run of points, already in sheet coordinates. It
@@ -399,5 +507,6 @@ export function ms14ToSchematic(xml: string): MsSchematic {
     if (path.length >= 2) wires.push({ path });
   }
 
-  return { parts, connectors, wires, junctions: [], texts: [], nets };
+  // Multisim 14 draws nine units to the grid square, ours is 16.
+  return { unit: 16 / 9, parts, connectors, wires, junctions: [], texts: [], nets };
 }
