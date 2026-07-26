@@ -87,6 +87,8 @@ await build({
       export { offsetsForNode, parseRot, symbolToType } from "@core/ltspice/ltspiceGeometry.js";
       export { convert } from "@core/multisim/MultisimConverter.js";
       export { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
+      export { readMs14 } from "@core/multisim/ms14.js";
+      export { ms14ToSchematic } from "@core/multisim/ms14Schematic.js";
     `,
     resolveDir: root,
     loader: "ts",
@@ -106,7 +108,7 @@ await build({
 const {
   useCircuitStore, useLibraryStore, ModelParser,
   registerSymbol, symbolByName, offsetsForNode, parseRot, symbolToType,
-  convert, readMsjs, msjsToSchematic,
+  convert, readMsjs, msjsToSchematic, readMs14, ms14ToSchematic,
 } = await import(pathToFileURL(outfile).href);
 
 const MSJS = "examples/Sicherung_Multisim_Circuits";
@@ -397,3 +399,72 @@ for (const [what, n] of [...now.blame].sort((a, b) => b[1] - a[1]).slice(0, 18))
   console.log(`  ${String(what).padEnd(38)} ${String(n).padStart(5)} | ${String(before?.blame.get(what) ?? 0).padStart(5)}`);
 }
 cleanup?.();
+
+// ── der Multisim-14-Korpus ───────────────────────────────────────────────────
+/**
+ * The `.ms14` files, measured on the way *through* the converter rather than on a
+ * committed `.asc`: nothing checks these into the tree, they are opened as they
+ * are. Three numbers, and each of them named a real defect once:
+ *
+ *  - **shorted nets** — two of Multisim's nets that our drawing joined. The
+ *    converter reports these itself; they are the honest count of what the
+ *    geometry cost.
+ *  - **parts at the sheet corner** — a placement that could not be read. The
+ *    result still looks like a schematic, with everything on top of everything.
+ *  - **types with no mapping** — the parts that arrive with their Multisim name
+ *    and are left off the sheet, which is the list to work down next.
+ */
+const MS14 = "examples/Multisim14";
+
+function ms14Files(dir) {
+  const out = [];
+  const walk = (d) => {
+    if (!existsSync(d)) return;
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.ms14$/i.test(e.name)) out.push(p);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+const ms14 = { files: 0, clean: 0, shorts: 0, stacked: 0, unknown: new Map(), worst: [] };
+for (const file of ms14Files(resolve(root, MS14))) {
+  const b = readFileSync(file);
+  let sch, res;
+  try {
+    sch = ms14ToSchematic(readMs14(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)));
+    res = convert(sch);
+  } catch (e) {
+    console.log(`  FEHLER ${file}: ${e.message}`);
+    continue;
+  }
+  ms14.files++;
+  if (!res.shorts.length) ms14.clean++;
+  ms14.shorts += res.shorts.length;
+  ms14.stacked += sch.parts.filter((p) => (p.matrix.e ?? 0) === 0 && (p.matrix.f ?? 0) === 0).length;
+  for (const t of res.skipped) ms14.unknown.set(t, (ms14.unknown.get(t) ?? 0) + 1);
+  if (res.shorts.length) ms14.worst.push([res.shorts.length, file.slice(file.lastIndexOf("/") + 1)]);
+}
+
+console.log(`\nMultisim 14 — ${ms14.files} Schaltungen, direkt aus der Datei`);
+console.log("=".repeat(70));
+console.log(line("Schaltungen ohne Kurzschluss", ms14.clean));
+console.log(line("Kurzgeschlossene Netze (gesamt)", ms14.shorts));
+console.log(line("Bauteile in der Blattecke", ms14.stacked));
+console.log(line("Typen ohne Zuordnung", ms14.unknown.size));
+
+if (ms14.worst.length) {
+  console.log("\nSchaltungen mit Kurzschluss:");
+  for (const [n, f] of ms14.worst.sort((a, b) => b[0] - a[0]).slice(0, 10)) {
+    console.log(`  ${String(n).padStart(5)}  ${f}`);
+  }
+}
+if (ms14.unknown.size) {
+  console.log("\nNicht abbildbare Typen (Schaltungen, in denen sie vorkommen):");
+  for (const [t, n] of [...ms14.unknown].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${String(n).padStart(5)}x  ${t || "(ohne Namen)"}`);
+  }
+}

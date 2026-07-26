@@ -97,6 +97,14 @@ export async function runMs14Tests(): Promise<TestReport> {
         (n, p) => n + Object.values(p.pins).filter(([x, y]) => x === 0 && y === 0).length, 0);
       if (atOrigin) problems.push(`${atOrigin} pins at (0,0)`);
 
+      // The same tell-tale one level up: a part whose placement could not be read
+      // lands at the sheet's corner, and a whole sheet of them stacks there. It
+      // reads as a schematic — right parts, right nets — while every wire between
+      // them is a short. No file in the corpus draws a part at the origin, so one
+      // sitting there is the reading having failed, not the author's doing.
+      const partsAtOrigin = sch.parts.filter((p) => (p.matrix.e ?? 0) === 0 && (p.matrix.f ?? 0) === 0);
+      if (partsAtOrigin.length) problems.push(`${partsAtOrigin.length} parts at (0,0)`);
+
       // Converted and read back: the two things the reading is *for*. Whether a
       // part *can* be converted is not this suite's business — the converter says
       // which types it has no entry for, and three of these sheets are built

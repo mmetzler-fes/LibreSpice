@@ -357,13 +357,19 @@ export function ms14ToSchematic(xml: string): MsSchematic {
     const slots = paramValues(def);
     const refdes = text(def.attrs.LocalName);
 
-    // Pins: the connector inside a pin holds the point, the pin itself holds the
-    // placement. Both are needed — the point is symbol-local.
+    // Pins: the connector inside a pin holds the point, and it is symbol-local —
+    // where the symbol sits is a transform, which the two writers of this format
+    // put in different places. Most files state it on the placed symbol; some
+    // state it on every pin instead and leave the symbol without one. Whichever
+    // is present is the placement, and the symbol wins where both are: taking the
+    // pin's there put a whole sheet's parts on top of each other at the corner,
+    // because a pin that is not itself displaced carries the identity. Checked
+    // against the drawn wire ends, which land on the symbol's transform.
     const pins: Record<string, Pt> = {};
     const pinsById: Record<string, Pt> = {};
     const connPin: Record<string, string> = {};
     const connNames: string[] = [];
-    let matrix: Record<string, number> | undefined;
+    let matrix = sym.attrs["Transformer-M20"] !== undefined ? matrixOf(sym.attrs) : undefined;
     for (const pin of walk(sym)) {
       if (pin.tag !== "CIITPinSymbolComp") continue;
       const portId = pin.attrs.PortID;
