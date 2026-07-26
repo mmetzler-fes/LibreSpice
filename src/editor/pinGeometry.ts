@@ -147,15 +147,18 @@ const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
     { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
     { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
   ],
+  // The JFET's drain and source leave to the right of the channel, as njf.asy
+  // draws them, so their terminals sit 32 px right of centre and not on the
+  // channel bar — see JFETNSymbol.
   jfet_n: [
-    { handleId: "d", order: 1, px: NODE_SIZE / 2, py: 0 },
+    { handleId: "d", order: 1, px: NODE_SIZE / 2 + 32, py: 0 },
     { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
-    { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
+    { handleId: "s", order: 3, px: NODE_SIZE / 2 + 32, py: NODE_SIZE },
   ],
   jfet_p: [
-    { handleId: "d", order: 1, px: NODE_SIZE / 2, py: 0 },
+    { handleId: "d", order: 1, px: NODE_SIZE / 2 + 32, py: 0 },
     { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
-    { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
+    { handleId: "s", order: 3, px: NODE_SIZE / 2 + 32, py: NODE_SIZE },
   ],
 };
 

@@ -85,28 +85,35 @@ export const MOSFETNSymbol = () => (
  * it is the gate-junction diode's direction — into the channel for N, out of it
  * for P. Drawn with a solid channel, unlike the MOSFET's dashed one, because that
  * is the physical difference: the JFET's channel is there without a gate voltage.
+ *
+ * Drain and source leave to the *right* and their terminals sit at the end of
+ * those leads, not on the channel bar — the same places njf.asy puts them, so the
+ * part docks where it is drawn whether the symbol file is loaded or not. Drawn
+ * with the terminals on the bar, the two leads hung in the air beside three
+ * connection points that were not where the wire had to go.
  */
+const JFETBody = () => (
+  <>
+    <line x1="-14" y1="-28" x2="-14" y2="28" stroke="currentColor" strokeWidth="2" />
+    <line x1="-40" y1="0" x2="-14" y2="0" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="-14" y1="-20" x2="32" y2="-20" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="32" y1="-20" x2="32" y2="-40" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="-14" y1="20" x2="32" y2="20" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="32" y1="20" x2="32" y2="40" stroke="currentColor" strokeWidth="1.5" />
+  </>
+);
+
 export const JFETNSymbol = () => (
   <g>
-    <line x1="0" y1="-40" x2="0" y2="40" stroke="currentColor" strokeWidth="2" />
-    <line x1="-40" y1="0" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="0" y1="-26" x2="30" y2="-26" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="30" y1="-26" x2="30" y2="-40" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="0" y1="26" x2="30" y2="26" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="30" y1="26" x2="30" y2="40" stroke="currentColor" strokeWidth="1.5" />
-    <polygon points="-12,-5 -12,5 -2,0" fill="currentColor" />
+    <JFETBody />
+    <polygon points="-26,-5 -26,5 -16,0" fill="currentColor" />
   </g>
 );
 
 export const JFETPSymbol = () => (
   <g>
-    <line x1="0" y1="-40" x2="0" y2="40" stroke="currentColor" strokeWidth="2" />
-    <line x1="-40" y1="0" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="0" y1="-26" x2="30" y2="-26" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="30" y1="-26" x2="30" y2="-40" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="0" y1="26" x2="30" y2="26" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="30" y1="26" x2="30" y2="40" stroke="currentColor" strokeWidth="1.5" />
-    <polygon points="-14,0 -4,-5 -4,5" fill="currentColor" />
+    <JFETBody />
+    <polygon points="-28,0 -18,-5 -18,5" fill="currentColor" />
   </g>
 );
 
