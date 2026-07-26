@@ -1,0 +1,12 @@
+import { build } from "esbuild";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+const root = process.cwd();
+const outfile = resolve(root, "node_modules/.cache/librespice-ms14.mjs");
+await build({ stdin: { contents: `export { readMs14 } from "./src/core/multisim/ms14.ts";`, resolveDir: root, loader: "ts" }, bundle: true, format: "esm", platform: "node", packages: "external", outfile, logLevel: "warning" });
+const { readMs14 } = await import(pathToFileURL(outfile).href);
+const b = readFileSync(process.argv[2]);
+const xml = readMs14(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+writeFileSync(process.argv[3], xml, "utf8");
+console.log(xml.length, "Zeichen ->", process.argv[3]);

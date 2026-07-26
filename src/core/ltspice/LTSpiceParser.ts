@@ -481,30 +481,40 @@ export class LTSpiceParser {
         const p2 = netPins[i];
         let waypoints: { x: number; y: number }[] = [];
         const v2 = vertexForPin(p2);
-        if (v1 && v2) {
-          const path = bfsPath(v1, v2);
-          if (path) markPath(path);
-          if (path && path.length > 2) {
-            const c2 = pinCenters.get(`${p2.compId}|${p2.handle}`);
-            // Interior junctions only; drop any sitting on top of an endpoint
-            // pin (our terminals can be a few px off the LTSpice pin, which
-            // would otherwise leave a tiny hook).
-            waypoints = path.slice(1, -1)
-              .map((k) => vCoord.get(k)!)
-              .filter((v) => (!c1 || Math.hypot(v.x - c1.x, v.y - c1.y) > 12) &&
-                             (!c2 || Math.hypot(v.x - c2.x, v.y - c2.y) > 12));
-          }
+        const path = v1 && v2 ? bfsPath(v1, v2) : null;
+        if (path) markPath(path);
+        if (path && path.length > 2) {
+          const c2 = pinCenters.get(`${p2.compId}|${p2.handle}`);
+          // Interior junctions only; drop any sitting on top of an endpoint
+          // pin (our terminals can be a few px off the LTSpice pin, which
+          // would otherwise leave a tiny hook).
+          waypoints = path.slice(1, -1)
+            .map((k) => vCoord.get(k)!)
+            .filter((v) => (!c1 || Math.hypot(v.x - c1.x, v.y - c1.y) > 12) &&
+                           (!c2 || Math.hypot(v.x - c2.x, v.y - c2.y) > 12));
         }
         // Did this route follow a *diagonal* LTSpice wire? Orthogonalising such a
         // segment on export can make two diagonals' right-angle legs overlap and
         // wrongly merge their nets on the next import. Flag it so the exporter
         // writes the diagonal verbatim instead (see LTSpiceExporter).
-        const start = c1 ?? { x: p1.x, y: p1.y };
-        const end = pinCenters.get(`${p2.compId}|${p2.handle}`) ?? { x: p2.x, y: p2.y };
-        const route = [start, ...waypoints, end];
+        //
+        // Measured on the *file's* own wire runs, not on the route we
+        // reconstruct: our pin centres sit a few px off the LTSpice pin for some
+        // parts on purpose (a voltage source's terminals span 64 px on the canvas
+        // and 80 in the file), and a route ending on such a pin looks diagonal to
+        // a test that includes it. It cost 364 of the 1702 wires in the converted
+        // Multisim corpus — every one of them drawn from an axis-aligned pair of
+        // WIRE lines, every one frozen as a straight diagonal that no longer
+        // re-routed when its part was dragged, because the flag also protects the
+        // path from being forgotten (see forgetImportedRoutes).
+        //
+        // A graph link always runs along one wire, so its two vertices give that
+        // wire's direction. Where there is no path at all the pins are joined by
+        // name and no wire is involved, which is not a diagonal either.
         let diagonal = false;
-        for (let k = 0; k < route.length - 1 && !diagonal; k++) {
-          if (Math.abs(route[k + 1].x - route[k].x) > 4 && Math.abs(route[k + 1].y - route[k].y) > 4) diagonal = true;
+        for (let k = 0; path && k < path.length - 1 && !diagonal; k++) {
+          const a = vCoord.get(path[k])!, b = vCoord.get(path[k + 1])!;
+          if (Math.abs(b.x - a.x) > 4 && Math.abs(b.y - a.y) > 4) diagonal = true;
         }
 
         edges.push({

@@ -460,6 +460,68 @@ SYMATTR Value 1k
     if (p.pPw !== 0) fail(`pPw (Ton) ${p.pPw} != 0`);
     if (p.pPer !== 20) fail(`pPer (Tperiod) ${p.pPer} != 20`);
   } },
+  { name: "an axis-aligned import is not frozen as a direct connection", run: (fail) => {
+    // Two right-angled WIRE lines from a source's terminal to a resistor. The
+    // route *we* draw starts at our own pin centre, which for a voltage source
+    // sits 8 px inside the file's terminal on purpose (canvas artwork spans 64,
+    // voltage.asy spans 80) — so the first hop of the reconstructed route is
+    // 96 x 8 and looks diagonal, while the wire in the file is dead horizontal.
+    //
+    // Taken for a diagonal, the wire was drawn as a straight line pin-to-pin and
+    // never re-routed again: the flag also protects the path from being forgotten
+    // when a part moves (see forgetImportedRoutes), so dragging the part dragged
+    // a slanted line along with it. 364 of the 1702 wires in the converted
+    // Multisim corpus were in that state.
+    const asc = `Version 4
+SHEET 1 880 680
+WIRE 0 16 96 16
+WIRE 96 16 96 32
+FLAG 0 96 0
+FLAG 96 112 0
+SYMBOL voltage 0 0 R0
+SYMATTR InstName V1
+SYMATTR Value 5
+SYMBOL res 80 16 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+`;
+    const { nodes, edges } = LTSpiceParser.parse(asc);
+    const v1 = nodeBy(nodes, (d) => d.label === "V1");
+    const r1 = nodeBy(nodes, (d) => d.label === "R1");
+    if (!v1 || !r1) { fail("V1/R1 not imported"); return; }
+    const wire = edges.find((e) =>
+      (e.source === v1.id && e.target === r1.id) || (e.source === r1.id && e.target === v1.id));
+    if (!wire) { fail("no wire between V1 and R1"); return; }
+    const d = wire.data as { diagonal?: boolean; waypoints?: unknown[] };
+    if (d.diagonal) fail("an axis-aligned pair of WIRE lines was flagged diagonal");
+    if (!d.waypoints?.length) fail("the corner between the two WIRE lines was dropped");
+  } },
+
+  { name: "a diagonal wire keeps its exact path", run: (fail) => {
+    // The other half of the same rule: LTSpice does draw diagonals, and
+    // straightening one on export can put its right-angle legs on top of a
+    // neighbouring net (04-4_AstabileKippstufe1.asc has two). Such a wire must
+    // still be recognised — from the file's own run, which is what this checks.
+    const asc = `Version 4
+SHEET 1 880 680
+WIRE 16 16 112 112
+SYMBOL res 0 0 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+SYMBOL res 96 96 R0
+SYMATTR InstName R2
+SYMATTR Value 2k
+`;
+    const { nodes, edges } = LTSpiceParser.parse(asc);
+    const r1 = nodeBy(nodes, (d) => d.label === "R1");
+    const r2 = nodeBy(nodes, (d) => d.label === "R2");
+    if (!r1 || !r2) { fail("R1/R2 not imported"); return; }
+    const wire = edges.find((e) =>
+      (e.source === r1.id && e.target === r2.id) || (e.source === r2.id && e.target === r1.id));
+    if (!wire) { fail("no wire between R1 and R2"); return; }
+    if (!(wire.data as { diagonal?: boolean }).diagonal) fail("the diagonal WIRE line lost its flag");
+  } },
+
   ...ROUNDTRIP_CASES,
   ...MIRROR_CASES,
 ];
