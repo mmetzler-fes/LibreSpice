@@ -474,11 +474,67 @@ export class LTSpiceParser {
 
     for (const netPins of nets.values()) {
       if (netPins.length < 2) continue;
-      const p1 = netPins[0];
-      const v1 = vertexForPin(p1);
-      const c1 = pinCenters.get(`${p1.compId}|${p1.handle}`);
-      for (let i = 1; i < netPins.length; i++) {
-        const p2 = netPins[i];
+
+      // Each pin is wired to its *nearest* one already on the net, not all of
+      // them to the first — a spanning tree rather than a star.
+      //
+      // The difference only shows once a part is dragged and the wires re-route:
+      // as a star, every pin's wire runs the whole way back to whichever pin the
+      // file happened to list first, so three resistors on a rail come out as
+      // three long parallel runs across the sheet instead of one rail with short
+      // branches. Nearest is measured along the drawn wiring, so the tree follows
+      // the shape the schematic was drawn in; pins the drawing does not join (they
+      // share a net *name*) fall back to plain distance.
+      const reach = new Map<Pin, { dist: Map<string, number>; prev: Map<string, string> }>();
+      const walkFrom = (p: Pin) => {
+        let r = reach.get(p);
+        if (r) return r;
+        const v = vertexForPin(p);
+        r = { dist: new Map(), prev: new Map() };
+        if (v) {
+          r.dist.set(v, 0);
+          r.prev.set(v, v);
+          const queue = [v];
+          while (queue.length) {
+            const cur = queue.shift()!;
+            for (const nb of adj.get(cur) ?? []) {
+              if (r.dist.has(nb)) continue;
+              const a = vCoord.get(cur)!, b = vCoord.get(nb)!;
+              r.dist.set(nb, r.dist.get(cur)! + Math.hypot(b.x - a.x, b.y - a.y));
+              r.prev.set(nb, cur);
+              queue.push(nb);
+            }
+          }
+        }
+        reach.set(p, r);
+        return r;
+      };
+      /** Wire length between two pins, or plain distance where no wire joins them. */
+      const cost = (a: Pin, b: Pin): number => {
+        const vb = vertexForPin(b);
+        const d = vb === undefined ? undefined : walkFrom(a).dist.get(vb);
+        // Unreachable is worse than any drawn path, so the tree prefers wiring
+        // that exists; among the unreachable, the closest still wins.
+        return d ?? 1e6 + Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+      };
+
+      const inTree = [netPins[0]];
+      const rest = netPins.slice(1);
+      while (rest.length) {
+        let bi = 0, bj = 0, best = Infinity;
+        for (let i = 0; i < inTree.length; i++) {
+          for (let j = 0; j < rest.length; j++) {
+            const c = cost(inTree[i], rest[j]);
+            if (c < best) { best = c; bi = i; bj = j; }
+          }
+        }
+        const p1 = inTree[bi];
+        const p2 = rest[bj];
+        rest.splice(bj, 1);
+        inTree.push(p2);
+
+        const v1 = vertexForPin(p1);
+        const c1 = pinCenters.get(`${p1.compId}|${p1.handle}`);
         let waypoints: { x: number; y: number }[] = [];
         const v2 = vertexForPin(p2);
         const path = v1 && v2 ? bfsPath(v1, v2) : null;
