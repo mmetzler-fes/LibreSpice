@@ -218,6 +218,7 @@ const TYPES: Record<string, {
   POTENTIOMETER_VIRTUAL: { name: "Potentiometer", params: { Resistance: 5, Key: 3 } },
 
   D_FF: { name: "D Flip-Flop" },
+  JK_FF: { name: "JK Flip-Flop" },
 
   // Measuring instruments are not parts of the circuit, but leaving them out
   // takes their node with them. Each becomes the thing SPICE measures with: an

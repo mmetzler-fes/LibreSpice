@@ -156,6 +156,36 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   ],
 };
 
+/**
+ * The JK flip-flop's pins: three down the left edge instead of two.
+ *
+ * Not in the table above because a `dff` symbol can be either — the kind is
+ * carried in our own attribute, not in the symbol name, so which of the two
+ * layouts applies is only known once the pin list has been read. J and K keep
+ * the heights the other kinds' data and clock pins have, so a JK's terminals
+ * still land on the same grid rows; only the clock is new, in the middle.
+ */
+const JK_OFFSETS: PinOffset[] = [
+  { handle: "d", dx: -32, dy: -24 },
+  { handle: "k", dx: -32, dy: 24 },
+  { handle: "clk", dx: -32, dy: 0 },
+  { handle: "set", dx: 0, dy: -48 },
+  { handle: "rst", dx: 0, dy: 48 },
+  { handle: "q", dx: 32, dy: -24 },
+  { handle: "qn", dx: 32, dy: 24 },
+];
+
+/**
+ * Which flip-flop layout a symbol's declared pins describe.
+ *
+ * The JK is the one with seven; every other kind has six. Reading it off the
+ * count rather than off the kind keeps a file written before the JK existed
+ * working — it has no seventh pin and so cannot be mistaken for one.
+ */
+export function dffPinOffsets(pinNames?: string[]): PinOffset[] {
+  return pinNames?.length === JK_OFFSETS.length ? JK_OFFSETS : PIN_OFFSETS["dff"];
+}
+
 /** Ground's node is offset so its single terminal lands on the FLAG point. */
 export const GROUND_PIN: PinOffset = { handle: "gnd", dx: CENTER, dy: GROUND_PIN_Y };
 
@@ -242,7 +272,9 @@ export function offsetsForNode(
     ? subcircuitPinOffsets(pinNames ?? [], symbolName)
     : type === "logicgate"
       ? logicGatePinOffsets(pinNames ?? ["In1", "In2", "Out"])
-      : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
+      : type === "dff"
+        ? dffPinOffsets(pinNames)
+        : (PIN_OFFSETS[type] ?? PIN_OFFSETS["resistor"]);
   return rotateOffsets(mirrorOffsets(base, mirrored), deg);
 }
 

@@ -199,7 +199,7 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
       // edge fails in a way that looks like a wiring mistake.
       const f = component as unknown as { kind: keyof typeof KIND_LABELS; edge: string };
       if (f.kind === "dlatch") return "Latch";
-      const mark = f.kind === "tff" ? "TFF" : "DFF";
+      const mark = f.kind === "tff" ? "TFF" : f.kind === "jkff" ? "JK" : "DFF";
       return f.edge === "falling" ? `${mark} \u2193` : `${mark} \u2191`;
     }
     default: return "";

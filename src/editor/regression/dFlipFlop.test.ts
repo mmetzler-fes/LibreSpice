@@ -194,6 +194,44 @@ const CASES: Case[] = [
     },
   },
   {
+    name: "a JK's master samples J and K against its own output",
+    run: (fail) => {
+      // Verified against the engine over eight clocks, with J and K tied to
+      // fixed levels: 00 holds, 10 sets, 01 clears (checked from a Q raised by
+      // SET, since clearing a zero proves nothing), 11 divides the clock by two.
+      // The term is J·~Q + ~K·Q, read off the *slave* for the same reason the T
+      // flip-flop does — the master's own node would be a loop with no clock.
+      const f = ff(["J", "K", "CLK", "Q"], { kind: "jkff" });
+      const master = f.getNetlistLine().split("\n").find((x) => /^BU1M /.test(x)) ?? "";
+      if (!master.includes("v(j)")) fail(`does not read J: ${master}`);
+      if (!master.includes("v(k)")) fail(`does not read K: ${master}`);
+      if (!master.includes("v(n_U1_s)")) fail(`does not read the slave: ${master}`);
+      // Both halves of the term, so a JK cannot decay into "J sets, K ignored".
+      if (!/\(v\(j\)>2\.5\) && !\(v\(n_U1_s\)>2\.5\)/.test(master)) fail(`no J·~Q term: ${master}`);
+      if (!/!\(v\(k\)>2\.5\) && \(v\(n_U1_s\)>2\.5\)/.test(master)) fail(`no ~K·Q term: ${master}`);
+    },
+  },
+  {
+    name: "a JK has seven pins and the others still have six",
+    run: (fail) => {
+      // The seventh pin is a compatibility surface: four tables have to agree on
+      // it (the ports, pinGeometry, ltspiceGeometry and the Multisim converter),
+      // and a file written before the JK existed must keep its six.
+      const jk = new DFlipFlop("f1", "U1", undefined, "jkff");
+      const names = jk.ports.map((p) => p.name).join(",");
+      if (names !== "J,K,CLK,SET,RESET,Q,~Q") fail(`jk pins: ${names}`);
+      const ids = jk.ports.map((p) => p.id).join(",");
+      if (ids !== "f1-d,f1-k,f1-clk,f1-set,f1-rst,f1-q,f1-qn") fail(`jk ids: ${ids}`);
+      // J and K keep the heights the other kinds' data and clock pins have, so a
+      // JK's terminals still land on the same grid rows.
+      const at = (n: string) => { const p = jk.getPort(n)!.relativePosition; return `${p.x},${p.y}`; };
+      if (at("J") !== "-32,-24") fail(`J moved: ${at("J")}`);
+      if (at("K") !== "-32,24") fail(`K moved: ${at("K")}`);
+      if (at("CLK") !== "-32,0") fail(`CLK not between them: ${at("CLK")}`);
+      if (new DFlipFlop("f1", "U1").ports.length !== 6) fail("a plain D flip-flop grew a pin");
+    },
+  },
+  {
     name: "a D latch is a single transparent cell",
     run: (fail) => {
       // The whole difference from a flip-flop: one storage node, driven straight

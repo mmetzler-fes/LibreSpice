@@ -8,11 +8,20 @@ export type AsyncPolarity = "high" | "low";
  * Which storage element this is. All three share the same latch cell; they
  * differ only in how many cells there are and what feeds the first one.
  */
-export type FlipFlopKind = "dff" | "tff" | "dlatch";
+export type FlipFlopKind = "dff" | "tff" | "dlatch" | "jkff";
 
 export const KIND_LABELS: Record<FlipFlopKind, string> = {
-  dff: "D Flip-Flop", tff: "T Flip-Flop", dlatch: "D Latch",
+  dff: "D Flip-Flop", tff: "T Flip-Flop", dlatch: "D Latch", jkff: "JK Flip-Flop",
 };
+
+/**
+ * The JK is the only kind with a pin the others have not got, and that one extra
+ * pin is a compatibility surface: it decides how many terminals a saved `.asc`
+ * comes back with. Asked in one place so the four tables that have to agree —
+ * the ports here, `pinGeometry.digitalPins`, `ltspiceGeometry.PIN_OFFSETS` and
+ * the Multisim converter's — cannot drift apart.
+ */
+export const isJK = (kind: string): boolean => kind === "jkff";
 
 /**
  * A one-bit storage element — D flip-flop, T flip-flop or transparent D latch —
@@ -81,10 +90,25 @@ export class DFlipFlop extends SpiceComponent {
   }
 
   protected createPorts(): Port[] {
-    // Port *ids* stay the same across all three kinds — the .asc geometry table
-    // and the editor's handles are keyed on them. Only the displayed names move.
-    const data = this.kind === "tff" ? "T" : "D";
+    // Port *ids* stay the same across the kinds — the .asc geometry table and the
+    // editor's handles are keyed on them. Only the displayed names move, and only
+    // the JK adds one (`-k`).
+    const data = this.kind === "tff" ? "T" : this.kind === "jkff" ? "J" : "D";
     const clock = this.kind === "dlatch" ? "EN" : "CLK";
+    // The JK wants three pins down the left edge. J and K keep the heights the
+    // data and clock pins have on the other kinds, and the clock moves to the
+    // middle — which is also how a JK is drawn on paper.
+    if (isJK(this.kind)) {
+      return [
+        new Port(`${this.id}-d`, "J", { x: -32, y: -24 }),
+        new Port(`${this.id}-k`, "K", { x: -32, y: 24 }),
+        new Port(`${this.id}-clk`, "CLK", { x: -32, y: 0 }),
+        new Port(`${this.id}-set`, "SET", { x: 0, y: -48 }),
+        new Port(`${this.id}-rst`, "RESET", { x: 0, y: 48 }),
+        new Port(`${this.id}-q`, "Q", { x: 32, y: -24 }),
+        new Port(`${this.id}-qn`, "~Q", { x: 32, y: 24 }),
+      ];
+    }
     return [
       new Port(`${this.id}-d`, data, { x: -32, y: -24 }),
       new Port(`${this.id}-clk`, clock, { x: -32, y: 24 }),
@@ -116,7 +140,7 @@ export class DFlipFlop extends SpiceComponent {
     const { threshold: t, vHigh: hi } = this;
     const nm = this.internal("m");
     const ns = this.internal("s");
-    const dataPin = this.kind === "tff" ? "T" : "D";
+    const dataPin = this.kind === "tff" ? "T" : isJK(this.kind) ? "J" : "D";
     const clockPin = this.kind === "dlatch" ? "EN" : "CLK";
     const [d, clk, q, qn] = [this.net(dataPin), this.net(clockPin), this.net("Q"), this.net("~Q")];
 
@@ -174,9 +198,18 @@ export class DFlipFlop extends SpiceComponent {
       // own inverted output, gated by T. Reading the slave (not the master) is
       // what keeps the feedback safe — the slave holds while the master is open.
       out = ns;
+      // The JK is the same pair again, differing only in what the master
+      // samples: J sets, K clears, both together toggle and neither holds —
+      // which is exactly `J·~Q + ~K·Q`. Read off the slave, as the T does, so
+      // the feedback is safe while the master is open. An unwired J or K counts
+      // as 0, which is what an open TTL input is *not* — but a JK with a pin
+      // left off is not a circuit either, and reading 0 keeps it quiet rather
+      // than making it free-run.
       const want = this.kind === "tff"
         ? `(${high(d)} != ${high(ns)})`
-        : high(d);
+        : isJK(this.kind)
+          ? `((${high(d)} && !${high(ns)}) || (!${high(this.net("K"))} && ${high(ns)}))`
+          : high(d);
       lines = [...cell("M", nm, want, inactive), ...cell("S", ns, high(nm), active)];
     }
 

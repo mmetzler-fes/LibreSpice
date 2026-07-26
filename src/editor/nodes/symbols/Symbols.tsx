@@ -206,6 +206,7 @@ export const LogicGateSymbol = ({ gate = "and", inputs = 2 }: { gate?: string; i
  */
 export const DFlipFlopSymbol = ({ edge = "rising", asyncPolarity = "high", kind = "dff" }: { edge?: string; asyncPolarity?: string; kind?: string }) => {
   const latch = kind === "dlatch";
+  const jk = kind === "jkff";
   const falling = edge === "falling";
   const asyncLow = asyncPolarity === "low";
   const pin = { fontSize: 8, fontFamily: "sans-serif", fill: "currentColor", stroke: "none" } as const;
@@ -213,14 +214,24 @@ export const DFlipFlopSymbol = ({ edge = "rising", asyncPolarity = "high", kind 
     <g>
       <rect x="-20" y="-40" width="40" height="80" fill="none" stroke="currentColor" strokeWidth="1.5" />
 
-      {/* Left: D above, clock below. */}
+      {/* Left: the data input above, the clock below — except on a JK, which has
+          J and K at those two heights and its clock between them. */}
       <line x1="-32" y1="-24" x2="-20" y2="-24" stroke="currentColor" strokeWidth="1.5" />
-      <text x="-17" y="-24" textAnchor="start" dominantBaseline="central" {...pin}>{kind === "tff" ? "T" : "D"}</text>
+      <text x="-17" y="-24" textAnchor="start" dominantBaseline="central" {...pin}>
+        {kind === "tff" ? "T" : jk ? "J" : "D"}
+      </text>
       <line x1="-32" y1="24" x2="-20" y2="24" stroke="currentColor" strokeWidth="1.5" />
       {/* A latch is level-sensitive, so it gets a named EN pin; the flip-flops
           get the clock wedge, bubbled when they trigger on the falling edge. */}
       {latch ? (
         <text x="-17" y="24" textAnchor="start" dominantBaseline="central" {...pin}>EN</text>
+      ) : jk ? (
+        <>
+          <text x="-17" y="24" textAnchor="start" dominantBaseline="central" {...pin}>K</text>
+          <line x1="-32" y1="0" x2="-20" y2="0" stroke="currentColor" strokeWidth="1.5" />
+          {falling && <circle cx="-24" cy="0" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+          <polyline points="-20,-5 -13,0 -20,5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </>
       ) : (
         <>
           {falling && <circle cx="-24" cy="24" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}

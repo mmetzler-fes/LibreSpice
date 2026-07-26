@@ -453,6 +453,9 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   // came apart, its wires still drawn to the old positions. A published
   // schematic that worked has to keep working, so the raster stays.
   "Digital\\dflop": [[-32, -24], [-32, 24], [0, -48], [0, 48], [32, -24], [32, 24]],
+  // The JK's seventh pin, in FF_CONNS order: J and K at the other kinds' two
+  // heights, the clock between them (see DFlipFlop.createPorts).
+  "Digital\\dflop:jk": [[-32, -24], [-32, 24], [-32, 0], [0, -48], [0, 48], [32, -24], [32, 24]],
 };
 
 // ---------------------------------------------------------------------------
@@ -824,9 +827,12 @@ const FF_CONNS: Record<string, string[]> = {
   dff: ["D", "CLK", "SET", "RESET", "Q", "~Q"],
   tff: ["T", "CLK", "SET", "RESET", "Q", "~Q"],
   dlatch: ["D", "EN", "SET", "RESET", "Q", "~Q"],
+  jkff: ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"],
 };
-const ffPins = (kind: string): { conn: string; off: Pt }[] =>
-  FF_CONNS[kind].map((conn, i) => ({ conn, off: PIN_OFFSETS["Digital\\dflop"][i] }));
+const ffPins = (kind: string): { conn: string; off: Pt }[] => {
+  const offs = PIN_OFFSETS[kind === "jkff" ? "Digital\\dflop:jk" : "Digital\\dflop"];
+  return FF_CONNS[kind].map((conn, i) => ({ conn, off: offs[i] }));
+};
 
 /**
  * Emit a D flip-flop.
@@ -868,7 +874,7 @@ function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
 
   symbolLines.push(`SYMBOL Digital\\dflop ${origin[0]} ${origin[1]} R0`);
   symbolLines.push(`SYMATTR InstName ${name}`);
-  const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH" }[kind] ?? "DFF";
+  const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH", jkff: "JKFF" }[kind] ?? "DFF";
   symbolLines.push(`SYMATTR Value ${kind === "dlatch" ? mark : mark + (edge === "falling" ? "-" : "+")}`);
   symbolLines.push(
     `SYMATTR LibreSpice kind=${kind};edge=${edge};async=${asyncPol};` +
@@ -1423,6 +1429,7 @@ export function convert(sch: MsSchematic): ConversionResult {
     // pin names that go with it.
     const FF_KINDS: Record<string, string> = {
       "D Flip-Flop": "dff", "T Flip-flop": "tff", "D Latch": "dlatch",
+      "JK Flip-Flop": "jkff",
     };
     if (FF_KINDS[bp.name]) {
       const kind = FF_KINDS[bp.name];

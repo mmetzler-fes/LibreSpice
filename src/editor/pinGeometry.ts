@@ -3,6 +3,7 @@ import { symbolByName, symbolForType, type SymbolNorm } from "@sym/asyParser.js"
 import { mapSymbol } from "@sym/AsySymbol.js";
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import { outwardAxis, outwardDir, type Axis, type Pt, type RouteHints, type Box } from "@core/geometry/ortho.js";
+import { isJK } from "@core/components/digital/DFlipFlop.js";
 
 /** Editor node box size in px (also the React Flow node footprint). */
 export const NODE_SIZE = 80;
@@ -88,6 +89,7 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   netconnector: ["t"],
   // The flip-flop's ids match DFlipFlop.createPorts; the logic gate's input
   // count varies, so its handles are built per instance (see digitalPins).
+  // A JK has a seventh ("k"); its handles are built per instance, like the gate's.
   dff: ["d", "clk", "set", "rst", "q", "qn"],
 };
 
@@ -178,6 +180,15 @@ function digitalPins(data: ComponentNodeData): LocalPin[] {
     ({ handleId, order, px: c + dx, py: c + dy });
 
   if (data.componentType === "dff") {
+    // The JK has three pins down the left edge; every other kind has two. Same
+    // heights for J and K, the clock between them (see DFlipFlop.createPorts).
+    if (isJK(data.kind ?? "")) {
+      return [
+        at("d", 1, -32, -24), at("k", 2, -32, 24), at("clk", 3, -32, 0),
+        at("set", 4, 0, -48), at("rst", 5, 0, 48),
+        at("q", 6, 32, -24), at("qn", 7, 32, 24),
+      ];
+    }
     return [
       at("d", 1, -32, -24), at("clk", 2, -32, 24),
       at("set", 3, 0, -48), at("rst", 4, 0, 48),

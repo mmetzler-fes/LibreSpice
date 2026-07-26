@@ -715,7 +715,11 @@ export class LTSpiceParser {
     // has decides where they sit (they are spread over a fixed span, so two and
     // four land in different places). Without it every gate was registered as the
     // default two-input one, and a three- or four-input gate's wires met nothing.
-    const subPins = cType === "subcircuit" || cType === "logicgate" ? declaredPins : undefined;
+    // The flip-flop needs its pin list for the same reason: a JK has a seventh
+    // pin the other kinds have not got, and without the list it came back as the
+    // six-pin layout — with K's wire meeting nothing.
+    const subPins = cType === "subcircuit" || cType === "logicgate" || cType === "dff"
+      ? declaredPins : undefined;
 
     // `R<deg>` / `M<deg>`: a mirrored symbol is flipped horizontally first, then
     // rotated. Dropping the `M` (as we used to) put every pin of a mirrored part

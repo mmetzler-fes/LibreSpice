@@ -112,7 +112,7 @@ function symbolAttrs(comp: any, type: ComponentType, fallback: string): SymAttrs
       `kind=${comp.kind}`, `edge=${comp.edge}`, `async=${comp.asyncPolarity}`,
       `vth=${comp.threshold}`, `vhigh=${comp.vHigh}`, `pins=${pins}`,
     ].join(";");
-    const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH" }[String(comp.kind)] ?? "DFF";
+    const mark = { dff: "DFF", tff: "TFF", dlatch: "DLATCH", jkff: "JKFF" }[String(comp.kind)] ?? "DFF";
     return { value: comp.kind === "dlatch" ? mark : `${mark}${comp.edge === "falling" ? "-" : "+"}`, extra };
   }
 
