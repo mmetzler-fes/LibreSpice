@@ -12,6 +12,8 @@ import { runSimulation } from "@simulation/simulationEngine.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { convert } from "@core/multisim/MultisimConverter.js";
 import { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
+import { readMs14 } from "@core/multisim/ms14.js";
+import { ms14ToSchematic } from "@core/multisim/ms14Schematic.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildShareQrSvg } from "./qrExport.js";
@@ -264,11 +266,12 @@ export function Toolbar() {
       try {
         const [handle] = await (window as any).showOpenFilePicker({
           types: [{
-            description: "Schaltplan (.asc, .msjs)",
+            description: "Schaltplan (.asc, .msjs, .ms14)",
             accept: {
-              "application/octet-stream": [".asc", ".msjs"],
+              "application/octet-stream": [".asc", ".msjs", ".ms14"],
               "text/plain": [".asc"],
               "application/json": [".msjs"],
+              "application/xml": [".ms14"],
             },
           }],
           multiple: false,
@@ -285,7 +288,7 @@ export function Toolbar() {
     // Fallback for browsers without the file-system picker.
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".asc,.msjs";
+    input.accept = ".asc,.msjs,.ms14";
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) await openFile(file, null);
@@ -296,22 +299,24 @@ export function Toolbar() {
 
 
   /**
-   * Open a schematic, whichever of the two shapes it has.
+   * Open a schematic, whichever of the three shapes it has.
    *
-   * `.asc` is loaded as it is. A Multisim Live `.msjs` is converted first and
-   * then handed to the same loader — Multisim Live was retired, so its files are
-   * turned into an LTSpice schematic rather than drawn a second way, and what
-   * opens behaves exactly like an opened `.asc`.
+   * `.asc` is loaded as it is. Both Multisim formats are converted first and then
+   * handed to the same loader: Multisim Live's `.msjs` and Multisim 14's `.ms14`.
+   * They look nothing alike — JSON with a part catalogue against a packed MFC
+   * object graph — but each reader resolves its file into the same neutral
+   * schematic (see multisim/model.ts), so there is one conversion and what opens
+   * behaves exactly like an opened `.asc`.
    *
-   * There is one Open for both because that is what the user has: a file. Which
-   * of the two it is, is the file's business, not a second button's.
+   * There is one Open for all three because that is what the user has: a file.
+   * Which of them it is, is the file's business, not a second button's.
    */
   const openFile = async (file: File, handle: any) => {
-    const isMultisim = /\.msjs$/i.test(file.name);
-    const baseName = file.name.replace(/\.(asc|msjs)$/i, "");
+    const multisim = /\.msjs$/i.test(file.name) ? "msjs" : /\.ms14$/i.test(file.name) ? "ms14" : null;
+    const baseName = file.name.replace(/\.(asc|msjs|ms14)$/i, "");
     const bytes = await file.arrayBuffer();
 
-    if (!isMultisim) {
+    if (!multisim) {
       // LTSpice writes .asc files in Windows-1252 (byte 0xB5 = µ). Decoding as
       // UTF-8 (the default) replaces 0xB5 with U+FFFD, which breaks SI-suffix
       // parsing (e.g. "14µF" → "14F" = 14 Farads).
@@ -322,7 +327,10 @@ export function Toolbar() {
     }
 
     try {
-      const { asc, skipped, substituted, shorts } = convert(msjsToSchematic(readMsjs(bytes)));
+      const sch = multisim === "msjs"
+        ? msjsToSchematic(readMsjs(bytes))
+        : ms14ToSchematic(readMs14(bytes));
+      const { asc, skipped, substituted, shorts, unconnected } = convert(sch);
       loadFromAsc(asc);
       // No handle: saving must write a new `.asc`, not back over the `.msjs` it
       // was converted from.
@@ -336,6 +344,15 @@ export function Toolbar() {
       if (skipped.length) notes.push(`Nicht abbildbare Bauteile (fehlen in der Schaltung):\n  ${skipped.join(", ")}`);
       if (substituted.length) notes.push(`Als Ersatzmodell konvertiert:\n  ${substituted.join(", ")}`);
       if (shorts.length) notes.push(`Achtung — kurzgeschlossene Netze: ${shorts.join(", ")}\nDiese Schaltung vor Gebrauch prüfen.`);
+      // Parts the *original* leaves at fewer than two nodes. Said here because the
+      // symptom looks like a conversion fault: every such terminal lands on node 0,
+      // and a source with both terminals there is one ngspice will not start on.
+      // Many of these sheets are exercises whose parts are there to be wired up.
+      if (unconnected.length) {
+        const list = unconnected.slice(0, 12).join(", ");
+        notes.push(`Im Original ohne Anschluss (nichts zu zeichnen): ${list}` +
+          (unconnected.length > 12 ? ` … und ${unconnected.length - 12} weitere` : ""));
+      }
       if (notes.length) alert(`${file.name}\n\n${notes.join("\n\n")}`);
     } catch (err) {
       alert(`Konvertierung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
@@ -432,7 +449,7 @@ export function Toolbar() {
       <TBtn title="New circuit (Ctrl+N)" onClick={clearCircuit}>
         <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
       </TBtn>
-      <TBtn title="Öffnen (Strg+O) — .asc oder Multisim Live .msjs" onClick={handleOpen}>
+      <TBtn title="Öffnen (Strg+O) — .asc, Multisim Live .msjs oder Multisim 14 .ms14" onClick={handleOpen}>
         <Ico d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
       </TBtn>
       <TBtn title="Open folder — loads the .asc and its matching .plt plot settings" onClick={handleOpenFolder}>
