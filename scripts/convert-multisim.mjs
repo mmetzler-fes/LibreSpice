@@ -117,8 +117,11 @@ function buildReport(results) {
   L.push("4. KURZGESCHLOSSENE NETZE");
   L.push("-".repeat(60));
   L.push("");
-  L.push("  Hier verbindet die uebernommene Verdrahtung zwei Netze, die in");
-  L.push("  Multisim getrennt waren. Diese Schaltungen vor Gebrauch pruefen.");
+  L.push("  Hier liegen zwei in Multisim getrennte Netze am selben Knoten. Die");
+  L.push("  Verdrahtung selbst kann das nicht mehr verursachen - sie wird zwischen");
+  L.push("  unseren Pins neu verlegt und nur dort, wo sie kein anderes Netz");
+  L.push("  beruehrt (siehe router.ts). Bleibt hier etwas stehen, liegen zwei");
+  L.push("  Anschluesse aufeinander. Diese Schaltungen vor Gebrauch pruefen.");
   L.push("");
   if (!sh.length) L.push("  keine");
   for (const r of sh) L.push(`  ${r.name}\n        ${r.shorts.join(", ")}`);
@@ -136,6 +139,46 @@ function buildReport(results) {
   if (!un.length) L.push("  keine");
   for (const r of un) L.push(`  ${r.name}\n        ${r.unmapped.join("\n        ")}`);
   L.push("");
+
+  // --- 6. what the sheet itself never connected ---
+  const spare = results.filter((r) => r.unconnected?.length);
+  L.push("6. BAUTEILE OHNE ANSCHLUSS IM ORIGINAL");
+  L.push("-".repeat(60));
+  L.push("");
+  L.push("  Diese Bauteile haengen schon in der Multisim-Datei an weniger als");
+  L.push("  zwei Knoten - meist Uebungsblaetter, auf denen die Schaltung erst");
+  L.push("  verdrahtet werden soll. Es ist also nichts zu zeichnen. Es steht");
+  L.push("  hier, weil es von aussen wie ein Konvertierungsfehler aussieht: jeder");
+  L.push("  solche Anschluss landet auf Knoten 0, und eine Quelle mit beiden");
+  L.push("  Anschluessen dort startet in ngspice nicht.");
+  L.push("");
+  if (!spare.length) L.push("  keine");
+  for (const r of spare) L.push(`  ${r.name}\n        ${r.unconnected.join(", ")}`);
+  L.push("");
+
+  // --- 7. how much of the wiring is drawn, and how much is named ---
+  const routed = results.filter((r) => r.route);
+  const sum = (f) => routed.reduce((n, r) => n + f(r.route), 0);
+  L.push("7. GEZEICHNET ODER BENANNT");
+  L.push("-".repeat(60));
+  L.push("");
+  L.push("  Die Leitungen werden zwischen unseren eigenen Pins verlegt, aber nur");
+  L.push("  wo das kein anderes Netz beruehrt - diese Blaetter sind nicht planar.");
+  L.push("  Was sich nicht kreuzungsfrei zeichnen laesst, wird ueber den Netznamen");
+  L.push("  verbunden. Beides ist elektrisch dasselbe, gezeichnet liest es sich");
+  L.push("  besser.");
+  L.push("");
+  L.push(`  Verbindungen als Leitung gezeichnet:  ${String(sum((x) => x.drawn)).padStart(6)}`);
+  L.push(`  auf den Netznamen ausgewichen:        ${String(sum((x) => x.named)).padStart(6)}`);
+  L.push(`  Netze in mehr als einer Insel:        ${String(sum((x) => x.labels)).padStart(6)}`);
+  L.push(`  Leitungen durch einen Bauteilkoerper: ${String(sum((x) => x.throughBodies)).padStart(6)}`);
+  L.push("");
+  const worst = routed.filter((r) => r.route.named).sort((a, b) => b.route.named - a.route.named).slice(0, 10);
+  if (worst.length) {
+    L.push("  Am meisten ausgewichen:");
+    for (const r of worst) L.push(`  ${String(r.route.named).padStart(5)}x  ${r.name}`);
+    L.push("");
+  }
 
   return L.join("\n");
 }
@@ -164,10 +207,10 @@ function main() {
     const name = basename(f, ".msjs");
     try {
       const buf = readFileSync(join(inDir, f));
-      const { asc, skipped, substituted, shorts, unmapped } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
+      const { asc, skipped, substituted, shorts, unmapped, unconnected, route } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
       writeFileSync(join(outDir, `${name}.asc`), asc, "latin1");
       ok++;
-      results.push({ name, skipped, substituted, shorts, unmapped });
+      results.push({ name, skipped, substituted, shorts, unmapped, unconnected, route });
       if (skipped.length) gaps.push(`  ${name}: ${skipped.join(", ")}`);
       if (shorts.length) shorted.push(`  ${name}: ${shorts.join(", ")}`);
     } catch (e) {

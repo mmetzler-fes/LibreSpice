@@ -21,8 +21,9 @@
  *    draws a resistor horizontally, LTSpice vertically), so Multisim's rotation
  *    cannot be reused — see fitOrientation.
  *  - Multisim marks connections with explicit junctions, so two of its wires may
- *    cross while staying separate nets. LTSpice has no such notion — see
- *    cutCrossings.
+ *    cross while staying separate nets. LTSpice has no such notion: wires sharing
+ *    a point are one node. So the wiring is not carried over at all but drawn
+ *    fresh between our own pins, from the net list — see router.ts.
  *
  * The document is external, untyped JSON, so `any` is the honest type wherever
  * it is touched.
@@ -32,7 +33,7 @@
  * drift apart.
  */
 
-import { outwardDir } from "@core/geometry/ortho.js";
+import { routeNets, touches, entersBody, type RouteReport } from "./router.js";
 
 /** A point or a symbol-local offset, in LTSpice units. */
 type Pt = [number, number];
@@ -81,26 +82,43 @@ interface Ctx {
   directives: string[];
   pinPos: PinPos;
   used: Set<string>;
-  wires: Wire[];
   /**
-   * Pin bridges, as index spans into `wires` (see `bridgeTo`). Held on the
-   * context rather than locally, because the parts that need them most are the
-   * ones with their own emitter: a gate's pin raster is nothing like ours.
+   * Wiring an emitter draws itself, which is only the switch stand-in tying its
+   * contacts together. Everything between *parts* is the router's (see router.ts).
    */
-  bridges: { from: number; until: number; ends: Pt[] }[];
+  wires: Wire[];
   /**
    * Every terminal any emitter has placed, whether or not Multisim names it.
    *
    * `pinPos` cannot serve here: it is keyed by Multisim's own pin ids and so
    * skips a terminal the file's `connPin` does not mention — and the pruning
-   * below has to know about *all* of them, or it cuts the wire to one and drops
-   * the connection. Filled as the parts are drawn, because the alternative
+   * below has to know about *all* of them, or it lays a route across one and
+   * welds two nets together. Filled as the parts are drawn, because the alternative
    * (reading the emitted SYMBOL lines back) cannot work for the gates, whose
    * offsets depend on their input count.
    */
   terminals: Pt[];
+  /**
+   * Every instance placed, so the conversion can say afterwards which of them the
+   * *original* leaves with fewer than two nodes (see `unconnected`).
+   */
+  instances: Instance[];
+  /**
+   * The digital sources' invented grounds, as indices into `symbolLines` and
+   * `flags` plus the output pin the symbol hangs from (see `seatDigitalGrounds`).
+   */
+  grounds: { symbol: number; flag: number; out: Pt }[];
   to: (v: number) => number;
 }
+
+/**
+ * A placed instance, and what it takes to tell whether it can have two nodes.
+ *
+ * `extraNodes` counts terminals this conversion invented and wired itself — the
+ * digital source's implied ground is one. They are nodes the Multisim net list
+ * knows nothing about, so they have to be added by hand.
+ */
+interface Instance { name: string; guid: string; extraNodes: number }
 
 export interface ConversionResult {
   /** The LTSpice schematic. */
@@ -111,21 +129,19 @@ export interface ConversionResult {
   substituted: string[];
   /** Multisim nets the emitted drawing shorted together. */
   shorts: string[];
+  /** What the router managed to draw, and what it had to leave to a name. */
+  route: RouteReport;
   /**
-   * What a router would need, and nothing the conversion itself uses.
+   * Instances the original leaves with fewer than two nodes, by their emitted
+   * name — the parts of a task sheet the student is meant to wire up.
    *
-   * The `.asc` above copies Multisim's wire geometry; this is the alternative
-   * that geometry stands in for — where our own terminals ended up, grouped by
-   * the net Multisim says they belong to, plus the boxes a route would have to
-   * keep out of. Exported so a router can be built and *measured* against the
-   * corpus without the conversion depending on it (see scripts/route-prototype.mjs).
+   * These are not converted badly, they are converted faithfully: there is no
+   * connection in the file to draw. It has to be *reported*, because the symptom
+   * looks like a conversion fault from the outside — every terminal of such a part
+   * lands on node 0, and a source with both terminals there is one ngspice refuses
+   * to start on. Without this list the two are indistinguishable.
    */
-  placement: {
-    /** Each Multisim net as the points our parts actually put on the sheet. */
-    nets: { name: string; pts: Pt[] }[];
-    /** Symbol bounding boxes, as [x1, y1, x2, y2]. */
-    bodies: Wire[];
-  };
+  unconnected: string[];
   /**
    * Connections a part type declares that the placed part does not have.
    *
@@ -737,56 +753,25 @@ function gatePinOffsets(n: number): Pt[] {
 }
 
 /**
- * Bridge a symbol pin to the point Multisim's wiring ends at.
- *
- * Routed as an L so it stays on the orthogonal grid, leading with the axis the
- * pin faces so it leaves the symbol squarely. Recorded as a span in `wires`, so
- * the withdrawal pass below can take the whole stub back if it turns out to
- * cross something or to run over a neighbouring pin.
- */
-function bridgeTo(ctx: Ctx, pin: Pt, target: Pt, siblings: Pt[]): void {
-  if (pin[0] === target[0] && pin[1] === target[1]) return;
-  const from = ctx.wires.length;
-  const dir = outwardDir({ x: pin[0], y: pin[1] }, siblings.map(([x, y]) => ({ x, y })));
-  const alongFlank = dir && (dir.x !== 0 ? pin[0] === target[0] : pin[1] === target[1]);
-  if (alongFlank) {
-    const mx = pin[0] + dir!.x * LEAD, my = pin[1] + dir!.y * LEAD;
-    ctx.wires.push([pin[0], pin[1], mx, my]);
-    if (dir!.x !== 0) {
-      ctx.wires.push([mx, my, mx, target[1]]);
-      ctx.wires.push([mx, target[1], target[0], target[1]]);
-    } else {
-      ctx.wires.push([mx, my, target[0], my]);
-      ctx.wires.push([target[0], my, target[0], target[1]]);
-    }
-  } else if (dir?.y) {
-    ctx.wires.push([pin[0], pin[1], pin[0], target[1]]);
-    ctx.wires.push([pin[0], target[1], target[0], target[1]]);
-  } else {
-    ctx.wires.push([pin[0], pin[1], target[0], pin[1]]);
-    ctx.wires.push([target[0], pin[1], target[0], target[1]]);
-  }
-  ctx.bridges.push({ from, until: ctx.wires.length, ends: [pin, target] });
-}
-
-/**
  * Emit a logic gate.
  *
  * Fitted over *all* its pins, like every other part, and anchored on the input
- * column rather than on the output. Both halves of that matter:
+ * column rather than on the output. The wiring no longer depends on that — the
+ * router draws to wherever the pins end up — but the *reading* does: the gate
+ * lands where the original drawing had it, facing the way it faced, so the sheet
+ * still looks like the sheet it came from.
  *
- *   - The inputs are where the fit is exact. Our gate spaces them 16 apart and
- *     so does Multisim, so one orientation puts every input on its wire and
- *     leaves only the output to bridge. Anchored on the output instead — as this
- *     did — the whole column lands 56 units off, and that was before mirroring.
+ *   - The inputs are where the fit is exact: our gate spaces them 16 apart and so
+ *     does Multisim. Anchored on the output instead — as this did — the whole
+ *     column lands 56 units off, and that was before mirroring.
  *   - `R0` was written unconditionally, so a gate Multisim had mirrored (its
- *     matrix carries `a = -1`) came out facing the wrong way and its inputs
- *     ended up 200 units from their wires. Unconnected ports read as ground, so
- *     the gate then computed with zeros and said nothing about it.
+ *     matrix carries `a = -1`) came out facing the wrong way, with its inputs 200
+ *     units from where the original had them.
  */
 function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
   const name = uniqueName(part.refdes.prefix || "U", part.refdes.number, used);
+  ctx.instances.push({ name, guid: part.guid, extraNodes: 0 });
 
   const at = (conn: string, p: Pt) => { const id = part.connPin[conn]; if (id !== undefined) pinPos[`${part.guid}/${id}`] = p; };
 
@@ -816,16 +801,9 @@ function emitGate(part: MsPart, spec: { gate: string; ins: string[] }, ctx: Ctx)
     const r = rotate(o, deg, mirrored);
     return [origin[0] + r[0], origin[1] + r[1]] as Pt;
   });
-  // With the fit anchored on the input column every input lands on its own wire,
-  // so in practice only the output is left to bridge, and only by the difference
-  // between the two tools' body widths. Leaving even that out is worse — the
-  // reconciliation then has to name more islands, and the corpus goes from three
-  // shorted schematics to five.
   conns.forEach((c, i) => {
     at(c, pinPts[i]);
     ctx.terminals.push(pinPts[i]);
-    const target = want[i];
-    if (target) bridgeTo(ctx, pinPts[i], target, pinPts);
   });
 }
 
@@ -874,6 +852,7 @@ const ffPins = (kind: string): { conn: string; off: Pt }[] =>
 function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
   const { symbolLines, pinPos, used } = ctx;
   const name = uniqueName(part.refdes.prefix || "U", part.refdes.number, used);
+  ctx.instances.push({ name, guid: part.guid, extraNodes: 0 });
 
   const p = part.params;
   const edge = p.Negative_Edge_Trigg_CLOCK === "1" ? "falling" : "rising";
@@ -910,16 +889,16 @@ function emitDFlipFlop(part: MsPart, kind: string, ctx: Ctx): void {
  * the source's negative terminal gets its own ground flag rather than being left
  * floating — which ngspice would reject as an open circuit.
  *
- * That invented terminal needs somewhere to go. Emitted at a fixed `R0` it sat
- * 80 units below the output pin, and where the drawn wiring also left the pin
- * downwards it landed *on that wire* — grounding the output and shorting the
- * source it belongs to (`2_0_Disjunktive_Normalform_Lsg`: three inputs of the
- * logic all pinned to 0, and ngspice rejecting the sources). So the source is
- * turned to point its ground away from its own wiring.
+ * That invented terminal needs somewhere to go, and where it goes cannot be
+ * decided here: it has to keep clear of every other terminal on the sheet, and
+ * most of those are not placed yet. So the SYMBOL and the FLAG are written with
+ * placeholder coordinates and seated afterwards — see `seatDigitalGrounds`.
  */
-function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx, sch: MsSchematic): void {
+function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx): void {
   const { symbolLines, pinPos, flags, used } = ctx;
   const name = uniqueName(`V${part.refdes.prefix || "DG"}`, part.refdes.number, used);
+  // The ground this emitter invents below is a node the net list does not carry.
+  ctx.instances.push({ name, guid: part.guid, extraNodes: 1 });
   const p = part.params;
 
   let value: string;
@@ -938,37 +917,55 @@ function emitDigitalSource(part: MsPart, kind: "constant" | "clock", ctx: Ctx, s
   const conn = part.connNames[0] ?? "1";
   const local = part.pins[conn];
   const outAbs: Pt = local ? scaled(applyMatrix(part.matrix, local), ctx.to) : [0, 0];
-
-  const VS = PIN_OFFSETS.voltage;
-  // Every segment the sheet draws, in LTSpice units — what the ground terminal
-  // has to keep clear of.
-  const drawn: Wire[] = [];
-  for (const w of sch.wires) {
-    for (let i = 0; i + 1 < w.path.length; i++) {
-      drawn.push([ctx.to(w.path[i][0]), ctx.to(w.path[i][1]), ctx.to(w.path[i + 1][0]), ctx.to(w.path[i + 1][1])]);
-    }
-  }
-  // R0 first, so a source with nothing in the way keeps the upright shape these
-  // sheets were drawn with; the turns are only reached when it is in the way.
-  const deg = [0, 180, 90, 270].find((d) => {
-    const o: Pt = [outAbs[0] - rotate(VS[0], d, false)[0], outAbs[1] - rotate(VS[0], d, false)[1]];
-    const r = rotate(VS[1], d, false);
-    const g: Pt = [o[0] + r[0], o[1] + r[1]];
-    return !drawn.some((w) => onSegment(g, w));
-  }) ?? 0;
-
-  const plus = rotate(VS[0], deg, false);
-  const origin: Pt = [outAbs[0] - plus[0], outAbs[1] - plus[1]];
-  symbolLines.push(`SYMBOL voltage ${origin[0]} ${origin[1]} R${deg}`);
-  symbolLines.push(`SYMATTR InstName ${name}`);
-  symbolLines.push(`SYMATTR Value ${value}`);
-
-  const off = rotate(VS[1], deg, false);
-  const minus: Pt = [origin[0] + off[0], origin[1] + off[1]];
-  flags.push(`FLAG ${minus[0]} ${minus[1]} 0`);
   const id = part.connPin[conn];
   if (id !== undefined) pinPos[`${part.guid}/${id}`] = outAbs;
-  ctx.terminals.push(outAbs, minus);
+  ctx.terminals.push(outAbs);
+
+  // Written now, placed later: the two lines are kept by index so the seating
+  // pass can rewrite them once every terminal is known.
+  const symbol = symbolLines.length;
+  symbolLines.push("SYMBOL voltage 0 0 R0");
+  symbolLines.push(`SYMATTR InstName ${name}`);
+  symbolLines.push(`SYMATTR Value ${value}`);
+  const flag = flags.length;
+  flags.push("FLAG 0 0 0");
+  ctx.grounds.push({ symbol, flag, out: outAbs });
+}
+
+/**
+ * Turn each digital source so its invented ground lands on nothing.
+ *
+ * The ground terminal is not in the net list — it is this conversion's own
+ * addition — so nothing stops it from coming down on a neighbour's pin, and there
+ * it does not merely look wrong: it grounds that pin's net, and the source whose
+ * ground it is reads as shorted. ngspice then refuses to start on the sheet.
+ *
+ * Which is not hypothetical. Multisim stacks the five digital constants of
+ * `6_3_3_Universal_Schieberegister_Lsg` 32 units apart, while our `voltage` symbol
+ * puts 80 between its terminals — so the ground of one sits squarely on the output
+ * of another two rows down.
+ *
+ * `R0` is tried first, so a source with room keeps the upright shape these sheets
+ * were drawn with; the turns are only reached when it is in the way. The output pin
+ * stays put through all four, since the symbol is placed *from* it.
+ */
+function seatDigitalGrounds(ctx: Ctx): void {
+  const VS = PIN_OFFSETS.voltage;
+  for (const g of ctx.grounds) {
+    const taken = new Set(ctx.terminals.map(key));
+    const seats = [0, 180, 90, 270].map((deg) => {
+      const plus = rotate(VS[0], deg, false);
+      const origin: Pt = [g.out[0] - plus[0], g.out[1] - plus[1]];
+      const off = rotate(VS[1], deg, false);
+      return { deg, origin, minus: [origin[0] + off[0], origin[1] + off[1]] as Pt };
+    });
+    // All four occupied happens on a sheet whose sources sit on top of each other;
+    // upright is then the least confusing of four wrong answers.
+    const seat = seats.find((s) => !taken.has(key(s.minus))) ?? seats[0];
+    ctx.symbolLines[g.symbol] = `SYMBOL voltage ${seat.origin[0]} ${seat.origin[1]} R${seat.deg}`;
+    ctx.flags[g.flag] = `FLAG ${seat.minus[0]} ${seat.minus[1]} 0`;
+    ctx.terminals.push(seat.minus);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,6 +1008,9 @@ function emitSwitch(part: MsPart, spec: SwitchSpec, ctx: Ctx): string[] {
   const { symbolLines, directives, pinPos, used } = ctx;
 
   const base = uniqueName(`R${part.refdes.prefix || "S"}`, part.refdes.number, used);
+  // One resistor per contact, but they share the part's pins, so they share its
+  // count too. Only the single-contact transistor switch is left on this path.
+  ctx.instances.push({ name: base, guid: part.guid, extraNodes: 0 });
 
   const state = parseInt(part.params.State ?? "0", 10) || 0;
 
@@ -1157,6 +1157,12 @@ function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
  * Add net labels wherever the drawn geometry leaves one Multisim net split
  * across several disconnected islands. Returns the FLAG lines to append.
  *
+ * Ground is a special case and the reason it reads well: it is not routed at all
+ * (see the router call), so every ground pin is its own island and gets its own
+ * `FLAG … 0` — which is how LTSpice draws ground, a symbol per pin rather than a
+ * net snaking across the sheet. A ground net with a single pin is labelled too,
+ * where any other net with nothing to join is left alone.
+ *
  * A label is set one grid square off its pin and joined to it by a short wire,
  * rather than placed on the pin itself. On the pin the tag covers the terminal
  * and reads as part of the symbol — and since it is a component of its own, it
@@ -1165,7 +1171,7 @@ function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
  * another pin or on an existing wire is dropped back onto the pin, since a stub
  * into an occupied point would invent a connection Multisim never had.
  */
-function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[]): string[] {
+function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[], bodies: Wire[]): string[] {
   // Ground already has FLAGs from the connector symbols; take their points into
   // account so a grounded pin isn't labelled a second time under another name.
   const flagPts: Pt[] = [];
@@ -1187,20 +1193,41 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
       const p = pinPos[k];
       if (p) pts.push({ p, key: k });
     }
-    if (pts.length < 2) continue;
 
     // Multisim's node 0 is ground; LTSpice spells that label "0" as well.
     const netName = net.name ?? "";
-    const name = /^\d+$/.test(netName) ? (netName === "0" ? "0" : `N${netName}`) : netName;
+    const ground = netName === "0";
+    const numbered = /^\d+$/.test(netName);
+    const name = numbered ? (ground ? "0" : `N${netName}`) : netName;
+    // A net Multisim *named* is one the original drawing showed a name for, via a
+    // connector symbol — `+Ub`, `-Ub`, `Ut`. Those connectors are not carried over
+    // (see the connector note in `convert`), so the name has to come from here,
+    // and it is written whether or not the wiring needs it: without that the sheet
+    // loses the label the reader recognises it by, and a supply net with one pin
+    // on it loses the node as well.
+    const shown = ground || (netName !== "" && !numbered);
+    // A net the original *did* connect, but of which we placed a single pin: the
+    // other end is a part that could not be converted (see `skipped`/`unmapped`),
+    // or a pin a stand-in does not have — the transistor switch loses its control
+    // input, and the clock driving it was left with its terminal on no node at
+    // all, which reads to ngspice as a shorted source. The name goes on anyway:
+    // the node the original had then exists, with one device on it.
+    const lost = pts.length === 1 && net.pins.length >= 2;
+    if (pts.length < 2 && !shown && !lost) continue;
 
     const islands = new Map<string, { p: Pt; key: string }>();
     for (const it of pts) {
       const root = uf.find(key(it.p));
       if (!islands.has(root)) islands.set(root, it);
     }
-    // One island means the wires already join every pin on this net.
-    if (islands.size < 2) continue;
+    // One island means the wires already join every pin on this net — except for
+    // the named ones, where the label is wanted for its own sake, and for the one
+    // whose counterpart went missing.
+    if (islands.size < 2 && !shown && !lost) continue;
     for (const [, { p, key: pinKey }] of islands) {
+      // Already named, by a connector symbol or by another net's pin sharing the
+      // point: a second FLAG on the same spot says nothing and draws twice.
+      if (placed.some((q) => q[0] === p[0] && q[1] === p[1])) continue;
       // A pin with no wire on it needs one. A name binds to the *net under it*,
       // and a net is made of wires (see anchorNets/resolveAnchor) — so a name
       // dropped on a bare terminal reaches nothing and the pin stays floating.
@@ -1209,17 +1236,35 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
       // up with no wire at all (see emitGate).
       //
       // One grid square, out of the part, and only where it is load-bearing.
+      //
+      // Four directions are tried, the informed one first. That is not thorough
+      // for its own sake: the lead is wire like any other, so it shorts whatever
+      // it touches, and where the pin's own way out is blocked the alternative to
+      // trying another is a name that binds to nothing.
       if (!wires.some((w) => onSegment(p, w))) {
-        const d = leadDirection(pinKey, pinPos);
-        if (d) {
-          const tip: Pt = [p[0] + d[0] * LEAD, p[1] + d[1] * LEAD];
-          if (!placed.some((q) => q[0] === tip[0] && q[1] === tip[1])) {
-            wires.push([p[0], p[1], tip[0], tip[1]]);
-            placed.push(tip);
-            out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
-            continue;
-          }
+        const first = leadDirection(pinKey, pinPos);
+        const dirs: Pt[] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        if (first) dirs.unshift(first);
+        let seated = false;
+        for (const d of dirs) {
+          const lead: Wire = [p[0], p[1], p[0] + d[0] * LEAD, p[1] + d[1] * LEAD];
+          const tip: Pt = [lead[2], lead[3]];
+          // The pin it starts from carries no wire (that is why it is here), so
+          // anything the lead reaches belongs to another net — including a pin it
+          // would end on, a label already sitting there, and a part it would run
+          // into, which is not a short but reads as one.
+          const clear = !wires.some((w) => touches(lead, w))
+            && !Object.values(pinPos).some((q) => (q[0] !== p[0] || q[1] !== p[1]) && onSegment(q, lead))
+            && !placed.some((q) => onSegment(q, lead))
+            && !bodies.some((b) => entersBody(lead, b));
+          if (!clear) continue;
+          wires.push(lead);
+          placed.push(tip);
+          out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
+          seated = true;
+          break;
         }
+        if (seated) continue;
       }
 
       // Otherwise the name goes *on* the pin: no stub, and nothing joined to it.
@@ -1242,51 +1287,6 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
     }
   }
   return out;
-}
-
-/**
- * Drop wire segments that cross another wire at a point Multisim did not mark
- * as a junction.
- *
- * Multisim records connections explicitly, so two of its wires may cross while
- * staying separate nets. LTSpice has no such notion — wires meeting at a point
- * are one node — and carrying such a crossing over verbatim shorts the two nets.
- * Removing the segment leaves its net split, which the net-list reconciliation
- * then rejoins with a label; a label connects by name and cannot cross anything.
- */
-/**
- * Where two axis-aligned segments cross without meeting end to end, or null.
- *
- * A shared endpoint is a corner of one routed path, not a crossing — two of the
- * four endpoints landing on the point is what tells the two apart.
- */
-function crossingPoint(a: Wire, b: Wire): Pt | null {
-  const aVert = a[0] === a[2], bVert = b[0] === b[2];
-  if (aVert === bVert) return null;
-  const [v, h] = aVert ? [a, b] : [b, a];
-  const x = v[0], y = h[1];
-  const onV = y >= Math.min(v[1], v[3]) && y <= Math.max(v[1], v[3]);
-  const onH = x >= Math.min(h[0], h[2]) && x <= Math.max(h[0], h[2]);
-  if (!onV || !onH) return null;
-  const ends = [[v[0], v[1]], [v[2], v[3]], [h[0], h[1]], [h[2], h[3]]]
-    .filter((p) => p[0] === x && p[1] === y).length;
-  return ends >= 2 ? null : [x, y];
-}
-
-function cutCrossings(wires: Wire[], junctions: Pt[], alsoMarked: Set<string> = new Set()): Wire[] {
-  const marked = new Set([...junctions.map((p) => key(p)), ...alsoMarked]);
-  const drop = new Set<number>();
-
-  for (let i = 0; i < wires.length; i++) {
-    for (let k = i + 1; k < wires.length; k++) {
-      if (drop.has(i) || drop.has(k)) continue;
-      const a = wires[i], b = wires[k];
-      const at = crossingPoint(a, b);
-      if (!at || marked.has(key(at))) continue;
-      drop.add(a[0] === a[2] ? k : i);
-    }
-  }
-  return wires.filter((_, i) => !drop.has(i));
 }
 
 /**
@@ -1336,17 +1336,10 @@ export function convert(sch: MsSchematic): ConversionResult {
   const unmapped: string[] = [];
 
   const wires: Wire[] = [];
-  /**
-   * Which stretches of `wires` are pin bridges (see below), as index spans.
-   *
-   * Whether a bridge is worth drawing cannot be decided when it is drawn — the
-   * wiring it might run into is not read until later. So it is written in place,
-   * keeping the order of the list, and taken out again further down if need be:
-   * `cutCrossings` walks the list in order and a wire it has already dropped
-   * stops taking part, so reordering the list quietly changes which segment
-   * survives at every other crossing on the sheet.
-   */
-  const bridges: { from: number; until: number; ends: Pt[] }[] = [];
+  /** Every instance placed on the sheet (see Ctx.instances). */
+  const instances: Instance[] = [];
+  /** The digital sources still to be seated (see Ctx.grounds). */
+  const grounds: { symbol: number; flag: number; out: Pt }[] = [];
   /** Every terminal placed on the sheet (see Ctx.terminals). */
   const terminals: Pt[] = [];
 
@@ -1373,11 +1366,11 @@ export function convert(sch: MsSchematic): ConversionResult {
     if (prefix) used.add(`${prefix}${num}`);
   }
 
+  const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, terminals, instances, grounds, to };
+
   // --- placed parts -------------------------------------------------------
   for (const part of sch.parts) {
     const bp = { name: part.typeName };
-
-    const ctx: Ctx = { symbolLines, flags, directives, pinPos, used, wires, bridges, terminals, to };
 
     if (GATES[bp.name]) {
       emitGate(part, GATES[bp.name], ctx);
@@ -1399,7 +1392,7 @@ export function convert(sch: MsSchematic): ConversionResult {
     }
 
     if (bp.name === "Digital Constant" || bp.name === "Digital Clock") {
-      emitDigitalSource(part, bp.name === "Digital Clock" ? "clock" : "constant", ctx, sch);
+      emitDigitalSource(part, bp.name === "Digital Clock" ? "clock" : "constant", ctx);
       substituted.push(`${bp.name} (als Spannungsquelle)`);
       continue;
     }
@@ -1449,7 +1442,9 @@ export function convert(sch: MsSchematic): ConversionResult {
     // Refdes: Multisim leaves the number null on single-instance designs, so
     // number those ourselves per prefix rather than emitting a bare "R".
     const prefix = type.forcePrefix || part.refdes.prefix || type.prefix;
-    symbolLines.push(`SYMATTR InstName ${uniqueName(prefix, part.refdes.number, used)}`);
+    const inst = uniqueName(prefix, part.refdes.number, used);
+    symbolLines.push(`SYMATTR InstName ${inst}`);
+    instances.push({ name: inst, guid: part.guid, extraNodes: 0 });
 
     // Ratings can sit on either level — a lamp keeps its voltage and power in
     // `modeldefinitiondata` while a resistor keeps its value in
@@ -1460,18 +1455,6 @@ export function convert(sch: MsSchematic): ConversionResult {
     const spiceLine = type.spiceLine?.(flat);
     if (spiceLine) symbolLines.push(`SYMATTR SpiceLine ${spiceLine}`);
     for (const a of type.attrs ?? []) symbolLines.push(`SYMATTR ${a}`);
-
-    // Where LTSpice's pin spacing differs from Multisim's, the Multisim wire
-    // still ends at the original point — bridge the gap with a stub so the net
-    // stays connected instead of silently breaking. Collected rather than drawn:
-    // whether a stub is worth having depends on the wiring around it, which is
-    // not read until below (see `bridges`).
-    // Every pin of this part, so a stub can be told which way leads *out* of the
-    // symbol (see outwardAxis) rather than along its flank.
-    const pinPts: Pt[] = useOffsets
-      .map((o) => (o ? rotate(o, deg, mirrored) : null))
-      .filter((r): r is Pt => r !== null)
-      .map((r) => [origin[0] + r[0], origin[1] + r[1]]);
 
     for (let i = 0; i < want.length; i++) {
       if (!useOffsets[i]) continue;
@@ -1486,124 +1469,86 @@ export function convert(sch: MsSchematic): ConversionResult {
       const pid = conn === null ? undefined : part.connPin[conn];
       if (pid !== undefined) pinPos[`${part.guid}/${pid}`] = [ax, ay];
       ctx.terminals.push([ax, ay]);
-      const target = want[i];
-      if (!target) continue;
-      if (ax !== target[0] || ay !== target[1]) {
-        bridgeTo(ctx, [ax, ay], target, pinPts);
-      }
     }
   }
+
+  // Now that every terminal is known, the digital sources can be turned so their
+  // invented grounds land on none of them.
+  seatDigitalGrounds(ctx);
 
   // --- ground and other connectors ---------------------------------------
-  for (const c of sch.connectors) {
-    if (c.kind === "ground") {
-      const [x, y] = applyMatrix(c.matrix, [0, 0]);
-      flags.push(`FLAG ${to(x)} ${to(y)} 0`);
-      // Ground appears in the net list like any other pin, so record it.
-      pinPos[`${c.guid}/1`] = [to(x), to(y)];
-    } else {
-      // A plain connector is Multisim's net label: it names the node it sits on
-      // and joins every other connector carrying that name. Registering its
-      // position is what makes those joins survive — the reconciliation below
-      // then emits the matching LTSpice FLAGs.
-      const [x, y] = applyMatrix(c.matrix, [0, 0]);
-      pinPos[`${c.guid}/1`] = [to(x), to(y)];
-    }
-  }
+  // Left out on purpose, both kinds. A Multisim connector is a *name* on a net,
+  // not a terminal: the ground symbol says "node 0" and a plain connector says
+  // "+Ub", and in both cases the net list has already recorded that — the nets
+  // these sheets carry are literally named `0`, `+Ub`, `Uc`. So there is nothing
+  // to place. Carried over as a point it would only be a terminal with no device
+  // behind it: the router would run a wire out to it, and the reconciliation
+  // would hang a second ground symbol in the empty space beside the pin that
+  // already has one.
 
   // --- wires --------------------------------------------------------------
-  // Taken over verbatim (scaled). Moving each end onto our own pin instead — the
-  // converter knows both coordinates — was built and reverted: it does fix the
-  // ends (the corpus went from 641 dead ends to 520) but it pulls the *paths*
-  // apart, because two wires that met at a Multisim pin no longer meet once each
-  // is moved to a different one of our pins. Net labels rose from 1242 to 1308,
-  // a source lost its terminal and a name stopped binding.
+  // Drawn between our own pins, not copied from Multisim (see router.ts). What
+  // the router is given, and why each part of it:
   //
-  // The idea is right and the half-measure is not: it needs the wires *routed*
-  // between our pins, with Multisim's path as the guide, rather than the old
-  // endpoints nudged. That is a router, and `sch.nets` already holds the
-  // authority it would route from.
-  for (const w of sch.wires) {
-    const path = w.path;
-    for (let i = 0; i + 1 < path.length; i++) {
-      wires.push([to(path[i][0]), to(path[i][1]), to(path[i + 1][0]), to(path[i + 1][1])]);
+  //   - the nets as *our* terminals, from the net list Multisim simulated, since
+  //     that says what belongs together where the drawing only shows it;
+  //   - the part bodies, so a wire prefers going round a symbol to through it;
+  //   - the wiring the emitters drew themselves (a changeover switch ties its two
+  //     contacts together), which is fixed and has to be routed around;
+  //   - every terminal on the sheet, so no route is laid across a foreign pin.
+  //     `terminals` and not `pinPos`: the invented ground of a digital source is
+  //     a terminal Multisim never named, and running over that one grounds a net.
+  //
+  // Ground is left out on purpose. It is the widest net on nearly every sheet, so
+  // routing it first (nets go longest-first) would spend the whole sheet's
+  // crossing budget on it, and it is the one net that needs no wire: LTSpice draws
+  // a ground symbol per pin, which is what the reconciliation below emits.
+  // Which net each pin sits on, by pin and by point. Only a net with two pins on
+  // it is a connection: Multisim writes a one-pin net for a terminal that goes
+  // nowhere, and these teaching sheets are full of them — the parts of an exercise
+  // the student is meant to wire up.
+  const netOfPin = new Map<string, string>();
+  const ofNet = new Map<string, string>();
+  for (const net of sch.nets) {
+    if (net.pins.length < 2) continue;
+    for (const obj of net.pins) {
+      const k = `${obj.component}/${obj.pin}`;
+      netOfPin.set(k, net.name ?? "");
+      const p = pinPos[k];
+      if (p) ofNet.set(key(p), net.name ?? "");
     }
   }
 
-  // --- take back the pin bridges that run into something -------------------
-  // A stub is a shortcut, not an obligation: everything it would connect is
-  // reachable by name through the reconciliation below. So one that crosses
-  // drawn wiring is withdrawn — as a whole, since half a stub connects nothing
-  // and just leaves a spur pointing at the part.
-  //
-  // The op-amp is why. Multisim's INA333 has IN+ above IN-, our symbol has them
-  // the other way round, so the stub reaching down to the old IN- point ran
-  // straight through the wire on IN+. Both were then cut as crossings, and what
-  // was left on the sheet was a hook curling out of one input towards the other
-  // — the wiring read as wrong even though the net list was right.
-  //
-  // Crossings *between* bridges are not counted: two of them meeting is the same
-  // pin spacing problem seen twice, and withdrawing both would take out wiring
-  // that nothing was wrong with.
-  //
-  // Running over somebody else's *pin* counts too, and is the worse of the two:
-  // a crossing is at least visible, but a stub laid across a neighbouring
-  // terminal welds two nets together silently. The 74LS93's four Q outputs are
-  // 16 units apart in Multisim and 96 apart on our symbol, so the stub from one
-  // of them ran along the row of the others.
-  const marked = new Set(sch.junctions.map((j) => key([to(j[0]), to(j[1])])));
-  const inBridge = new Set<number>();
-  for (const b of bridges) for (let i = b.from; i < b.until; i++) inBridge.add(i);
-  const dropped = new Set<number>();
-  for (const b of bridges) {
-    const own = new Set(b.ends.map(key));
-    let bad = false;
-    for (let i = b.from; i < b.until && !bad; i++) {
-      const s = wires[i];
-      for (let k = 0; k < wires.length && !bad; k++) {
-        if (inBridge.has(k)) continue;
-        const at = crossingPoint(s, wires[k]);
-        // Touching the very wire the stub was built to reach is not a crossing
-        // but the connection itself: the stub commonly meets it at a corner, and
-        // a corner counts as a crossing by the plain geometric test.
-        if (at && !marked.has(key(at)) && !onSegment(b.ends[1], wires[k])) bad = true;
-      }
-      for (const p of Object.values(pinPos)) {
-        if (!own.has(key(p)) && onSegment(p, s)) { bad = true; break; }
-      }
-    }
-    if (bad) for (let i = b.from; i < b.until; i++) dropped.add(i);
-    // A surviving stub reaches its target by *tapping* the wire that ends there,
-    // usually meeting it at one of its own corners. To `cutCrossings` that reads
-    // as a crossing — neither run stops at the point, so it would cut the wire
-    // and split the very net the stub was drawn to keep whole. It is a junction,
-    // and this is where we say so: the schematic then shows a wire arriving at
-    // the pin instead of stopping a grid square short of it with a net label
-    // either side (1_2_PT100-Sensor_mit_OPV, on the inverting input).
-    else {
-      for (let i = b.from; i < b.until; i++) {
-        marked.add(key([wires[i][0], wires[i][1]]));
-        marked.add(key([wires[i][2], wires[i][3]]));
-      }
-    }
-  }
-  if (dropped.size) {
-    const kept = wires.filter((_, i) => !dropped.has(i));
-    wires.length = 0;
-    wires.push(...kept);
-  }
+  // What the original leaves with fewer than two nodes. Nothing can be drawn for
+  // these — there is no connection to draw — and the netlist puts every terminal
+  // of them on node 0, which for a source reads to ngspice as a short. Said out
+  // loud so that it is not mistaken for the conversion's own doing: this is the
+  // sheet as it was drawn.
+  const unconnected = instances.filter((inst) => {
+    const nodes = new Set<string>();
+    for (const [k, name] of netOfPin) if (k.startsWith(`${inst.guid}/`)) nodes.add(name);
+    return nodes.size + inst.extraNodes < 2;
+  }).map((i) => i.name);
+  const bodies = symbolBodies(symbolLines);
+  const { wires: laid, report: route } = routeNets({
+    nets: sch.nets
+      .filter((n) => (n.name ?? "") !== "0")
+      .map((n) => ({
+        name: n.name ?? "",
+        pts: n.pins.map((q) => pinPos[`${q.component}/${q.pin}`]).filter((q): q is Pt => !!q),
+      }))
+      .filter((n) => n.pts.length >= 2),
+    bodies,
+    fixed: wires.map((seg) => ({ what: seg, net: ofNet.get(key([seg[0], seg[1]])) ?? null })),
+    keepClear: terminals.map((pt) => ({ what: pt, net: ofNet.get(key(pt)) ?? null })),
+  });
+  wires.push(...laid);
 
   // --- close gaps against the authoritative net list ----------------------
-  // `doc.nets` is what Multisim actually simulated, and it is not always
-  // reproduced by the drawing: parts whose pins abut directly carry no wire at
-  // all, and the two tools' pin spacings don't always leave a stub that lands on
-  // one. Rather than guess at extra routing, reconcile geometry against the net
-  // list and bridge whatever is still split with an LTSpice net label — which
-  // connects by name and so cannot introduce a false crossing.
-  const routed = cutCrossings(wires, sch.junctions.map((j): Pt => [to(j[0]), to(j[1])]), marked);
-  wires.length = 0;
-  wires.push(...routed);
-  flags.push(...reconcile(sch.nets, pinPos, wires, flags));
+  // Whatever the router could not draw without touching another net is joined by
+  // name instead — a label connects without geometry and so cannot short
+  // anything. This is also where ground gets its symbols, one per pin.
+  flags.push(...reconcile(sch.nets, pinPos, wires, flags, bodies));
 
   // --- prune what reaches nothing -----------------------------------------
   // A wire end that meets no terminal, no other wire and no name connects
@@ -1696,12 +1641,7 @@ export function convert(sch: MsSchematic): ConversionResult {
     substituted: [...new Set(substituted)],
     shorts: findShorts(sch.nets, pinPos, cleanWires, flags),
     unmapped,
-    placement: {
-      nets: sch.nets.map((n) => ({
-        name: n.name ?? "",
-        pts: n.pins.map((q) => pinPos[`${q.component}/${q.pin}`]).filter((q): q is Pt => !!q),
-      })).filter((n) => n.pts.length >= 2),
-      bodies: symbolBodies(symbolLines),
-    },
+    route,
+    unconnected,
   };
 }

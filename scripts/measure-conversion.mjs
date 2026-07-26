@@ -9,6 +9,9 @@
  *
  *   - a **shorted source**, both terminals on one node. ngspice refuses to run
  *     at all ("instance vdg6 is a shorted VSRC"), so the sheet yields nothing.
+ *     Counted against the original: a part the source file itself leaves unwired
+ *     has no two nodes to be on, and several of these sheets are exercises whose
+ *     parts are there for the student to connect. Those are listed separately.
  *   - a **wire in mid-air**, an end that reaches no pin, no other wire and no
  *     name. Harmless to the simulation, but it is the visible symptom of a
  *     connection the converter could not draw.
@@ -82,6 +85,8 @@ await build({
       export { ModelParser } from "@core/library/ModelParser.js";
       export { registerSymbol, symbolByName } from "@sym/asyParser.js";
       export { offsetsForNode, parseRot, symbolToType } from "@core/ltspice/ltspiceGeometry.js";
+      export { convert } from "@core/multisim/MultisimConverter.js";
+      export { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
     `,
     resolveDir: root,
     loader: "ts",
@@ -101,7 +106,30 @@ await build({
 const {
   useCircuitStore, useLibraryStore, ModelParser,
   registerSymbol, symbolByName, offsetsForNode, parseRot, symbolToType,
+  convert, readMsjs, msjsToSchematic,
 } = await import(pathToFileURL(outfile).href);
+
+const MSJS = "examples/Sicherung_Multisim_Circuits";
+
+/**
+ * The sources the *original* leaves with fewer than two nodes, per converted file.
+ *
+ * Several of these sheets are exercises: the parts lie on them for the student to
+ * wire up, and a source with nothing on either terminal has both of them on node 0
+ * — which reads exactly like a source this conversion shorted. Only the difference
+ * is worth counting, so the original is asked first (see ConversionResult.unconnected).
+ */
+function spareInstances(file) {
+  const src = resolve(root, MSJS, file.replace(/\.asc$/, ".msjs"));
+  if (!existsSync(src)) return [];
+  try {
+    const b = readFileSync(src);
+    const res = convert(msjsToSchematic(readMsjs(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))));
+    return res.unconnected;
+  } catch {
+    return [];
+  }
+}
 
 /** Every `.asy` under a directory, registered under its bare name. */
 function eachSymbol(dir, fn) {
@@ -177,16 +205,25 @@ function ascPins(text) {
     if (!m) continue;
     const base = m[1].split(/[\\/]/).pop();
     const { deg, mirrored } = parseRot(m[4]);
-    // The InstName follows its SYMBOL, before the next one.
+    // The InstName and, where the part has one, its pin list — both follow the
+    // SYMBOL line, before the next one.
     let inst = "?";
+    let declared;
     for (let j = i + 1; j < lines.length && !/^SYMBOL\s/.test(lines[j]); j++) {
       const a = /^SYMATTR\s+InstName\s+(\S+)/.exec(lines[j]);
-      if (a) { inst = a[1]; break; }
+      if (a) { inst = a[1]; continue; }
+      // A gate's pin count is a property, not a fixed table, so its offsets can
+      // only be worked out from the pins the file names. Without this every 3- and
+      // 4-input gate was measured against a 2-input raster, and each of its inputs
+      // came out as a wire ending 16 or 24 units short of a pin — 149 phantom open
+      // ends across the corpus, all of them wiring that in fact meets its pin.
+      const g = /^SYMATTR\s+LibreSpice\s+.*\bpins=([^;]+)/.exec(lines[j]);
+      if (g) declared = g[1].split(",");
     }
     // Exactly the resolution the parser does: a known device symbol maps to its
     // component type, anything else is a library part drawn from its own `.asy`.
     const type = symbolToType(m[1]) ?? "subcircuit";
-    const names = type === "subcircuit" ? (symPins.get(base) ?? []) : undefined;
+    const names = declared ?? (type === "subcircuit" ? (symPins.get(base) ?? []) : undefined);
     let offs = [];
     try { offs = offsetsForNode(type, deg, names, base, mirrored) ?? []; } catch { offs = []; }
     for (const o of offs) out.push({ x: +m[2] + o.dx, y: +m[3] + o.dy, handleId: o.handle, sym: base, inst });
@@ -243,6 +280,8 @@ async function measure(dir) {
   const openWires = [];
   let danglingTotal = 0;
   let flagTotal = 0;
+  /** Instances the original itself leaves with fewer than two nodes. */
+  let spareTotal = 0;
 
   for (const file of files) {
     const text = readFileSync(join(dir, file), "latin1");
@@ -255,10 +294,14 @@ async function measure(dir) {
       st().regenerateNetlist();
       await tick();
 
+      const spare = spareInstances(file);
+      spareTotal += spare.length;
+      // The netlist prepends the device letter where the instance name lacks it.
+      const spared = new Set(spare.flatMap((n) => [n, `V${n}`, `I${n}`]));
       const bad = [];
       for (const l of st().netlist.split(/\r?\n/)) {
         const m = /^\s*([VI]\S*)\s+(\S+)\s+(\S+)\s/.exec(l);
-        if (m && m[2] === m[3]) bad.push(m[1]);
+        if (m && m[2] === m[3] && !spared.has(m[1])) bad.push(m[1]);
       }
       if (bad.length) shortedSources.push(`${file}: ${bad.join(", ")}`);
 
@@ -297,7 +340,7 @@ async function measure(dir) {
       shortedSources.push(`${file}: THREW ${e.message}`);
     }
   }
-  return { files: files.length, shortedSources, dangling, danglingTotal, flagTotal, blame, openWires };
+  return { files: files.length, shortedSources, dangling, danglingTotal, flagTotal, blame, openWires, spareTotal };
 }
 
 /** Check out the converted directory from a git revision into a scratch dir. */
@@ -334,6 +377,7 @@ console.log(line("Schaltungen mit kurzgeschl. Quelle", now.shortedSources.length
 console.log(line("Schaltungen mit Leitung in der Luft", now.dangling.length, before?.dangling.length));
 console.log(line("Leitungsenden in der Luft (gesamt)", now.danglingTotal, before?.danglingTotal));
 console.log(line("Netzlabel gesamt", now.flagTotal, before?.flagTotal));
+console.log(line("Bauteile ohne Anschluss im Original", now.spareTotal, before?.spareTotal));
 
 if (now.shortedSources.length) {
   console.log("\nKurzgeschlossene Quellen (ngspice startet nicht):");

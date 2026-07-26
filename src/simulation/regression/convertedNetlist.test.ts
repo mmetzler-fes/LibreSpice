@@ -3,6 +3,7 @@ import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { withSymbols } from "@editor/regression/withSymbols.js";
 import { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
+import { convert } from "@core/multisim/MultisimConverter.js";
 import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
@@ -14,11 +15,11 @@ import type { TestReport } from "@editor/regression/svgExport.test.js";
  *
  *   - **A shorted source.** Multisim's digital constant and clock have a single
  *     pin and an implied ground, so the converter invents the return terminal.
- *     Emitted at a fixed orientation it landed on the wire leaving the output
- *     pin wherever that wire ran downwards, which grounds the output: ngspice
- *     stops at "instance vdg6 is a shorted VSRC" and the sheet yields nothing.
- *     Three schematics were in that state (`2_0_Disjunktive_Normalform_Lsg` and
- *     both `6_3_3_Universal_Schieberegister`).
+ *     Landing on a neighbour's pin it grounds that pin's net: ngspice stops at
+ *     "instance vdg6 is a shorted VSRC" and the sheet yields nothing. Judged
+ *     against the original, like the gate inputs below — a source the original
+ *     itself left unwired has no two nodes to be on, and that is the sheet as it
+ *     was drawn rather than something the conversion did.
  *   - **A lost gate input.** Our logic symbols carry their pins nothing like
  *     Multisim's — a 4-input AND's input column sits 200 units off — and an
  *     unconnected port reads as ground, so the gate quietly computes with zeros.
@@ -36,44 +37,16 @@ import type { TestReport } from "@editor/regression/svgExport.test.js";
  */
 
 /**
- * Sheets that still convert with a shorted source, with the source named.
- *
- * Recorded rather than waived: each entry is a schematic ngspice will not start
- * on, and the list is the work still to do. It is spelled out per source so the
- * guard still fires if a *different* one goes dead in the same file.
- *
- * The digital constant and clock are fixed (their invented ground terminal now
- * turns away from the wiring it used to land on). These are the ones that are
- * not that: ordinary sources whose two terminals meet through the drawn wiring
- * — a different geometry fault, not yet run down.
- */
-const KNOWN_DEAD_SOURCES: Record<string, string[]> = {
-  "1_1_1_Nichtinvertierender_Komparator.asc": ["V2"],
-  "1_1_2_Invertierender Komparator (1).asc": ["VUe4"],
-  "1_1_2_Invertierender Komparator.asc": ["VUe4"],
-  "6_1_1_Einfaches_RS_Flipflop.asc": ["VSet1", "VReset1"],
-  "6_3_3_Universal_Schieberegister_Lsg.asc": ["VDG13", "VDG14"],
-  "7_1_1_Intergrierender_OPV.asc": ["V4"],
-};
-
-/**
  * Gate inputs a sheet grounds that its Multisim source did not, per file.
  *
- * Down to one from four, and meant to stay there. It shrank when `emitGate` was fitted
- * over all its pins instead of anchored on its output alone: a gate Multisim had
- * mirrored used to come out facing the wrong way, with its inputs 200 units from
- * their wires and reading as ground. Anything appearing here again is that class
- * of fault returning.
+ * Empty, and meant to stay that way. It held one — a 2-input AND whose inputs
+ * Multisim spaces 32 apart against our 48 — until the wiring stopped being copied
+ * from Multisim and started being routed between our own pins, which is exactly
+ * the class of fault that removed. Anything appearing here again is our pin raster
+ * disagreeing with the original's, and the number has to be checked by hand before
+ * it is written down.
  */
-const KNOWN_LOST_GATE_INPUTS: Record<string, number> = {
-  // One 2-input AND whose inputs Multisim spaces 32 apart; our gate spaces two
-  // inputs 48 apart, so the second lands 16 off its wire. Not an orientation
-  // fault — our own pin pitch. Changing it means changing the gate everywhere
-  // (LogicGate.createPorts, pinGeometry and ltspiceGeometry have to agree, and
-  // every hand-drawn schematic moves with them), which is a poor trade for one
-  // input in one sheet.
-  "2_1_Tiefgaragensteuerung_Lsg.asc": 1,
-};
+const KNOWN_LOST_GATE_INPUTS: Record<string, number> = {};
 
 /** Instance names of the logic gates a converted `.asc` places. */
 function gateNames(asc: string): Set<string> {
@@ -89,9 +62,14 @@ function gateNames(asc: string): Set<string> {
   return out;
 }
 
+/** A Node `Buffer` as the plain `ArrayBuffer` the reader wants. */
+function bufferOf(buf: { buffer: ArrayBuffer; byteOffset: number; byteLength: number }): ArrayBuffer {
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
+
 /** How many gate inputs the Multisim source itself leaves on ground. */
 function groundedInSource(buf: { buffer: ArrayBuffer; byteOffset: number; byteLength: number }): number {
-  const sch = msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) as never);
+  const sch = msjsToSchematic(readMsjs(bufferOf(buf)) as never);
   let n = 0;
   for (const p of sch.parts) {
     if (!/-Input |Inverter|Buffer/.test(p.typeName)) continue;
@@ -155,24 +133,32 @@ export async function runConvertedNetlistTests(): Promise<TestReport> {
         await tick();
 
         const lines = st().netlist.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const known = KNOWN_DEAD_SOURCES[file] ?? [];
+        const src = path.resolve("examples/Sicherung_Multisim_Circuits", file.replace(/\.asc$/, ".msjs"));
+
+        // Which sources the *original* leaves with fewer than two nodes. There is
+        // no waiver list here on purpose: a source with both terminals on one node
+        // is either a sheet the conversion broke — always a failure — or a part the
+        // original never wired up, which several of these teaching sheets are full
+        // of (`2_0_Disjunktive_Normalform` is an exercise: the gates and their
+        // drivers lie on the sheet for the student to connect). The conversion is
+        // asked which, because it holds the refdes→InstName mapping; the *symptom*
+        // is still read off the netlist, so the two cannot agree by construction.
+        const spare = new Set<string>(
+          fs.existsSync(src) ? convert(msjsToSchematic(readMsjs(bufferOf(fs.readFileSync(src))) as never)).unconnected : [],
+        );
         const bad: string[] = [];
-        const stillDead: string[] = [];
         for (const l of lines) {
           // `V<name> <n+> <n-> …` / `I<name> …`: an independent source.
           const m = /^([VI]\S*)\s+(\S+)\s+(\S+)\s/.exec(l);
           if (!m || m[2] !== m[3]) continue;
-          if (known.includes(m[1])) stillDead.push(m[1]);
-          else bad.push(`${m[1]}: both terminals on ${m[2]}`);
+          // The netlist prepends the device letter where the instance name does
+          // not already carry it: the sheet's `Ue4` is `VUe4` on its own line.
+          if (spare.has(m[1]) || spare.has(m[1].slice(1))) continue;
+          bad.push(`${m[1]}: both terminals on ${m[2]}`);
         }
-        // A known one that came back to life means the list is stale — say so,
-        // rather than let a fixed schematic keep a waiver it no longer needs.
-        const revived = known.filter((k) => !stillDead.includes(k));
-        if (revived.length) bad.push(`no longer dead, drop from KNOWN_DEAD_SOURCES: ${revived.join(", ")}`);
         if (bad.length) failures.push({ name, reason: bad.join("; ") });
 
         // ── gate inputs the conversion grounded and the source did not ──────
-        const src = path.resolve("examples/Sicherung_Multisim_Circuits", file.replace(/\.asc$/, ".msjs"));
         if (fs.existsSync(src)) {
           const names = gateNames(fs.readFileSync(path.join(dir, file), "latin1"));
           let grounded = 0;
