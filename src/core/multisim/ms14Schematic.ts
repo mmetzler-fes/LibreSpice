@@ -221,6 +221,17 @@ const TYPES: Record<string, {
   JK_FF: { name: "JK Flip-Flop" },
   VOLTAGE_CONTROLLED_VOLTAGE_SOURCE: { name: "Voltage Controlled Voltage Source", params: { Gain: 1 } },
 
+  // Multisim 14 names the instrumentation amplifier after the ordering code; the
+  // converter already knows it under the Live name, with the same connection
+  // names on both sides, so this is the alias and nothing more.
+  INA333AIDGKR: { name: "INA333" },
+
+  // The PWL source is the converter's "Arbitrary Voltage Source": it takes the
+  // time/value pairs as one string and turns them into a SPICE `PWL(...)`,
+  // nudging Multisim's duplicated timestamps apart on the way. Only the pairs
+  // themselves have to be dug out of the slots (see derived).
+  PIECEWISE_LINEAR_VOLTAGE: { name: "Arbitrary Voltage Source" },
+
   // Measuring instruments are not parts of the circuit, but leaving them out
   // takes their node with them. Each becomes the thing SPICE measures with: an
   // ammeter is a source of 0 V (the classic current probe, and it even reads out
@@ -314,6 +325,18 @@ function derived(type: string, slots: string[]): Record<string, string> {
       TD: slots[7] || "0", TR: String(period - fall), TF: String(fall),
       PW: "0", Per: String(period),
     };
+  }
+
+  // Multisim keeps the pairs as a run of slots with their *count* in front:
+  // the template says `pwl(%f11:10:1)` — read from slot 11, as many as slot 10
+  // says. Written out as the one string the converter's `pwl()` expects, so the
+  // reading of the format stays here and the SPICE end of it stays there.
+  if (type === "PIECEWISE_LINEAR_VOLTAGE") {
+    const count = num(10);
+    if (!Number.isFinite(count) || count < 2) return {};
+    const pairs = slots.slice(11, 11 + count).filter((v) => v !== undefined && v !== "");
+    if (pairs.length < 2) return {};
+    return { "Time/Voltage pairs": pairs.join(" ") };
   }
 
   return {};
