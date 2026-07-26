@@ -1,4 +1,5 @@
 import type { MsSchematic, MsPart, MsConnector, MsNet, Pt } from "./model.js";
+import { parseSI } from "../components/base/componentValue.js";
 
 /**
  * Reading a Multisim 14 document into the neutral schematic model.
@@ -187,6 +188,10 @@ const TYPES: Record<string, {
   // pulse width; `derived` below does that arithmetic.
   CLOCK_VOLTAGE: { name: "Clock Voltage", params: { VP: 5, TR: 7, TF: 9 } },
   PULSE_VOLTAGE: { name: "Pulse Voltage", params: { VI: 1, VP: 3, TD: 5, TR: 7, TF: 9, PW: 11, Per: 13 } },
+  // Both come out as a pulse, but neither is a slot mapping — the step needs a
+  // period that never comes round and the triangle's peak is a sum (see derived).
+  STEP_VOLTAGE: { name: "Pulse Voltage" },
+  TRIANGULAR_VOLTAGE: { name: "Pulse Voltage" },
 
   OPAMP_3T_VIRTUAL: { name: "3 Terminal Opamp" },
   OPAMP_5T_VIRTUAL: { name: "5 Terminal Opamp" },
@@ -268,14 +273,56 @@ const PROBES = /^PROBE(_|$)/;
  * two numbers the same way.
  */
 function derived(type: string, slots: string[]): Record<string, string> {
-  if (type !== "CLOCK_VOLTAGE") return {};
-  const freq = parseFloat(slots[1] ?? "");
-  const duty = parseFloat(slots[3] ?? "");
-  if (!Number.isFinite(freq) || freq <= 0) return {};
-  const period = 1 / freq;
-  const width = Number.isFinite(duty) ? (period * duty) / 100 : period / 2;
-  return { Per: period.toPrecision(6), PW: width.toPrecision(6) };
+  // Multisim states these with SI suffixes ("100m"), so plain parseFloat would
+  // read a hundred milliseconds as a hundred seconds.
+  const num = (i: number) => parseSI(slots[i] ?? "") ?? NaN;
+
+  if (type === "CLOCK_VOLTAGE") {
+    const freq = num(1);
+    const duty = num(3);
+    if (!Number.isFinite(freq) || freq <= 0) return {};
+    const period = 1 / freq;
+    const width = Number.isFinite(duty) ? (period * duty) / 100 : period / 2;
+    return { Per: period.toPrecision(6), PW: width.toPrecision(6) };
+  }
+
+  // A step is one edge and then nothing, which SPICE has no source for: the
+  // nearest is a pulse whose period outlasts the analysis. Multisim writes it as
+  // `pwl(0 #1 #5 #1 {#5+#7} #3 …)` — start at #1, reach #3 at #5, taking #7 to
+  // get there. `NEVER` is what "and then nothing" costs: a pulse that would come
+  // back after eleven days.
+  if (type === "STEP_VOLTAGE") {
+    const step = num(5);
+    if (!Number.isFinite(step)) return {};
+    return {
+      VI: slots[1] ?? "0", VP: slots[3] ?? "0",
+      TD: slots[5] ?? "0", TR: slots[7] || "1n", TF: "1n",
+      PW: NEVER, Per: NEVER,
+    };
+  }
+
+  // A triangle is a pulse with no flat top, all of whose period is spent rising
+  // and falling: `pulse(#9 {#1+#9} #7 {#3-#5} #5 0 #3)`. The one sum in there —
+  // the peak sits #1 above the offset #9 — is why this cannot be a slot mapping.
+  if (type === "TRIANGULAR_VOLTAGE") {
+    const amp = num(1), period = num(3), fall = num(5), offset = num(9);
+    if (![amp, period, fall, offset].every(Number.isFinite) || period <= 0) return {};
+    return {
+      VI: String(offset), VP: String(offset + amp),
+      TD: slots[7] || "0", TR: String(period - fall), TF: String(fall),
+      PW: "0", Per: String(period),
+    };
+  }
+
+  return {};
 }
+
+/**
+ * A pulse period long enough that the pulse never repeats — for the sources that
+ * are one edge rather than a train. Eleven days: past any transient analysis
+ * these sheets ask for, and still far short of where a double loses resolution.
+ */
+const NEVER = "1e6";
 
 /** Multisim 14's connectors: parts in the file, a symbol on the sheet for us. */
 const CONNECTORS: Record<string, string> = {

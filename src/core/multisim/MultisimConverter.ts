@@ -34,6 +34,16 @@
  */
 
 import { routeNets, touches, entersBody, type RouteReport } from "./router.js";
+import { parseSI } from "../components/base/componentValue.js";
+
+/** Normalise a Multisim value for SPICE (µ → u, strip blanks). */
+function si(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "";
+  return String(v).replace(/[μµ]/g, "u").trim();
+}
+
+/** A Multisim number as a plain one; NaN where there is no number to read. */
+const siNum = (s: string): number => parseSI(s ?? "") ?? NaN;
 
 /** A point or a symbol-local offset, in LTSpice units. */
 type Pt = [number, number];
@@ -474,12 +484,6 @@ function switchThresholds(p: Params): string {
   return `Von=${v("V_ON", "1")} Voff=${v("V_OFF", "0")} Ron=${v("R_ON", "10m")} Roff=${v("R_OFF", "1G")}`;
 }
 
-/** Normalise a Multisim value for SPICE (µ → u, strip blanks). */
-function si(v: unknown): string {
-  if (v === undefined || v === null || v === "") return "";
-  return String(v).replace(/[μµ]/g, "u").trim();
-}
-
 /** `AC Voltage`/`AC Current` carry a SPICE SIN() source's parameters. */
 function sine(p: Params): string {
   const f = (k: string, d: string) => si(p[k]) || d;
@@ -523,19 +527,6 @@ function lampResistance(p: Params): string {
   const w = parseFloat(si(p["Maximum rated power"]));
   if (!Number.isFinite(u) || !Number.isFinite(w) || w <= 0) return "1k";
   return String(Number((u * u / w).toPrecision(4)));
-}
-
-/** SI-suffixed SPICE number ("1m", "4.7k", "1n") as a plain number. */
-function siNum(s: string): number {
-  const m = /^\s*([-+]?[\d.]+(?:e[-+]?\d+)?)\s*([a-zµ]*)/i.exec(s ?? "");
-  if (!m) return NaN;
-  const mult: Record<string, number> = {
-    t: 1e12, g: 1e9, meg: 1e6, k: 1e3, m: 1e-3, u: 1e-6, µ: 1e-6, n: 1e-9, p: 1e-12, f: 1e-15,
-  };
-  const suf = m[2].toLowerCase();
-  // "meg" before "m": SPICE spells a million "MEG" and a milli "m".
-  const f = suf.startsWith("meg") ? mult.meg : mult[suf[0]] ?? 1;
-  return parseFloat(m[1]) * f;
 }
 
 /**
