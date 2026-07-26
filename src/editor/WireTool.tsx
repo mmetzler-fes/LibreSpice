@@ -12,7 +12,8 @@ import { orthoVertices, outwardAxis, type Axis, type RouteHints } from "@core/ge
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
-import { DRAG_TOUCH_ACTION, isDragPointer } from "./pointerDrag.js";
+import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
+import { grabWire, movedWaypoints, type WireGrab } from "./wireDrag.js";
 import { wireNameTag } from "./wireLabelShape.js";
 
 export interface FlowPoint {
@@ -111,6 +112,14 @@ export function orthoPath(points: FlowPoint[], hints?: RouteHints): string {
 export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, sourceX, sourceY, targetX, targetY, data, selected, markerEnd }: EdgeProps) {
   const circuit = useCircuitStore((s) => s.circuit);
   const nodes = useCircuitStore((s) => s.nodes);
+  const updateEdgeData = useCircuitStore((s) => s.updateEdgeData);
+  const rebuildConnections = useCircuitStore((s) => s.rebuildConnections);
+  const editorMode = useUIStore((s) => s.editorMode);
+  const canvasLocked = useUIStore((s) => s.canvasLocked);
+  const { screenToFlowPosition } = useReactFlow();
+  /** The point being dragged, while it is being dragged. */
+  const [held, setHeld] = useState<{ grab: WireGrab; at: FlowPoint } | null>(null);
+  const heldRef = useRef<{ grab: WireGrab; at: FlowPoint } | null>(null);
   // Re-render the net-id label when net assignments change.
   useCircuitStore((s) => s.netVersion);
   const symbolNorm = useUIStore((s) => s.symbolNorm);
@@ -133,7 +142,10 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
     return node ? pinOutwardAxis(node, handleId, symbolNorm) : undefined;
   };
 
-  const waypoints = (data?.waypoints as FlowPoint[] | undefined) ?? [];
+  const stored = (data?.waypoints as FlowPoint[] | undefined) ?? [];
+  // While a point of this wire is being dragged the route is drawn through it,
+  // and only the release writes it down.
+  const waypoints = held ? movedWaypoints(stored, held.grab, held.at) : stored;
   // When an endpoint taps an existing wire, draw only to the junction point
   // instead of routing all the way to the (electrical) target port.
   const sourceTap = data?.sourceTap as FlowPoint | undefined;
@@ -164,6 +176,53 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   const anchor = pointAtT(verts, 0.5);
   const showBox = !!netLabel;
 
+  /**
+   * Take hold of the point of the wire that was pressed and move it.
+   *
+   * The wire is re-routed *through* that point: what the user aims at is one
+   * spot of the drawn line, not a corner of an abstract path, so the grabbed
+   * spot becomes a waypoint and the right angles fall where they may around it.
+   *
+   * Only after the pointer has actually travelled a grid step — a plain click
+   * still selects the wire and nothing moves. On release the wire is an
+   * ordinary hand-routed one: `autoRoute` and `diagonal` both go, because both
+   * say "this path is the file's, not the user's", and it no longer is. Moving
+   * a part would otherwise throw the correction away again.
+   */
+  const onGrab = (e: React.PointerEvent) => {
+    if (editorMode !== "select" || canvasLocked || !isDragPointer(e)) return;
+    const from = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const grab = grabWire(verts, waypoints, from);
+    if (!grab) return;
+    e.stopPropagation();
+    let moving = false;
+    trackPointerDrag(
+      e,
+      (ev) => {
+        const at = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        if (!moving && Math.hypot(at.x - from.x, at.y - from.y) < GRID) return;
+        moving = true;
+        const next = { grab, at: { x: snap(at.x), y: snap(at.y) } };
+        heldRef.current = next;
+        setHeld(next);
+      },
+      () => {
+        const done = heldRef.current;
+        heldRef.current = null;
+        setHeld(null);
+        if (!done) return;
+        updateEdgeData(id, {
+          waypoints: movedWaypoints(stored, done.grab, done.at),
+          autoRoute: undefined,
+          diagonal: undefined,
+        });
+        // A name finds its net by lying on a wire, so a wire that has moved can
+        // have taken one with it or left one behind (see anchorNets).
+        setTimeout(() => rebuildConnections(), 0);
+      },
+    );
+  };
+
   return (
     <>
       <BaseEdge
@@ -171,6 +230,18 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         path={path}
         markerEnd={markerEnd}
         style={{ stroke: selected ? theme.accent : theme.wireStroke, strokeWidth: 2 }}
+      />
+      {/* The grab area: wider than the drawn line, and invisible. A 2 px line is
+          not something a finger can hit, and the same path serves the pointer for
+          both the correction drag and React Flow's own click-to-select. */}
+      <path
+        d={path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={14}
+        pointerEvents="stroke"
+        onPointerDown={onGrab}
+        style={{ ...DRAG_TOUCH_ACTION, cursor: editorMode === "select" && !canvasLocked ? "move" : undefined }}
       />
       {showBox && netLabel && (() => {
         // The tag is drawn relative to the anchor so the whole group can carry
