@@ -219,6 +219,7 @@ const TYPES: Record<string, {
 
   D_FF: { name: "D Flip-Flop" },
   JK_FF: { name: "JK Flip-Flop" },
+  VOLTAGE_CONTROLLED_VOLTAGE_SOURCE: { name: "Voltage Controlled Voltage Source", params: { Gain: 1 } },
 
   // Measuring instruments are not parts of the circuit, but leaving them out
   // takes their node with them. Each becomes the thing SPICE measures with: an

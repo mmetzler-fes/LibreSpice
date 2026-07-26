@@ -323,6 +323,17 @@ const TYPES: Record<string, PartType> = {
     value: () => "spdt", attrs: ["Prefix X", "SpiceModel spdt"],
     spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}`,
   },
+  // The dependent source SPICE has as a primitive (`E`), wrapped in a `.subckt`
+  // so it can be a part with named pins like everything else. Multisim numbers
+  // its four connections and its template says which is which:
+  // `e%p %t4 %t3 %t2 %t1 #1` — the right-hand pair is the output, the left the
+  // control, and slot 1 is the gain.
+  "Voltage Controlled Voltage Source": {
+    sym: "vcvs", prefix: "E", forcePrefix: "X", pins: ["4", "3", "2", "1"],
+    value: () => "vcvs", attrs: ["Prefix X", "SpiceModel vcvs"],
+    spiceLine: (p) => `Gain=${si(p.Gain) || "1"}`,
+  },
+
   "Voltage Controlled SPST": {
     sym: "vcspst", prefix: "S", forcePrefix: "X", pins: ["inA", "outA", "ctrlp", "ctrln"],
     value: () => "vcspst", attrs: ["Prefix X", "SpiceModel vcspst"],
@@ -439,6 +450,8 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   spst: [[0, 0], [112, 0]],
   spdt: [[0, 0], [112, -48], [112, 0]],
   vcspst: [[0, 0], [128, 0], [48, 64], [80, 64]],
+  // src/sym/vcvs.asy, in SpiceOrder: output pair right, control pair left.
+  vcvs: [[48, 0], [48, 112], [0, 0], [0, 112]],
   vcspdt: [[0, 0], [128, -16], [128, 16], [48, 80], [80, 80]],
   // library/sym/74LS93.asy, in SpiceOrder: CKA CKB R01 R02 QA QB QC QD.
   "74LS93": [[-48, -48], [-48, -16], [-48, 16], [-48, 48], [48, -48], [48, -16], [48, 16], [48, 48]],

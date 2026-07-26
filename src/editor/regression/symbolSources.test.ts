@@ -137,6 +137,60 @@ const CASES: Case[] = [
       }
     },
   },
+  {
+    name: "each library symbol's pins match its .subckt's terminals",
+    run: async (fail) => {
+      // A `.subckt` part is wired by *position*: the `X` line lists the symbol's
+      // pins in SpiceOrder and ngspice matches them against the `.subckt` header
+      // one for one. The two files that decide this sit in different trees, and
+      // nothing but this connects them — swap two terminals in either and the
+      // circuit still builds, still simulates and is quietly wrong. That is the
+      // one failure a reader has no way of seeing.
+      const { fs, path, proc } = await nodeApi();
+      const subDir = path.join(proc.cwd(), "library/sub");
+      if (!fs.existsSync(subDir)) return fail("library/sub is missing");
+      for (const asy of await asyFiles("src/sym")) {
+        const text: string = fs.readFileSync(asy, "latin1");
+        const model = /^SYMATTR\s+SpiceModel\s+(\S+)/mi.exec(text)?.[1];
+        if (!model) continue;
+        const lib = path.join(subDir, `${model}.lib`);
+        if (!fs.existsSync(lib)) continue;
+        // The symbol's pin names, ordered by SpiceOrder — the order the X line
+        // is written in.
+        const pins: { name: string; order: number }[] = [];
+        let name: string | null = null;
+        for (const line of text.split(/\r?\n/)) {
+          const n = /^PINATTR\s+PinName\s+(\S+)/i.exec(line);
+          if (n) { name = n[1]; continue; }
+          const o = /^PINATTR\s+SpiceOrder\s+(\d+)/i.exec(line);
+          if (o && name) { pins.push({ name, order: +o[1] }); name = null; }
+        }
+        const ordered = pins.sort((a, b) => a.order - b.order).map((p) => p.name);
+        // `.subckt <name> <terminals…> [PARAMS: …]` — the terminals stop at the
+        // first `params:` or `name=value`.
+        const head = new RegExp(`^\\.subckt\\s+${model}\\s+(.*)$`, "mi").exec(fs.readFileSync(lib, "latin1"));
+        if (!head) { fail(`${path.basename(lib)} has no .subckt ${model}`); continue; }
+        const terminals: string[] = [];
+        for (const t of head[1].trim().split(/\s+/)) {
+          if (/^params:$/i.test(t) || t.includes("=")) break;
+          terminals.push(t);
+        }
+        if (ordered.length !== terminals.length) {
+          fail(`${model}: symbol has ${ordered.length} pins (${ordered.join(",")}), .subckt has ${terminals.length} (${terminals.join(",")})`);
+          continue;
+        }
+        // Where the `.subckt` names its terminals the way the symbol names its
+        // pins, the names are compared too — a mismatch there is a swap rather
+        // than a naming choice. A `.subckt` that merely numbers them (the
+        // comparator does) carries no such information, so the count is all
+        // there is to check.
+        const numbered = terminals.every((t) => /^\d+$/.test(t));
+        if (!numbered && ordered.join(",").toUpperCase() !== terminals.join(",").toUpperCase()) {
+          fail(`${model}: symbol order ${ordered.join(",")} vs .subckt ${terminals.join(",")}`);
+        }
+      }
+    },
+  },
 ];
 
 export async function runSymbolSourceTests(): Promise<TestReport> {

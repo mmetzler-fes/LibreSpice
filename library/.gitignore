@@ -45,6 +45,10 @@
 # sheet with a Multisim `3 Terminal Opamp` now references it by name.
 !/sub/opamp.lib
 !/sym/opamp.asy
+# Die gesteuerte Spannungsquelle: SPICE kann sie als Grundelement, aber als Teil
+# auf dem Blatt braucht sie ein Symbol mit Klemmennamen -- und die konvertierten
+# Multisim-Blaetter nennen sie beim Namen.
+!/sub/vcvs.lib
 # The ideal comparator: same drawing, output levels on the instance instead of
 # on supply pins — referenced by name from the converted Dual-Slope ADC.
 !/sub/comparator.lib

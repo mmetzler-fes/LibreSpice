@@ -1,0 +1,17 @@
+* Spannungsgesteuerte Spannungsquelle (VCVS).
+*
+* SPICE kann das als Grundelement -- `E` ist genau diese Quelle -- und trotzdem
+* steht hier ein Subcircuit darum. Der Grund ist der Anschluss: ein `E` traegt
+* seine vier Klemmen als nackte Knotenliste, waehrend jedes Bauteil dieses
+* Editors ueber ein Symbol mit benannten Pins angeschlossen wird. Der Umweg
+* kostet eine Zeile und gibt dem Teil dafuer Namen, die auf dem Blatt stehen.
+*
+* Pins:  OP ON = Klemmenpaar,  CP CN = Steuerpaar
+*
+* Gain ist dimensionslos: die Ausgangsspannung ist das Gain-fache der Spannung
+* zwischen CP und CN. Multisim nennt denselben Wert "Voltage gain (E)".
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt vcvs OP ON CP CN PARAMS: Gain=1
+E1 OP ON CP CN {Gain}
+.ends vcvs
