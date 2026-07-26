@@ -78,6 +78,38 @@ export const MOSFETNSymbol = () => (
   </g>
 );
 
+/**
+ * Junction FET, N-channel: the channel as a bar with the gate arrow *into* it.
+ *
+ * The arrow direction is the whole difference between the two channel types, and
+ * it is the gate-junction diode's direction — into the channel for N, out of it
+ * for P. Drawn with a solid channel, unlike the MOSFET's dashed one, because that
+ * is the physical difference: the JFET's channel is there without a gate voltage.
+ */
+export const JFETNSymbol = () => (
+  <g>
+    <line x1="0" y1="-40" x2="0" y2="40" stroke="currentColor" strokeWidth="2" />
+    <line x1="-40" y1="0" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="-26" x2="30" y2="-26" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="30" y1="-26" x2="30" y2="-40" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="26" x2="30" y2="26" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="30" y1="26" x2="30" y2="40" stroke="currentColor" strokeWidth="1.5" />
+    <polygon points="-12,-5 -12,5 -2,0" fill="currentColor" />
+  </g>
+);
+
+export const JFETPSymbol = () => (
+  <g>
+    <line x1="0" y1="-40" x2="0" y2="40" stroke="currentColor" strokeWidth="2" />
+    <line x1="-40" y1="0" x2="0" y2="0" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="-26" x2="30" y2="-26" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="30" y1="-26" x2="30" y2="-40" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="26" x2="30" y2="26" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="30" y1="26" x2="30" y2="40" stroke="currentColor" strokeWidth="1.5" />
+    <polygon points="-14,0 -4,-5 -4,5" fill="currentColor" />
+  </g>
+);
+
 export const VoltageSourceSymbol = () => (
   <g>
     <circle cx="0" cy="0" r="20" fill="none" stroke="currentColor" strokeWidth="1.5" />

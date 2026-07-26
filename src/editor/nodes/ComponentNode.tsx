@@ -16,6 +16,8 @@ import {
   BJTNPNSymbol,
   BJTPNPSymbol,
   MOSFETNSymbol,
+  JFETNSymbol,
+  JFETPSymbol,
   VoltageSourceSymbol,
   CurrentSourceSymbol,
   SineSourceSymbol,
@@ -53,6 +55,8 @@ export type ComponentType =
   | "bjt_pnp"
   | "mosfet_n"
   | "mosfet_p"
+  | "jfet_n"
+  | "jfet_p"
   | "vsource"
   | "isource"
   | "sinesource"
@@ -214,6 +218,8 @@ const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   bjt_pnp: BJTPNPSymbol,
   mosfet_n: MOSFETNSymbol,
   mosfet_p: MOSFETNSymbol,
+  jfet_n: JFETNSymbol,
+  jfet_p: JFETPSymbol,
   vsource: VoltageSourceSymbol,
   isource: CurrentSourceSymbol,
   sinesource: SineSourceSymbol,

@@ -19,7 +19,7 @@ import {
 import type { ComponentType, ComponentNodeData } from "./nodes/ComponentNode.js";
 import {
   ResistorSymbol, CapacitorSymbol, InductorSymbol, DiodeSymbol, LEDSymbol,
-  BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol,
+  BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol, JFETNSymbol, JFETPSymbol,
   VoltageSourceSymbol, CurrentSourceSymbol, SineSourceSymbol, PulseSourceSymbol, PWLSourceSymbol,
   GroundSymbol, LogicGateSymbol, DFlipFlopSymbol,
 } from "./nodes/symbols/Symbols.js";
@@ -29,6 +29,7 @@ const FALLBACK: Partial<Record<ComponentType, React.FC>> = {
   resistor: ResistorSymbol, capacitor: CapacitorSymbol, inductor: InductorSymbol,
   diode: DiodeSymbol, led: LEDSymbol, zener: DiodeSymbol, schottky: DiodeSymbol,
   bjt_npn: BJTNPNSymbol, bjt_pnp: BJTPNPSymbol, mosfet_n: MOSFETNSymbol, mosfet_p: MOSFETNSymbol,
+  jfet_n: JFETNSymbol, jfet_p: JFETPSymbol,
   vsource: VoltageSourceSymbol, isource: CurrentSourceSymbol,
   sinesource: SineSourceSymbol, pulsesource: PulseSourceSymbol, ground: GroundSymbol,
 };

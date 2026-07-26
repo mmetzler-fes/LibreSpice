@@ -28,6 +28,7 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   diode: "diode", LED: "led", zener: "zener", schottky: "schottky",
   npn: "bjt_npn", pnp: "bjt_pnp",
   nmos: "mosfet_n", pmos: "mosfet_p",
+  njf: "jfet_n", pjf: "jfet_p",
   voltage: "vsource", current: "isource",
   // `opamp2` and the UniversalOpAmp names are the *five*-terminal part, the one
   // with supply pins. LTSpice's plain `opamp` is the three-terminal ideal one and
@@ -76,6 +77,7 @@ export const TYPE_TO_SYMBOL: Record<string, string> = {
   diode: "diode", led: "LED", zener: "zener", schottky: "schottky",
   bjt_npn: "npn", bjt_pnp: "pnp",
   mosfet_n: "nmos", mosfet_p: "pmos",
+  jfet_n: "njf", jfet_p: "pjf",
   vsource: "voltage", isource: "current",
   sinesource: "voltage", pulsesource: "voltage",
   opamp: "UniversalOpAmp2",
@@ -125,6 +127,10 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
   bjt_pnp: [{ handle: "c", dx: 64, dy: 0 }, { handle: "b", dx: 0, dy: 48 }, { handle: "e", dx: 64, dy: 96 }],
   mosfet_n: [{ handle: "d", dx: 48, dy: 0 }, { handle: "g", dx: 0, dy: 80 }, { handle: "s", dx: 48, dy: 96 }],
   mosfet_p: [{ handle: "d", dx: 48, dy: 0 }, { handle: "g", dx: 0, dy: 80 }, { handle: "s", dx: 48, dy: 96 }],
+  // The JFET's terminals sit like the BJT's, which is how njf.asy draws them and
+  // what the Multisim converter has assumed all along (see its own PIN_OFFSETS).
+  jfet_n: [{ handle: "d", dx: 64, dy: 0 }, { handle: "g", dx: 0, dy: 48 }, { handle: "s", dx: 64, dy: 96 }],
+  jfet_p: [{ handle: "d", dx: 64, dy: 0 }, { handle: "g", dx: 0, dy: 48 }, { handle: "s", dx: 64, dy: 96 }],
   // UniversalOpAmp2 terminals (LTSpice symbol-local, origin at the centre):
   //   In+ (-32,16)  In- (-32,-16)  V+ (0,-32)  V- (0,32)  OUT (32,0)
   opamp: [

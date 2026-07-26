@@ -51,19 +51,38 @@ const off = (got: number, want: number) => Math.abs(got - want) / Math.abs(want)
 const CASES: Case[] = [
   { name: "every shipped .model runs without killing ngspice", run: async (fail) => {
     const text = await shippedModels();
-    const models = [...text.matchAll(/^\.model\s+(\S+)\s+(NPN|PNP|NMOS|PMOS)\b/gim)]
+    const models = [...text.matchAll(/^\.model\s+(\S+)\s+(NPN|PNP|NMOS|PMOS|NJF|PJF)\b/gim)]
       .map((m) => ({ name: m[1], kind: m[2].toUpperCase() }));
     if (models.length === 0) { fail("no .model lines found in library/sub/Discretes.lib"); return; }
     for (const { name, kind } of models) {
+      // A JFET conducts at Vgs = 0 and pinches off the other way round, so its
+      // rig grounds the gate rather than driving it.
       const dev = kind === "NPN" || kind === "PNP"
         ? `Q1 c b 0 ${name}\nVC c 0 DC ${kind === "NPN" ? 5 : -5}\nIB ${kind === "NPN" ? "0 b" : "b 0"} DC 10u`
-        : `M1 d g 0 0 ${name}\nVG g 0 DC ${kind === "NMOS" ? 5 : -5}\nVD d 0 DC ${kind === "NMOS" ? 5 : -5}`;
+        : kind === "NJF" || kind === "PJF"
+          ? `J1 d 0 0 ${name}\nVD d 0 DC ${kind === "NJF" ? 5 : -5}`
+          : `M1 d g 0 0 ${name}\nVG g 0 DC ${kind === "NMOS" ? 5 : -5}\nVD d 0 DC ${kind === "NMOS" ? 5 : -5}`;
       try {
         await sim(`* run ${name}\n${dev}\n${text}\n.options savecurrents\n.op\n.end\n`);
       } catch (e) {
         fail(`${name} (${kind}) did not simulate: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+  } },
+
+  { name: "MMBF4393L meets its datasheet Idss and rds(on)", run: async (fail) => {
+    const text = await shippedModels();
+    // Idss 5…30 mA at Vds = 15 V, Vgs = 0 (onsemi MMBF4393), fitted to ~20 mA.
+    const d = await sim(`* idss\nJ1 d 0 0 MMBF4393L\nVD d 0 DC 15\n${text}\n.options savecurrents\n.op\n.end\n`);
+    const idss = Math.abs(last(d, "i(vd)"));
+    if (!(idss > 5e-3 && idss < 30e-3)) {
+      fail(`Idss at Vds=15 V is ${(idss * 1e3).toFixed(1)} mA, outside the datasheet band 5…30 mA`);
+    }
+    // rds(on) <= 100 Ohm at Vgs = 0, read at a Vds small enough to stay ohmic.
+    // This is the figure the Wien oscillator's amplitude control depends on.
+    const r = await sim(`* rds\nJ1 d 0 0 MMBF4393L\nVD d 0 DC 0.1\n${text}\n.options savecurrents\n.op\n.end\n`);
+    const rds = 0.1 / Math.abs(last(r, "i(vd)"));
+    if (!(rds > 0 && rds <= 100)) fail(`rds(on) is ${rds.toFixed(1)} Ohm, above the datasheet limit 100 Ohm`);
   } },
 
   { name: "2N2222A meets its datasheet hFE and Vce(sat)", run: async (fail) => {

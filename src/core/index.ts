@@ -13,8 +13,9 @@ export {
   LED,
   BJT,
   MOSFET,
+  JFET,
 } from "./components/semiconductors/Semiconductors.js";
-export type { LEDColor, BJTType, MOSFETType } from "./components/semiconductors/Semiconductors.js";
+export type { LEDColor, BJTType, MOSFETType, JFETType } from "./components/semiconductors/Semiconductors.js";
 
 export {
   Source,

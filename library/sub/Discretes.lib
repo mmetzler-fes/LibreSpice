@@ -82,3 +82,15 @@
 *             platziert, also eine gewoehnliche Z-Diode mit zwei Anschluessen.
 * Erreicht:   BV auf den Nennwert 6,2 V gesetzt, IBV auf den Teststrom 5 mA.
 .model BZB84B6V2 D(IS=1e-14 N=1.1 RS=2 CJO=90p BV=6.2 IBV=5m)
+
+* MMBF4393L — N-Kanal-Sperrschicht-FET (onsemi MMBF4393, 2N4393 im SOT-23)
+* Datenblatt: Vgs(off) -0,5..-3,0 V; Idss 5..30 mA @ Vds=15V/Vgs=0;
+*             rds(on) <= 100 Ohm @ Vgs=0; Ciss 14 pF
+* Erreicht:   Idss = 19,58 mA; rds(on) = 42,1 Ohm; bei Vgs=-3 V sperrt er
+* Idss = BETA*VTO^2, rds(on) = 1/(2*BETA*|VTO|) + RD + RS — beide Eckwerte
+* haengen an denselben zwei Parametern, deshalb sind sie zusammen gefittet.
+* Der Kanalwiderstand ist hier die Groesse, auf die es ankommt: der Wien-
+* Oszillator regelt seine Amplitude damit (9_4_3_Wien_Oszillator_Amp_Controled).
+.model MMBF4393L NJF(
++ VTO=-1.42 BETA=9.1m LAMBDA=6.5m RD=1 RS=1
++ CGS=5p CGD=4.1p PB=0.5 IS=33.6f)

@@ -3,7 +3,7 @@ import { AsySymbolView } from "@sym/AsySymbol.js";
 import { useUIStore } from "@store/uiStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import {
-  BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol, GroundSymbol,
+  BJTNPNSymbol, BJTPNPSymbol, MOSFETNSymbol, JFETNSymbol, JFETPSymbol, GroundSymbol,
   VoltageSourceSymbol, SineSourceSymbol, PulseSourceSymbol,
 } from "./nodes/symbols/Symbols.js";
 
@@ -12,6 +12,8 @@ const FALLBACK_SYMBOLS: Partial<Record<ComponentType, React.FC>> = {
   bjt_pnp: BJTPNPSymbol,
   mosfet_n: MOSFETNSymbol,
   mosfet_p: MOSFETNSymbol,
+  jfet_n: JFETNSymbol,
+  jfet_p: JFETPSymbol,
   ground: GroundSymbol,
   vsource: VoltageSourceSymbol,
   sinesource: SineSourceSymbol,

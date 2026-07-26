@@ -17,8 +17,8 @@ const TYPE_TO_CLASS: Record<string, ModelDeviceClass> = {
   NMOS: "mosfet_n",
   PMOS: "mosfet_p",
   VDMOS: "mosfet_n",
-  NJF: "jfet",
-  PJF: "jfet",
+  NJF: "jfet_n",
+  PJF: "jfet_p",
   R: "resistor",
   C: "capacitor",
   L: "inductor",
@@ -38,7 +38,7 @@ const KNOWN_PARAMS: Partial<Record<ModelDeviceClass, Set<string>>> = {
   diode: new Set(["IS", "RS", "N", "CJO", "CJ0", "M", "VJ", "BV", "IBV", "TT", "EG", "XTI", "FC", "KF", "AF"]),
   bjt_npn: new Set(["IS", "BF", "BR", "NF", "NR", "VAF", "VAR", "IKF", "IKR", "ISE", "ISC", "NE", "NC", "RB", "RC", "RE", "CJE", "CJC", "CJS", "VJE", "VJC", "TF", "TR", "EG", "XTI", "XTB"]),
   mosfet_n: new Set(["VTO", "KP", "GAMMA", "PHI", "LAMBDA", "RD", "RS", "RG", "CBD", "CBS", "CGSO", "CGDO", "CGBO", "TOX", "NSUB", "LEVEL", "W", "L", "RDS", "VDS", "RG_", "MFG"]),
-  jfet: new Set(["VTO", "BETA", "LAMBDA", "RD", "RS", "CGS", "CGD", "PB", "IS", "KF", "AF"]),
+  jfet_n: new Set(["VTO", "BETA", "LAMBDA", "RD", "RS", "CGS", "CGD", "PB", "IS", "KF", "AF"]),
   resistor: new Set(["R", "TC1", "TC2", "TCE"]),
   capacitor: new Set(["C", "TC1", "TC2", "VC1", "VC2"]),
   inductor: new Set(["L", "TC1", "TC2"]),
@@ -46,6 +46,7 @@ const KNOWN_PARAMS: Partial<Record<ModelDeviceClass, Set<string>>> = {
 
 KNOWN_PARAMS.bjt_pnp = KNOWN_PARAMS.bjt_npn;
 KNOWN_PARAMS.mosfet_p = KNOWN_PARAMS.mosfet_n;
+KNOWN_PARAMS.jfet_p = KNOWN_PARAMS.jfet_n;
 
 /**
  * Parses raw LTSpice library text (one or more `.model` / `.subckt` directives)

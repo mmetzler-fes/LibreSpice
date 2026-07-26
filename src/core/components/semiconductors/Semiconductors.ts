@@ -244,3 +244,73 @@ export class MOSFET extends Semiconductor {
     return m;
   }
 }
+
+export type JFETType = "NJF" | "PJF";
+
+/**
+ * Junction FET — three terminals and a `J` line, the plain SPICE primitive.
+ *
+ * Unlike the MOSFET it has no bulk terminal: the gate *is* the junction, so the
+ * netlist line is drain, gate, source and nothing else. The Multisim corpus needs
+ * it for the amplitude control of the Wien oscillators, where the JFET works as a
+ * voltage-controlled resistor in the feedback path.
+ */
+export class JFET extends Semiconductor {
+  type: JFETType;
+
+  constructor(id: string, label: string, position?: Point, type: JFETType = "NJF", model = "JNJF") {
+    super(id, label, model, position);
+    this.type = type;
+  }
+
+  protected createPorts(): Port[] {
+    return [
+      new Port(`${this.id}-d`, "drain", { x: 0, y: -40 }),
+      new Port(`${this.id}-g`, "gate", { x: -40, y: 0 }),
+      new Port(`${this.id}-s`, "source", { x: 0, y: 40 }),
+    ];
+  }
+
+  getNetlistLine(): string {
+    const d = this.nodeOrGnd(this.ports[0].netId);
+    const g = this.nodeOrGnd(this.ports[1].netId);
+    const s = this.nodeOrGnd(this.ports[2].netId);
+    return `${this.spiceRef("J")} ${d} ${g} ${s} ${this.model}`;
+  }
+
+  /**
+   * Generic JFET fallback, used when the model name is defined nowhere else.
+   *
+   * A 2N3819-class small-signal device for N-channel and a 2N5460 for P-channel:
+   * `VTO` is the pinch-off voltage (negative for N-channel, positive for P), and
+   * `BETA` sets Idss = BETA·VTO². These are what an unqualified "JFET" in a
+   * teaching schematic means, and they matter for the one thing the corpus uses a
+   * JFET for: below pinch-off the channel is a resistor of Rds ≈ 1/(2·BETA·|VTO|),
+   * a few hundred ohms here, which is what regulates the oscillator's amplitude.
+   */
+  getModelDirective(): string | null {
+    return this.type === "PJF"
+      ? `.model ${this.model} PJF(VTO=2.5 BETA=1.3m LAMBDA=2.5m RD=1 RS=1 CGS=4p CGD=4p PB=0.5 IS=100f)`
+      : `.model ${this.model} NJF(VTO=-2.5 BETA=1.3m LAMBDA=2.5m RD=1 RS=1 CGS=4p CGD=4p PB=0.5 IS=100f)`;
+  }
+
+  getProperties(): Property[] {
+    return [
+      { key: "label", label: "Reference", value: this.label, type: "string" },
+      { key: "type", label: "Type", value: this.type, type: "select", options: ["NJF", "PJF"] },
+      { key: "model", label: "Model", value: this.model, type: "string" },
+    ];
+  }
+
+  setProperty(key: string, value: string | number): void {
+    if (key === "label") this.label = String(value);
+    if (key === "type") this.type = value as JFETType;
+    if (key === "model") this.model = String(value);
+  }
+
+  clone(): JFET {
+    const j = new JFET(this.id, this.label, { ...this.position }, this.type, this.model);
+    j.rotation = this.rotation;
+    return j;
+  }
+}

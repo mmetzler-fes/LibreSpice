@@ -21,6 +21,8 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "bjt_pnp", label: "PNP BJT", category: "Semiconductors", defaultLabel: "Q2", description: "PNP Bipolar Junction Transistor" },
   { type: "mosfet_n", label: "NMOS", category: "Semiconductors", defaultLabel: "M1", description: "N-Channel MOSFET" },
   { type: "mosfet_p", label: "PMOS", category: "Semiconductors", defaultLabel: "M2", description: "P-Channel MOSFET" },
+  { type: "jfet_n", label: "NJFET", category: "Semiconductors", defaultLabel: "J1", description: "N-Channel Junction FET" },
+  { type: "jfet_p", label: "PJFET", category: "Semiconductors", defaultLabel: "J2", description: "P-Channel Junction FET" },
   { type: "vsource", label: "Voltage Source", category: "Sources", defaultLabel: "V1", description: "Voltage Source (DC / Sine / Pulse — selectable)" },
   { type: "isource", label: "I Source", category: "Sources", defaultLabel: "I1", description: "Current Source" },
   { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },

@@ -1,7 +1,7 @@
 import { Resistor } from "@core/components/passives/Resistor.js";
 import { Capacitor } from "@core/components/passives/Capacitor.js";
 import { Inductor } from "@core/components/passives/Inductor.js";
-import { Diode, LED, Zener, Schottky, BJT, MOSFET } from "@core/components/semiconductors/Semiconductors.js";
+import { Diode, LED, Zener, Schottky, BJT, MOSFET, JFET } from "@core/components/semiconductors/Semiconductors.js";
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
 import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector, Junction } from "@core/components/special/Special.js";
 import { LogicGate, GATE_LABELS } from "@core/components/digital/LogicGate.js";
@@ -37,6 +37,8 @@ export function createSpiceComponent(
     case "bjt_pnp":     return new BJT(id, label, pos, "PNP");
     case "mosfet_n":    return new MOSFET(id, label, pos, "NMOS");
     case "mosfet_p":    return new MOSFET(id, label, pos, "PMOS");
+    case "jfet_n":      return new JFET(id, label, pos, "NJF");
+    case "jfet_p":      return new JFET(id, label, pos, "PJF");
     case "vsource":     return new VoltageSource(id, label, pos);
     case "isource":     return new CurrentSource(id, label, pos);
     case "sinesource":  return new SineSource(id, label, pos);
@@ -70,7 +72,7 @@ export function createSubcircuitComponent(
 const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
   resistor: "R", capacitor: "C", capacitor_polarized: "C", inductor: "L", diode: "D", led: "D",
   zener: "D", schottky: "D", opamp: "U", jumper: "R",
-  bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M",
+  bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M", jfet_n: "J", jfet_p: "J",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
   netlabel: "NET", netconnector: "PORT", subcircuit: "X", junction: "J",
 };

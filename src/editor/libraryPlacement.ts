@@ -5,8 +5,8 @@ import type { PendingLibraryPlacement } from "@store/uiStore.js";
 
 /**
  * Maps a parsed model's device class onto an editor component type. Returns null
- * for classes we have no placeable symbol for (e.g. JFET, unknown) – those
- * entries are still registered into the netlist but cannot be drag-placed.
+ * for classes we have no placeable symbol for (`unknown`, the switch models) –
+ * those entries are still registered into the netlist but cannot be drag-placed.
  */
 export function deviceClassToComponentType(cls: ModelDeviceClass): ComponentType | null {
   switch (cls) {
@@ -15,6 +15,8 @@ export function deviceClassToComponentType(cls: ModelDeviceClass): ComponentType
     case "bjt_pnp": return "bjt_pnp";
     case "mosfet_n": return "mosfet_n";
     case "mosfet_p": return "mosfet_p";
+    case "jfet_n": return "jfet_n";
+    case "jfet_p": return "jfet_p";
     case "resistor": return "resistor";
     case "capacitor": return "capacitor";
     case "inductor": return "inductor";

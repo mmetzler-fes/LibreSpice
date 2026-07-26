@@ -79,6 +79,8 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   bjt_pnp: ["c", "b", "e"],
   mosfet_n: ["d", "g", "s"],
   mosfet_p: ["d", "g", "s"],
+  jfet_n: ["d", "g", "s"],
+  jfet_p: ["d", "g", "s"],
   opamp: ["inp", "inn", "vcc", "vee", "out"],
   ground: ["gnd"],
   junction: ["j"],
@@ -141,6 +143,16 @@ const FALLBACK_PINS: Partial<Record<ComponentType, LocalPin[]>> = {
     { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
   ],
   mosfet_p: [
+    { handleId: "d", order: 1, px: NODE_SIZE / 2, py: 0 },
+    { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
+    { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
+  ],
+  jfet_n: [
+    { handleId: "d", order: 1, px: NODE_SIZE / 2, py: 0 },
+    { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
+    { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
+  ],
+  jfet_p: [
     { handleId: "d", order: 1, px: NODE_SIZE / 2, py: 0 },
     { handleId: "g", order: 2, px: 0, py: NODE_SIZE / 2 },
     { handleId: "s", order: 3, px: NODE_SIZE / 2, py: NODE_SIZE },
