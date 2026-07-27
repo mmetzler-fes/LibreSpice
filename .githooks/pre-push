@@ -1,0 +1,19 @@
+#!/bin/sh
+# Refuse to push the converted Multisim schematics.
+#
+# They are third-party teaching circuits: versioned locally (in their own
+# repository under examples/Multisim_converted/) but never published. The
+# .gitignore already keeps them out of the index; this is the second lock, for
+# the day someone reaches for `git add -f`.
+if git diff --cached --name-only HEAD 2>/dev/null | grep -q '^examples/Multisim_converted/'; then
+  echo "pre-push: examples/Multisim_converted/ darf nicht gepusht werden." >&2
+  exit 1
+fi
+for ref in $(git rev-list --all 2>/dev/null | head -400); do
+  if git ls-tree -r --name-only "$ref" 2>/dev/null | grep -q '^examples/Multisim_converted/'; then
+    echo "pre-push: examples/Multisim_converted/ steckt noch in der Historie ($ref)." >&2
+    echo "          Erst mit einem Rewrite entfernen, dann pushen." >&2
+    exit 1
+  fi
+done
+exit 0

@@ -16,7 +16,10 @@ dist/
 examples/*
 # …außer der Brückenschaltung, die eine Galerie-Karte auf der Startseite füllt.
 !examples/Brueckenschaltung1.asc
-# …und der Konverter-Ausgabe: sie ist zwar erzeugt, wird aber nach jedem Lauf
-# im Diff durchgesehen, und das geht nur, solange sie getrackt ist.
-!examples/Multisim_converted/
-!examples/Multisim_converted/*
+# Die Konverter-Ausgabe bleibt draussen. Sie war einmal getrackt, damit sich das
+# Ergebnis nach jedem Lauf im Diff durchsehen laesst — aber die Schaltungen
+# stammen von Dritten und gehoeren nicht in ein oeffentliches Repository. Sie
+# werden weiterhin versioniert, nur in einem eigenen Repository im Ordner selbst
+# (examples/Multisim_converted/.git), das nie gepusht wird. `npm run
+# convert:multisim` erzeugt sie jederzeit aus den Quellen neu.
+examples/Multisim_converted/

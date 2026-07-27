@@ -120,6 +120,22 @@ export async function runConvertedNetlistTests(): Promise<TestReport> {
       ? fs.readdirSync(dir).filter((n: string) => n.endsWith(".asc")).sort()
       : [];
 
+    // An empty directory is a failure, not a pass.
+    //
+    // The converted schematics are no longer tracked — they are third-party
+    // circuits, versioned in their own repository beside this one — so a fresh
+    // clone has none of them until `npm run convert:multisim` has run. Left to
+    // iterate over nothing, this suite would report "0 of 0 passed" in green and
+    // the whole guard against dead sources and lost gate inputs would be gone
+    // without a word. So it says so instead.
+    total++;
+    if (files.length === 0) {
+      failures.push({
+        name: "the converted schematics are there to check",
+        reason: "examples/Multisim_converted is empty — erst `npm run convert:multisim` laufen lassen",
+      });
+    }
+
     for (const file of files) {
       total++;
       const name = `no dead source in ${file}`;
