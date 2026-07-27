@@ -489,6 +489,84 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       fail("a dragged tag is measured where it is drawn", `threw: ${(e as Error).message}`);
     }
 
+    // ── 4. A name stays on its wire when the wire moves ────────────────────
+    // The claim the binding exists for, over every bundled schematic: move a
+    // part, and every name still names the net it named before.
+    //
+    // Before it, a name was a coordinate and its net was whatever lay beneath —
+    // so re-routing a wire slid the geometry out from under names nobody had
+    // touched. They fell onto whatever was left there, or onto nothing, and a
+    // connection vanished without a gesture that meant it to. Checked by *name*
+    // rather than by net id, because the ids are re-derived on every rebuild and
+    // the question is whether `Ub` still means the node it meant.
+    for (const file of files) {
+      total++;
+      const name = `a name keeps its net when a part moves: ${file}`;
+      try {
+        st().clearCircuit();
+        st().loadFromAsc(fs.readFileSync(path.join(dir, file), "latin1"));
+        await tick(); await tick();
+        st().rebuildConnections();
+        await tick();
+
+        /** Which named net each name sits on — by the ports on it, not its id. */
+        const bound = () => {
+          const s2 = st();
+          const resolved = resolveAnchors(s2, "en");
+          const out = new Map<string, string>();
+          for (const a of s2.netAnchors) {
+            const netId = resolved.get(a.id);
+            if (!netId) { out.set(`${a.id}:${a.name}`, "—"); continue; }
+            const ports: string[] = [];
+            for (const c of s2.circuit.components.values()) {
+              for (const p of c.ports) if (p.netId === netId) ports.push(p.id);
+            }
+            out.set(`${a.id}:${a.name}`, ports.sort().join(","));
+          }
+          return out;
+        };
+
+        const before = bound();
+        if (before.size === 0) continue;
+
+        // Move a part that a *named* wire hangs on, and far enough that the wire
+        // is genuinely somewhere else afterwards. Both matter: nudging an
+        // arbitrary part a grid step leaves every name inside its tolerance, so
+        // the check passes with the binding switched off and proves nothing —
+        // which is what a first version of this test did.
+        const s0 = st();
+        const named = resolveAnchors(s0, "en");
+        const namedNets = new Set([...named.values()]);
+        const carrier = s0.edges.find((e) => {
+          const port = (id: string, h: string | null | undefined) => `${id}-${h}`;
+          for (const c of s0.circuit.components.values()) {
+            for (const p of c.ports) {
+              if (!p.netId || !namedNets.has(p.netId)) continue;
+              if (p.id === port(e.source, e.sourceHandle) || p.id === port(e.target, e.targetHandle)) return true;
+            }
+          }
+          return false;
+        });
+        const victim = carrier ? st().nodes.find((n) => n.id === carrier.source) : undefined;
+        if (!victim) continue;
+        st().setNodes(st().nodes.map((n) =>
+          n.id === victim.id ? { ...n, position: { x: n.position.x + 128, y: n.position.y + 96 } } : n));
+        await tick();
+        st().rebuildConnections();
+        await tick();
+
+        const after = bound();
+        const lost: string[] = [];
+        for (const [key, ports] of before) {
+          const now = after.get(key);
+          if (now !== ports) lost.push(`${key}: ${ports || "—"} -> ${now ?? "weg"}`);
+        }
+        if (lost.length) fail(name, `${lost.length} Namen wechselten das Netz: ${lost.slice(0, 3).join(" | ")}`);
+      } catch (e) {
+        fail(name, `threw: ${(e as Error).message}`);
+      }
+    }
+
     // ── The shape of an anchor ─────────────────────────────────────────────
     // Ground is a flag named `0`, not a separate kind of thing — that is what
     // lets the anchor set cover every FLAG line rather than most of them.

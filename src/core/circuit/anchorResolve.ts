@@ -22,6 +22,34 @@ import type { RoutePoint } from "@core/geometry/wireRoutes.js";
 export interface RoutedNet {
   netId: string;
   verts: RoutePoint[];
+  /**
+   * What this route *is*, independently of the net it currently forms part of:
+   * `edge:<id>` for a wire, `pin:<portId>` for a bare terminal.
+   *
+   * The net is the wrong thing for a name to hold on to. It is derived from the
+   * whole sheet, so an edit anywhere can renumber the net a name sits on while
+   * the wire under that name has not moved at all. A wire keeps its identity
+   * until it is deleted.
+   */
+  key?: string;
+}
+
+/**
+ * Where a name is fastened: which route, how far along it, and how far off it.
+ *
+ * The offset is not a refinement — without it the binding is lossy. A name may
+ * lie up to {@link ANCHOR_TOLERANCE} beside its wire and still name it, which is
+ * what makes it something a person can place rather than a coordinate they have
+ * to hit. Recomputing from `t` alone puts it *on* the wire, so merely loading a
+ * schematic and saving it again moved every such name.
+ */
+export interface AnchorBinding {
+  key: string;
+  /** Position along the route, as a fraction of its length. */
+  t: number;
+  /** Offset from that point, so an unchanged wire yields the coordinate back exactly. */
+  ox: number;
+  oy: number;
 }
 
 /** Half a grid step (GRID is 16), so a parallel wire one step away is out of reach. */
@@ -67,4 +95,81 @@ export function resolveAnchor(
     if (d <= bestDist) { bestDist = d; bestNet = r.netId; }
   }
   return bestNet;
+}
+
+
+/** Total length of a polyline. */
+function routeLength(verts: RoutePoint[]): number {
+  let n = 0;
+  for (let i = 0; i < verts.length - 1; i++) n += Math.hypot(verts[i + 1].x - verts[i].x, verts[i + 1].y - verts[i].y);
+  return n;
+}
+
+/**
+ * Where along `verts` the point nearest `p` lies, as a fraction of the length.
+ * Zero for a degenerate route (a bare pin): it has no length to be partway
+ * along, and needs none.
+ */
+export function positionAlong(p: RoutePoint, verts: RoutePoint[]): number {
+  const total = routeLength(verts);
+  if (total === 0) return 0;
+  let best = Infinity, at = 0, walked = 0;
+  for (let i = 0; i < verts.length - 1; i++) {
+    const a = verts[i], b = verts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy), len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    const q = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best) { best = d; at = walked + t * len; }
+    walked += len;
+  }
+  return at / total;
+}
+
+/** The point a fraction `t` along `verts`. */
+export function pointAlong(verts: RoutePoint[], t: number): RoutePoint | null {
+  if (verts.length === 0) return null;
+  const total = routeLength(verts);
+  if (total === 0) return { x: Math.round(verts[0].x), y: Math.round(verts[0].y) };
+  let want = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < verts.length - 1; i++) {
+    const a = verts[i], b = verts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (want <= len || i === verts.length - 2) {
+      const f = len === 0 ? 0 : want / len;
+      return { x: Math.round(a.x + (b.x - a.x) * f), y: Math.round(a.y + (b.y - a.y) * f) };
+    }
+    want -= len;
+  }
+  return null;
+}
+
+/**
+ * Fasten a name to the route it is lying on.
+ *
+ * The same nearest-route test `resolveAnchor` makes, but it hands back *what* it
+ * landed on rather than only which net that route belongs to — which is what
+ * lets the name be carried along when the wire is re-routed under it.
+ */
+export function bindAnchor(
+  p: RoutePoint, routes: RoutedNet[], tolerance = ANCHOR_TOLERANCE,
+): (AnchorBinding & { netId: string }) | null {
+  let best: RoutedNet | null = null;
+  let bestDist = tolerance;
+  for (const r of routes) {
+    if (!r.key) continue;
+    const d = distToRoute(p, r.verts);
+    if (d <= bestDist) { bestDist = d; best = r; }
+  }
+  if (!best) return null;
+  const t = positionAlong(p, best.verts);
+  const on = pointAlong(best.verts, t) ?? p;
+  return { key: best.key!, t, ox: p.x - on.x, oy: p.y - on.y, netId: best.netId };
+}
+
+/** The coordinate a binding stands for on the route it names. */
+export function anchorFromBinding(verts: RoutePoint[], b: AnchorBinding): RoutePoint | null {
+  const on = pointAlong(verts, b.t);
+  return on ? { x: Math.round(on.x + b.ox), y: Math.round(on.y + b.oy) } : null;
 }

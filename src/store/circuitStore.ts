@@ -19,7 +19,8 @@ import { renameNetInProbe } from "@core/circuit/probeUtils.js";
 import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { resolveAnchors, anchorRoutes } from "@editor/anchorNets.js";
-import { ANCHOR_TOLERANCE, distToRoutes } from "@core/circuit/anchorResolve.js";
+import type { RoutedNet as RoutedNetLike } from "@core/circuit/anchorResolve.js";
+import { ANCHOR_TOLERANCE, distToRoute, distToRoutes, bindAnchor, anchorFromBinding, type AnchorBinding } from "@core/circuit/anchorResolve.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -30,6 +31,15 @@ import type { CircuitSnapshot } from "./persistence.js";
 interface HistoryEntry {
   nodes: Node[];
   edges: Edge[];
+  /**
+   * The names, too.
+   *
+   * They were left out while nothing but a deliberate drag could move one — and
+   * even then it was not undoable, which nobody had noticed. Now a name follows
+   * its wire (see `_anchorBind`), so rotating a part moves the names on the wires
+   * that re-route with it. Undo has to put those back or it restores half a step.
+   */
+  netAnchors: NetAnchor[];
 }
 
 interface CircuitState {
@@ -95,6 +105,28 @@ interface CircuitState {
   viewFitNonce: number;
   fileHandle: any | null;
   fileName: string | null;
+  /**
+   * Where each name is fastened: the route it lies on, how far along, how far off.
+   *
+   * Runtime only, never saved. The file keeps `FLAG x y name` and nothing else —
+   * LTSpice has no room for more and needs none, deriving its nets from the
+   * geometry exactly as we do. The binding is re-established from that geometry
+   * whenever the nets are rebuilt, and between rebuilds it is the *binding* that
+   * is authoritative and the coordinate that follows.
+   *
+   * That inversion is the whole mechanism. A wire that is re-routed — a part
+   * moved, a corner dragged, a detour pulled out — takes its names with it,
+   * because their coordinates are recomputed from where they sit along it. No
+   * "was this re-routed?" test is needed: recomputing an unchanged wire yields
+   * the same point and nothing happens.
+   *
+   * **It must be cleared with the schematic.** Anchor ids and edge ids both
+   * start again at 1 for each file, so a binding left over from the previous one
+   * matches by name and moves a name to a coordinate from a different drawing.
+   * That is not a hypothetical: it is what a first attempt did, and it showed up
+   * as names landing on numbers that appear nowhere in the file being loaded.
+   */
+  _anchorBind: Record<string, AnchorBinding>;
   _history: HistoryEntry[];
   _future: HistoryEntry[];
 }
@@ -318,11 +350,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   viewFitNonce: 0,
   fileHandle: null,
   fileName: null,
+  _anchorBind: {},
   _history: [],
   _future: [],
 
   addComponent: (component, nodeData) => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     get().circuit.addComponent(component);
     set((state) => ({
       nodes: [...state.nodes, nodeData],
@@ -332,7 +365,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   removeComponent: (id) => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     const node = get().nodes.find((n) => n.id === id);
     const doomed = get().edges.filter((e) => e.source === id || e.target === id);
 
@@ -447,7 +480,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   updateNodeData: (id, patch) => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     set((state) => ({
       nodes: state.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
       _history: [...state._history, snap],
@@ -456,7 +489,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   updateEdgeData: (id, patch) => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     set((state) => ({
       edges: state.edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, ...patch } } : e)),
       _history: [...state._history, snap],
@@ -467,7 +500,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   setNodes: (nodes) => set({ nodes }),
 
   setEdges: (edges) => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     set((state) => ({ edges, _history: [...state._history, snap], _future: [] }));
   },
 
@@ -608,9 +641,13 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     //
     // The readable tag is deliberately *not* snapped (see moveNetAnchorTag): it
     // decides nothing, so it may sit wherever it reads best.
+    // Dragging lets go of the old binding: the name is being aimed somewhere and
+    // must fasten to where it lands, not be pulled back to where it was. The
+    // rebuild below re-fastens it.
     set((state) => ({
       netAnchors: state.netAnchors.map((a) =>
         (a.id === id ? { ...a, x: snapToGrid(x), y: snapToGrid(y) } : a)),
+      _anchorBind: Object.fromEntries(Object.entries(state._anchorBind).filter(([k]) => k !== id)),
     }));
     get().rebuildConnections();
   },
@@ -633,6 +670,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     if (!ids.length || (dx === 0 && dy === 0)) return;
     const move = new Set(ids);
     set((state) => ({
+      _anchorBind: Object.fromEntries(
+        Object.entries(state._anchorBind).filter(([k]) => !move.has(k))),
       netAnchors: state.netAnchors.map((a) =>
         // Snapped like the single move, and for the same reason. The delta comes
         // from a part, which snaps itself, so an anchor that started on the grid
@@ -704,7 +743,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   loadFromAsc: (ascContent) => {
     const { nodes, edges, directives, components, dataFlags, textBoxes, sheetShapes, directiveRaw, header, anchors, busTaps } = LTSpiceParser.parse(ascContent);
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
 
     // A new circuit starts with a fresh diagram: linear axes on auto-range, no
     // colours or functions carried over from the circuit before it. A sibling
@@ -737,6 +776,8 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       ascHeader: header,
       dataFlags,
       netAnchors: anchors,
+      // The names are new, so their bindings are too — see _anchorBind.
+      _anchorBind: {},
       busTaps,
       textBoxes,
       sheetShapes,
@@ -818,7 +859,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     }
 
     const taken = new Set([...circuit.components.values()].map((c) => c.label));
-    const snap = { nodes: cur, edges: curEdges };
+    const snap = { nodes: cur, edges: curEdges, netAnchors: get().netAnchors };
 
     // Net names that the sheet already used. Keeping them is deliberate — it is
     // what LTSpice does and how a pasted block is meant to join an existing one —
@@ -914,7 +955,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   clearPasteNotice: () => set({ pasteNotice: null }),
 
   clearCircuit: () => {
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     const newCircuit = new Circuit();
     usePlotStore.getState().resetSettings();
     useSimulationStore.getState().reset();
@@ -927,6 +968,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       circuitName: "Untitled",
       dataFlags: [],
       netAnchors: [],
+      // With the names, or a binding survives into the next schematic. Anchor and
+      // edge ids both restart at 1 per file, so a stale one matches by name and
+      // drags a name to a coordinate out of a different drawing (see _anchorBind).
+      _anchorBind: {},
       busTaps: [],
       textBoxes: [],
       sheetShapes: [],
@@ -947,25 +992,31 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
   },
 
   undo: () => {
-    const { _history, _future, nodes, edges } = get();
+    const { _history, _future, nodes, edges, netAnchors } = get();
     if (_history.length === 0) return;
     const prev = _history[_history.length - 1];
     set({
       nodes: prev.nodes,
       edges: prev.edges,
+      netAnchors: prev.netAnchors ?? netAnchors,
+      // The bindings go with them: they describe where each name sat on the
+      // wiring being restored, and the next rebuild re-derives them from it.
+      _anchorBind: {},
       _history: _history.slice(0, -1),
-      _future: [{ nodes, edges }, ..._future],
+      _future: [{ nodes, edges, netAnchors }, ..._future],
     });
   },
 
   redo: () => {
-    const { _history, _future, nodes, edges } = get();
+    const { _history, _future, nodes, edges, netAnchors } = get();
     if (_future.length === 0) return;
     const next = _future[0];
     set({
       nodes: next.nodes,
       edges: next.edges,
-      _history: [..._history, { nodes, edges }],
+      netAnchors: next.netAnchors ?? netAnchors,
+      _anchorBind: {},
+      _history: [..._history, { nodes, edges, netAnchors }],
       _future: _future.slice(1),
     });
   },
@@ -982,7 +1033,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const { circuit } = get();
     const comp = circuit.components.get(id);
     if (!comp) return;
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     comp.rotate(270); // 270° CW == 90° counter-clockwise (rotate left)
     const nodes = get().nodes.map((n) =>
       n.id === id ? { ...n, data: { ...n.data, rotation: comp.rotation } } : n,
@@ -1007,7 +1058,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // Mirroring moves the pins just as a rotation does — and a flip along the
     // pin axis reverses their order, so the wires are re-seated by the same rule
     // and the part's SPICE node order turns with its drawing (see pinReseat).
-    const snap = { nodes: get().nodes, edges: get().edges };
+    const snap = { nodes: get().nodes, edges: get().edges, netAnchors: get().netAnchors };
     const nodes = get().nodes.map((n) =>
       n.id === selectedComponentId
         ? { ...n, data: { ...n.data, mirrored: !(n.data as { mirrored?: boolean }).mirrored } }
@@ -1120,6 +1171,44 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // as true as moving the name out from under the wire.
     const anchors = get().netAnchors;
     const norm = useUIStore.getState().symbolNorm;
+    // ── carry each name along its own wire ─────────────────────────────────
+    // Before resolving, not after: a name whose wire has moved is put back onto
+    // it first, so everything below sees where it actually belongs. A name with
+    // no binding — just placed, just dragged, or its wire gone — stays exactly
+    // where it is and resolves geometrically, as before.
+    {
+      const bind = get()._anchorBind;
+      const byKey = new Map<string, RoutedNetLike>();
+      for (const r of anchorRoutes(get(), norm)) if (r.key) byKey.set(r.key, r);
+      const moved: Record<string, { x: number; y: number }> = {};
+      for (const a of get().netAnchors) {
+        const b = bind[a.id];
+        if (!b) continue;
+        const route = byKey.get(b.key);
+        // The wire is gone — deleted, or the part it hung on removed. The name
+        // stays put and shows itself as loose; nothing is invented, nothing is
+        // quietly deleted (see NetAnchorPanel's warning).
+        if (!route) continue;
+        // The offset is carried so an unchanged wire gives the coordinate back
+        // exactly — but a wire that has changed *shape* can turn a sideways
+        // offset into a step onto whatever now lies there. Two op-amp sheets had
+        // a name walk from the + input to the − one that way. So the offset is
+        // only kept while it still lands on the wire it belongs to; otherwise the
+        // name sits squarely on the wire, which is never wrong.
+        let at = anchorFromBinding(route.verts, b);
+        if (at && distToRoute(at, route.verts) > ANCHOR_TOLERANCE) {
+          at = anchorFromBinding(route.verts, { ...b, ox: 0, oy: 0 });
+        }
+        if (at && (at.x !== a.x || at.y !== a.y)) moved[a.id] = at;
+      }
+      if (Object.keys(moved).length) {
+        set((state) => ({
+          netAnchors: state.netAnchors.map((a) =>
+            moved[a.id] ? { ...a, x: moved[a.id].x, y: moved[a.id].y } : a),
+        }));
+      }
+    }
+
     let byAnchor = resolveAnchors(get(), norm);
 
     // A name dropped on a bare pin *makes* that pin a net.
@@ -1203,6 +1292,19 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // One name wins (see applyNetNames); the net's other names stand. They are
     // aliases for the same net, exactly as LTSpice stores them, and rewriting
     // them here would change the user's file the moment they opened it.
+    // Re-fasten every name to whatever it is now lying on. At the end, so a name
+    // just dragged onto another wire binds to *that* one: the binding follows the
+    // geometry, never the other way round.
+    {
+      const routes = anchorRoutes(get(), norm);
+      const bind: Record<string, AnchorBinding> = {};
+      for (const a of get().netAnchors) {
+        const b = bindAnchor({ x: a.x, y: a.y }, routes);
+        if (b) bind[a.id] = { key: b.key, t: b.t, ox: b.ox, oy: b.oy };
+      }
+      set({ _anchorBind: bind });
+    }
+
     applyNetNames(circuit, anchors, byAnchor);
 
     set((state) => ({ netVersion: state.netVersion + 1 }));

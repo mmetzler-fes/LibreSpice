@@ -141,8 +141,19 @@ export async function runPinReseatTests(): Promise<{ total: number; passed: numb
 
     // Everything except that symbol's own placement and the wires reaching it
     // must be untouched — no caption window, value, directive or header moves.
+    //
+    // A `FLAG` is compared by its *name* rather than by its coordinate, and that
+    // is a real weakening of the claim, so it is worth saying why. A name is
+    // fastened to the wire it lies on and is carried when that wire is re-routed
+    // (see circuitStore._anchorBind). Turning the source swaps its terminals, so
+    // the wires reaching it genuinely run elsewhere afterwards — and a name on
+    // one of them genuinely moves with it. What must *not* happen is that a name
+    // is gained, lost or renamed, and that is what is still checked here.
     const settled = (t: string) =>
-      canonicalAscLines(t).filter((l) => !/^(SYMBOL|WIRE) /.test(l)).slice().sort().join("\n");
+      canonicalAscLines(t)
+        .filter((l) => !/^(SYMBOL|WIRE) /.test(l))
+        .map((l) => l.replace(/^FLAG\s+-?\d+\s+-?\d+\s+/, "FLAG "))
+        .slice().sort().join("\n");
     check("half a turn disturbs nothing but the part and its wires",
       settled(before) === settled(exportCurrent()),
       `unrelated lines changed`);

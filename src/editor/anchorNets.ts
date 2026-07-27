@@ -73,15 +73,17 @@ export function netRoutes(
   const pins = flowPins(nodes, norm);
   const out: RoutedNet[] = [];
 
+  // Each route carries its own identity as well as its net (see RoutedNet.key).
   for (const { edge, verts } of wireRoutes(edges, pins)) {
     const netId = nets.netOf(`${edge.source}-${edge.sourceHandle}`) ?? nets.netOf(`${edge.target}-${edge.targetHandle}`);
-    if (netId) out.push({ netId, verts });
+    if (netId) out.push({ netId, verts, key: `edge:${edge.id}` });
   }
 
   for (const n of nodes) {
     for (const p of getNodePins(n, norm)) {
-      const netId = nets.netOf(`${n.id}-${p.handleId}`);
-      if (netId) out.push({ netId, verts: [{ x: p.x, y: p.y }, { x: p.x, y: p.y }] });
+      const portId = `${n.id}-${p.handleId}`;
+      const netId = nets.netOf(portId);
+      if (netId) out.push({ netId, verts: [{ x: p.x, y: p.y }, { x: p.x, y: p.y }], key: `pin:${portId}` });
     }
   }
 
