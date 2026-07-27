@@ -307,16 +307,26 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
                 style={{
                   ...DRAG_TOUCH_ACTION,
                   position: "absolute",
-                  left: shape.circle.cx - ANCHOR_GRIP, top: shape.circle.cy - ANCHOR_GRIP,
-                  width: ANCHOR_GRIP * 2, height: ANCHOR_GRIP * 2,
+                  left: shape.circle.cx - ANCHOR_HIT, top: shape.circle.cy - ANCHOR_HIT,
+                  width: ANCHOR_HIT * 2, height: ANCHOR_HIT * 2,
                   borderRadius: "50%",
-                  background: isSelected ? "#2563eb" : theme.netLabelStroke,
-                  border: `2px solid ${theme.panelBg}`,
-                  boxSizing: "border-box",
+                  // The grab area is transparent and larger than the mark; the
+                  // dot below is what is seen.
+                  display: "flex", alignItems: "center", justifyContent: "center",
                   cursor: canvasLocked ? "default" : "move",
                   pointerEvents: "auto",
                 }}
-              />
+              >
+                <span
+                  style={{
+                    width: ANCHOR_GRIP * 2, height: ANCHOR_GRIP * 2,
+                    borderRadius: "50%",
+                    background: isSelected ? "#2563eb" : theme.netLabelStroke,
+                    border: `2px solid ${theme.panelBg}`,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
             )}
 
             {/* The tag is the name *and* the second grip. */}
@@ -384,8 +394,18 @@ const BUSTAP_LEN = 12;
 const RELATED_COLOR = "#f59e0b";
 const RELATED_RING = "rgba(245, 158, 11, 0.45)";
 
-/** Radius of the anchor grip, in symbol-local units. */
+/** Radius of the drawn anchor dot, in symbol-local units. */
 const ANCHOR_GRIP = 4;
+/**
+ * Radius of the *hit* area around it.
+ *
+ * Twice the dot, because the dot is 8 units across and sits on a wire it is
+ * drawn the same colour as. Missing it by a pixel does not do nothing — it
+ * reaches the canvas underneath, which pans, so the whole schematic slides away
+ * while the pointer is down. That reads as "the anchor cannot be moved", which
+ * is how it was reported.
+ */
+const ANCHOR_HIT = 9;
 
 /**
  * How far the anchor reaches for a wire while it is being dragged.
