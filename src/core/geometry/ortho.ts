@@ -67,6 +67,28 @@ export interface RouteHints {
    * choice of shapes, this decides between them.
    */
   obstacles?: Box[];
+  /**
+   * Terminals the route must not run over — every pin on the sheet except the
+   * two this wire connects.
+   *
+   * A *hard* constraint, unlike `obstacles`. A wire crossing a part body is ugly
+   * and nothing more; a wire crossing a foreign pin is a connection. It is drawn
+   * that way, it is saved that way (the `.asc` has no notion of a wire merely
+   * passing by), and on the next load the parser reads it back as exactly what
+   * it looks like — two nets joined.
+   *
+   * That is not hypothetical. Moving a seven-segment display a little way up the
+   * sheet re-routed the wire from a flip-flop's Q output straight across the same
+   * flip-flop's D input, and the file came back with D, Q and ~Q on one node:
+   * ngspice then reported a singular matrix at a node three parts away, which is
+   * about as far from the cause as a symptom can get.
+   *
+   * The converter's router has had this rule from the start (`keepClear` in
+   * multisim/router.ts) because it lays out whole sheets unattended. The editor
+   * needs it for the same reason — a wire re-routes without being asked whenever
+   * something it hangs on moves.
+   */
+  avoid?: Pt[];
 }
 
 /** Does a segment run through a body, rather than merely touch its edge? */
@@ -86,6 +108,23 @@ function bodyHits(path: Pt[], from: Pt, obstacles: Box[]): number {
   return n;
 }
 
+/** Does a point lie on an axis-aligned segment, endpoints included? */
+function onSegment(p: Pt, a: Pt, b: Pt): boolean {
+  return a.x === b.x
+    ? p.x === a.x && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)
+    : a.y === b.y && p.y === a.y && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x);
+}
+
+/** Does a path touch any terminal it must keep clear of? */
+function hitsPin(path: Pt[], from: Pt, avoid: Pt[]): boolean {
+  let prev = from;
+  for (const p of path) {
+    for (const q of avoid) if (onSegment(q, prev, p)) return true;
+    prev = p;
+  }
+  return false;
+}
+
 /**
  * Route one leg between two points with right angles.
  *
@@ -101,7 +140,7 @@ function bodyHits(path: Pt[], from: Pt, obstacles: Box[]): number {
 function leg(
   a: Pt, b: Pt,
   startAxis?: Axis, endAxis?: Axis,
-  obstacles?: Box[], startDir?: Pt, endDir?: Pt,
+  obstacles?: Box[], startDir?: Pt, endDir?: Pt, avoid?: Pt[],
 ): Pt[] {
   if (a.x === b.x || a.y === b.y) return [b];
 
@@ -140,7 +179,18 @@ function leg(
     shapes.push(axis === "x" ? cornerX : cornerY, axis === "x" ? cornerY : cornerX);
   }
 
-  if (!obstacles?.length) return shapes[0];
+  // Foreign terminals first, and separately from the bodies: this one is not a
+  // preference to be weighed but a rule. A shape that runs over one is dropped
+  // outright, and only if *every* shape does is the preferred one taken anyway —
+  // an unroutable pair still needs a wire, and one drawn wrongly is at least
+  // visible, where no wire at all would look like a part that was never
+  // connected.
+  let choices = shapes;
+  if (avoid?.length) {
+    const clear = shapes.filter((path) => !hitsPin(path, a, avoid));
+    if (clear.length) choices = clear;
+  }
+  if (!obstacles?.length) return choices[0];
 
   // Last resort: step clear of the part first, then route from there. Only the
   // *direction* out of a pin can do this — a leg that merely honours the pin's
@@ -167,7 +217,7 @@ function leg(
 
   // The first shape that clears every body; the preferred one if none does, so a
   // part boxed in on all sides still gets its wire.
-  return shapes.find((path) => bodyHits(path, a, obstacles) === 0) ?? shapes[0];
+  return choices.find((path) => bodyHits(path, a, obstacles) === 0) ?? choices[0];
 }
 
 /** How far past an end a Z-bend's crossing is pushed to clear a body. */
@@ -191,6 +241,7 @@ export function orthoVertices(points: Pt[], hints: RouteHints = {}): Pt[] {
       hints.obstacles,
       i === 1 ? hints.startDir : undefined,
       i === last ? hints.endDir : undefined,
+      hints.avoid,
     ));
   }
   return out;

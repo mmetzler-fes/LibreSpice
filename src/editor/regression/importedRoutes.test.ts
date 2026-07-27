@@ -1,5 +1,6 @@
 import type { Edge } from "@xyflow/react";
 import { forgetImportedRoutes } from "../importedRoutes.js";
+import { orthoVertices } from "@core/geometry/ortho.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -89,6 +90,68 @@ const CASES: Case[] = [
     },
   },
 ];
+
+/**
+ * A re-routed wire must not land on a terminal that is not its own.
+ *
+ * The rule the editor was missing. `orthoVertices` weighed part *bodies* — a
+ * wire crossing a symbol is ugly, so it prefers a shape that does not — but a
+ * pin sits on the body's edge, so a route could clear every body and still run
+ * straight over somebody's terminal. There it is not a detour: the `.asc` has no
+ * way to say "this wire merely passes by", so it is saved as a crossing and read
+ * back as a connection.
+ *
+ * The case below is the one that was reported, reduced to its geometry: a wire
+ * running left along y=128 from a flip-flop's Q at (480,128) to a display moved
+ * up the sheet, straight through the same flip-flop's D at (416,128). The file
+ * came back with D, Q and ~Q on one node.
+ */
+const PIN_D = { x: 416, y: 128 };
+
+CASES.push(
+  {
+    name: "a re-routed wire steps around a foreign pin",
+    run: (fail) => {
+      const from = { x: 480, y: 128 };
+      const to = { x: 312, y: 48 };
+      const path = orthoVertices([from, to], { avoid: [PIN_D] });
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i], b = path[i + 1];
+        const on = a.x === b.x
+          ? PIN_D.x === a.x && PIN_D.y >= Math.min(a.y, b.y) && PIN_D.y <= Math.max(a.y, b.y)
+          : a.y === b.y && PIN_D.y === a.y && PIN_D.x >= Math.min(a.x, b.x) && PIN_D.x <= Math.max(a.x, b.x);
+        if (on) {
+          fail(`route ${JSON.stringify(path)} runs over the pin at ${PIN_D.x},${PIN_D.y}`);
+          return;
+        }
+      }
+    },
+  },
+  {
+    name: "without the rule that same route would have crossed it",
+    run: (fail) => {
+      // The counter-check, so the test above cannot pass by accident on a
+      // geometry that never had the problem: with no pin to avoid, the shortest
+      // shape is the one straight along y=128 — over the pin.
+      const path = orthoVertices([{ x: 480, y: 128 }, { x: 312, y: 48 }]);
+      const crosses = path.some((p, i) => i > 0
+        && path[i - 1].y === 128 && p.y === 128
+        && PIN_D.x >= Math.min(path[i - 1].x, p.x) && PIN_D.x <= Math.max(path[i - 1].x, p.x));
+      if (!crosses) fail(`the unguarded route no longer crosses the pin: ${JSON.stringify(path)}`);
+    },
+  },
+  {
+    name: "a pin the wire itself ends on is not an obstacle",
+    run: (fail) => {
+      // Excluding the wire's own ends is by identity, not by position: a route
+      // must still be drawable to the very pin it connects.
+      const to = { x: 312, y: 48 };
+      const path = orthoVertices([{ x: 480, y: 128 }, to], { avoid: [PIN_D] });
+      const last = path[path.length - 1];
+      if (last.x !== to.x || last.y !== to.y) fail(`route does not reach its end: ${JSON.stringify(path)}`);
+    },
+  },
+);
 
 export function runImportedRouteTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];

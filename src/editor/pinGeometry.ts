@@ -306,7 +306,39 @@ export function edgeRouteHints(
     startDir: d?.sourceTap ? undefined : dir(edge.source, edge.sourceHandle),
     endDir: d?.targetTap ? undefined : dir(edge.target, edge.targetHandle),
     obstacles: nodeBodies(nodes, norm),
+    // Every terminal on the sheet except this wire's own two. A route that lands
+    // on one of the others is not a detour but a connection — see RouteHints.avoid.
+    //
+    // The wire's own ends are excluded by *identity*, not by position: two parts
+    // whose pins sit on the same point are already joined, and treating that
+    // point as forbidden would leave the wire between them unroutable.
+    avoid: foreignPins(nodes, edge, norm),
   };
+}
+
+/**
+ * Every pin except the two the given edge connects.
+ *
+ * A tapped end (`sourceTap`/`targetTap`) hangs on a wire rather than on a pin, so
+ * it excludes nothing — there is no pin of its own to spare.
+ */
+function foreignPins(
+  nodes: Node[],
+  edge: { source?: string; sourceHandle?: string | null; target?: string; targetHandle?: string | null },
+  norm: SymbolNorm,
+): { x: number; y: number }[] {
+  const mine = new Set([
+    `${edge.source}|${edge.sourceHandle}`,
+    `${edge.target}|${edge.targetHandle}`,
+  ]);
+  const out: { x: number; y: number }[] = [];
+  for (const n of nodes) {
+    for (const p of getNodePins(n, norm)) {
+      if (mine.has(`${n.id}|${p.handleId}`)) continue;
+      out.push({ x: p.x, y: p.y });
+    }
+  }
+  return out;
 }
 
 /**
