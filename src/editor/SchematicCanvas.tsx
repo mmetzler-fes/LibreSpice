@@ -1185,7 +1185,19 @@ function CanvasInner() {
         {showPropertiesPanel && (
           // keyboard-safe: its fields (component values, net names) can sit at the
           // bottom, where iPadOS' autofill bar would cover them (see index.css).
-          <aside className="keyboard-safe" style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
+          // The width belongs here, not to whichever panel happens to be showing.
+          // It used to come from PropertiesPanel's own `width: 220`, so selecting
+          // a *name* — which shows a different panel, with no width of its own —
+          // collapsed the sidebar, widened the canvas and shifted the whole
+          // schematic sideways. Mid-press that pulls the label out from under the
+          // pointer, which is why a name could be selected but not dragged.
+          <aside
+            className="keyboard-safe"
+            style={{
+              width: 220, flex: "0 0 220px", boxSizing: "border-box",
+              display: "flex", flexDirection: "column", overflow: "auto",
+            }}
+          >
             {/* A selected *name* shows its own properties; a selected wire shows
                 none, because a wire has none the file can hold — its name is a
                 flag at a point, which is the panel above. */}

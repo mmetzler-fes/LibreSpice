@@ -234,7 +234,7 @@ export function PropertiesPanel() {
     return (
       <aside
         style={{
-          width: 220,
+          width: "100%",
           borderLeft: `1px solid ${theme.borderMuted}`,
           padding: 16,
           background: theme.panelBg,
@@ -296,7 +296,7 @@ export function PropertiesPanel() {
   return (
     <aside
       style={{
-        width: 220,
+        width: "100%",
         borderLeft: `1px solid ${dynBorder}`,
         padding: 16,
         background: theme.panelBg,
