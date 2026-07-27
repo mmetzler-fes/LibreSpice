@@ -253,11 +253,32 @@ function logicGatePinOffsets(pinNames: string[]): PinOffset[] {
   // port id no port had, so `connectPorts` threw for every wire on a gate and
   // caught it as "visual only". The gates were drawn wired and netlisted with
   // every input on node 0: 489 dead inputs across the converted Multisim set.
+  //
+  // The inputs sit at `CENTER - 32`, not at 0. That is not cosmetic: this table
+  // describes the pins in the *file's* frame, and `pinGeometry.digitalPins`
+  // describes the same pins in the *canvas's* — and the two have to name the
+  // same point, because wires are matched in the first and names are resolved in
+  // the second (see anchorNets).
+  //
+  // With the inputs at 0 they did not. `symbolToNode` centres the node box on
+  // these offsets, so a four-input gate (0,0,0,0,72) centred on their mean 14.4
+  // and put the box 26 units left of the symbol origin, while the canvas drew
+  // its inputs 32 left of the box centre: the same input came out at `sym.x` in
+  // the file and at `sym.x - 18` on screen. Wires still met, because they are
+  // matched in the file's frame throughout — but a `FLAG` written at the file's
+  // pin missed the canvas pin by 18 units and named nothing. The converter had
+  // been papering over it with a 16-unit stub at every gate input.
+  //
+  // Laid out symmetrically about CENTER the mean is no longer the question: the
+  // pins span 8..72, whose *bounding box* centre is CENTER exactly, so with
+  // `centeringFor` returning "bbox" the node origin and the symbol origin
+  // coincide and both frames describe one point. Kept in step with digitalPins
+  // by `digitalGeometry.test.ts`, which compares the two directly.
   const ins = pinNames.slice(0, -1);
   const span = 48;
   const offsets = ins.map((_name, i) => ({
     handle: `in${i + 1}`,
-    dx: 0,
+    dx: CENTER - 32,
     dy: CENTER + (ins.length === 1 ? 0 : Math.round(-span / 2 + (span * i) / (ins.length - 1))),
   }));
   offsets.push({ handle: "out", dx: CENTER + 32, dy: CENTER });
@@ -316,7 +337,21 @@ export function centeringFor(type: string): Centering {
   // Multi-pin, asymmetric .asy symbols (op-amp, transistors) centre on the pin
   // bounding box to match mapSymbol's native-scale rendering; 2-pin parts have
   // mean == bbox so the default is fine.
-  return type === "opamp" || type === "subcircuit" || type.startsWith("bjt_") || type.startsWith("mosfet_")
+  // The logic gate joins them, and for a sharper reason than "asymmetric": its
+  // pins are laid out about CENTER on purpose (see logicGatePinOffsets), so the
+  // bbox centre *is* CENTER and the node origin lands on the symbol origin.
+  // Centred on the mean instead, a gate's node drifted with its input count —
+  // 26 units for four inputs, 19 for two — and the file's pins and the canvas's
+  // stopped describing the same point.
+  // The flip-flop for the same reason, and it is not hypothetical either: its
+  // pins are symmetric about the origin, so for the six-pin kinds the mean
+  // happens to land on the bbox centre and the two frames agreed by luck. The JK
+  // has a seventh pin — the clock, between J and K — which pulls the mean off by
+  // 5 units and nothing else, so a JK's name bound to nothing while a D's bound
+  // fine. Centring on the bounding box makes the agreement a property rather
+  // than a coincidence.
+  return type === "opamp" || type === "subcircuit" || type === "logicgate"
+    || type === "dff" || type.startsWith("bjt_") || type.startsWith("mosfet_")
     ? "bbox"
     : "mean";
 }

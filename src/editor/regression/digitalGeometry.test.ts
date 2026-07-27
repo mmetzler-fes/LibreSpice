@@ -1,6 +1,6 @@
 import { getLocalPins, NODE_SIZE } from "../pinGeometry.js";
 import { captionSide } from "../captionLayout.js";
-import { offsetsForNode } from "@core/ltspice/ltspiceGeometry.js";
+import { offsetsForNode, symbolToNode, centeringFor } from "@core/ltspice/ltspiceGeometry.js";
 import { buildSchematicSvg } from "../svgExport.js";
 import { LogicGate } from "@core/components/digital/LogicGate.js";
 import { DFlipFlop } from "@core/components/digital/DFlipFlop.js";
@@ -190,6 +190,79 @@ const CASES: Case[] = [
     },
   },
 ];
+
+/**
+ * The file's pin table and the canvas's must name the same point.
+ *
+ * The two describe the same pins in two frames — `offsetsForNode` relative to the
+ * `SYMBOL` origin, `getLocalPins` relative to the node box — and `symbolToNode`
+ * is the bridge between them. If that bridge does not close, wires still meet
+ * (they are matched in the file's frame from end to end) but *names* do not: an
+ * anchor is resolved against the canvas's pins and a `FLAG` is written at the
+ * file's, so a name dropped on a pin lands beside it.
+ *
+ * That is exactly what happened. A gate's inputs sat at `dx = 0` in the file
+ * table while the canvas drew them 32 left of the box centre; centred on the
+ * mean of (0,0,0,0,72) the node drifted with the input count, and a four-input
+ * gate's input came out 18 units apart in the two frames. Every name on a gate
+ * input therefore bound to nothing, and the Multisim converter had been hiding
+ * it behind a 16-unit stub at every one of them.
+ *
+ * Checked for every input count and every flip-flop kind, because the drift was
+ * a *function* of the pin count — two inputs were 19 units out, four 26, and any
+ * single example would have looked like a one-off constant.
+ */
+for (const inputs of [1, 2, 3, 4, 5, 6]) {
+  CASES.push({
+    name: `a ${inputs}-input gate has its pins in the same place in both frames`,
+    run: (fail) => {
+      const gate = new LogicGate("g1", "U1", { x: 0, y: 0 }, "and", inputs);
+      const data = {
+        componentType: "logicgate", label: "U1", gateType: "and", inputs,
+      } as unknown as ComponentNodeData;
+      const pinNames = [...gate.ports.map((p) => p.id.slice("g1-".length))];
+      const file = offsetsForNode("logicgate", 0, pinNames);
+      const canvas = getLocalPins(data);
+      // `symbolToNode` places the node box; with the two tables in step the two
+      // origins coincide, so the offsets must match one for one.
+      const node = symbolToNode(0, 0, file, centeringFor("logicgate"));
+      for (const f of file) {
+        const c = canvas.find((q) => q.handleId === f.handle);
+        if (!c) { fail(`no canvas pin for ${f.handle}`); return; }
+        const dx = node.x + c.px - f.dx;
+        const dy = node.y + c.py - f.dy;
+        if (dx !== 0 || dy !== 0) {
+          fail(`${f.handle}: file says ${f.dx},${f.dy}, canvas says ${node.x + c.px},${node.y + c.py}`);
+          return;
+        }
+      }
+    },
+  });
+}
+
+for (const kind of ["dff", "tff", "dlatch", "jkff"]) {
+  CASES.push({
+    name: `a ${kind} has its pins in the same place in both frames`,
+    run: (fail) => {
+      const ff = new DFlipFlop("f1", "U1", { x: 0, y: 0 });
+      (ff as unknown as { kind: string }).kind = kind;
+      (ff as unknown as { rebuildPorts?: () => void }).rebuildPorts?.();
+      const data = { componentType: "dff", label: "U1", kind } as unknown as ComponentNodeData;
+      const pinNames = ff.ports.map((p) => p.id.slice("f1-".length));
+      const file = offsetsForNode("dff", 0, pinNames);
+      const canvas = getLocalPins(data);
+      const node = symbolToNode(0, 0, file, centeringFor("dff"));
+      for (const f of file) {
+        const c = canvas.find((q) => q.handleId === f.handle);
+        if (!c) { fail(`no canvas pin for ${f.handle}`); return; }
+        if (node.x + c.px !== f.dx || node.y + c.py !== f.dy) {
+          fail(`${f.handle}: file says ${f.dx},${f.dy}, canvas says ${node.x + c.px},${node.y + c.py}`);
+          return;
+        }
+      }
+    },
+  });
+}
 
 export function runDigitalGeometryTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];
