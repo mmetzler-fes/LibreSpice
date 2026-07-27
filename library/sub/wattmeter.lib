@@ -1,0 +1,24 @@
+* Wattmeter, wie Multisims XWM: Spannungspfad und Strompfad in einem Bauteil.
+*
+* Von den virtuellen Messgeraeten ist es das einzige, das ein Bauteil bleiben
+* muss. Ein Oszilloskop liest nur mit und wird beim Import zum Netznamen; ein
+* Multimeter hat zwei Anschluesse und wird zu dem, wonach es beschaltet ist.
+* Das Wattmeter aber liegt gleichzeitig *parallel* zur Last (Spannungspfad) und
+* *in Reihe* mit ihr (Strompfad). Laesst man es weg, ist der Zweig, den der
+* Strompfad fuehrt, aufgetrennt - die halbe Schaltung haengt dann in der Luft.
+*
+* Beide Haelften sind das, womit SPICE ohnehin misst:
+*   Rv  hochohmig ueber die Last, wie ein Voltmeter
+*   Vi  Quelle mit 0 V im Zweig, die klassische Stromsonde
+*
+* Die Leistung selbst rechnet das Modell nicht aus - sie ist keine Groesse, die
+* in einem Knoten steht, sondern eine Ablesung: P = V(VP,VN) * I(Vi), im
+* Diagramm als Ausdruck ueber genau diesen beiden Messstellen.
+*
+* Anschlussreihenfolge: VP VN (Spannungspfad), IP IN (Strompfad)
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt wattmeter VP VN IP IN PARAMS: Rv=10Meg
+Rv VP VN {Rv}
+Vi IP IN 0
+.ends wattmeter

@@ -138,9 +138,22 @@ function firstOf(el: El, cls: string): El | undefined {
  * enough to convert from.
  */
 function catalogue(el: El): string[] {
-  const coll = firstOf(el, "CiaCollString");
-  const strings = coll?.kids.find((k) => k.tag === "strings");
-  return (strings?.kids ?? []).map((i) => text(i.attrs.Value));
+  // The *first* such collection is not always the catalogue entry. A virtual
+  // instrument — the multimeter, the oscilloscope, the wattmeter — carries an
+  // all-blank one where a part has its family and type, and states what it is in
+  // the next collection along ("Mulmeter", "Oscilloscope"). Read as the first
+  // one regardless, every instrument came out with an empty type name, and the
+  // converter reported it as a part it had no entry for.
+  //
+  // So the first collection that says anything wins. For an ordinary part that
+  // is the same collection as before — theirs is filled.
+  for (const d of walk(el)) {
+    if (d.tag !== "CiaCollString") continue;
+    const strings = d.kids.find((k) => k.tag === "strings");
+    const values = (strings?.kids ?? []).map((i) => text(i.attrs.Value));
+    if (values.some((v) => v !== "")) return values;
+  }
+  return [];
 }
 
 /**
@@ -215,6 +228,10 @@ const TYPES: Record<string, {
   ZENER: { name: "Zener" },
   MYZENER: { name: "Zener" },
   LED_RED_RATED: { name: "LED" },
+  // Multisim's configurable LED, which is the same part with its forward current
+  // and its capacitance exposed as parameters. Neither reaches our LED — it
+  // carries the model name and nothing else — so this is the alias alone.
+  LED_red: { name: "LED" },
   BJT_NPN: { name: "NPN" },
   "2N2222": { name: "NPN" },
   MMBF4393LT1G: { name: "JFET N" },
@@ -228,7 +245,33 @@ const TYPES: Record<string, {
   // the part comes out with two pins it did not have — and the conversion says so.
   SR_FF: { name: "D Flip-Flop", conns: { S: "SET", R: "RESET" } },
 
+  // Multisim 14 files the adjustable regulator under the housing letter and
+  // carries a vendor SPICE model with it; the converter knows the part under its
+  // plain name and pulls in library/sub/LM317.lib. IN/ADJ/OUT are spelled the
+  // same on both sides, so this is the alias and nothing more.
+  LM317H: { name: "LM317" },
+
   POTENTIOMETER_VIRTUAL: { name: "Potentiometer", params: { Resistance: 5, Key: 3 } },
+
+  // The hand-operated switches. Their two contact resistances are the only
+  // thing the format states about them — the position is not saved at all, only
+  // the hotkey that toggles it (see `manualSwitchClosed` in the converter).
+  SPST: { name: "SPST", params: { R_ON: 3, R_OFF: 5 } },
+  SPDT: { name: "SPDT", params: { R_ON: 3, R_OFF: 5 } },
+
+  // The voltage-controlled switches. Multisim's own `.subckt VC_SPST/VC_SPDT`
+  // takes `Von Voff Ron Roff` in that order, and its parameter list keeps each
+  // value in the odd slot after its flag — so the four numbers sit in 1, 3, 5, 7.
+  // Our models take the same two thresholds and two resistances (see
+  // library/sub/vcspst.lib), which is why they can be handed straight over.
+  VOLTAGE_CONTROLLED_SPST: {
+    name: "Voltage Controlled SPST",
+    params: { V_ON: 1, V_OFF: 3, R_ON: 5, R_OFF: 7 },
+  },
+  VOLTAGE_CONTROLLED_SPDT: {
+    name: "Voltage Controlled SPDT",
+    params: { V_ON: 1, V_OFF: 3, R_ON: 5, R_OFF: 7 },
+  },
 
   D_FF: { name: "D Flip-Flop" },
   JK_FF: { name: "JK Flip-Flop" },
@@ -259,7 +302,54 @@ const TYPES: Record<string, {
   AMMETER_V: { name: "DC Voltage", fixed: { DC_mag: "0" } },
   VOLTMETER_H: { name: "Resistor", fixed: { Resistance: "10Meg" } },
   VOLTMETER_V: { name: "Resistor", fixed: { Resistance: "10Meg" } },
+
+  // The 74LS138 and the display it drives. Both are library parts on our side;
+  // the connection names are the same on both, so nothing has to be renamed.
+  "74LS138D": { name: "74LS138" },
+  SEVEN_SEG_COM_A: { name: "7-Segment Display Common Anode" },
+
+  // The DIP switch pack. Its four positions are not read: Multisim files the
+  // same value pair for all four switches whatever their drawn state, so there
+  // is nothing to carry over (see dipsw4.lib).
+  DSWPK_4: { name: "DIP Switch 4" },
+
+  // The transistor switch with its body diode. `.subckt TRANSISTOR_DIODE_S1
+  // upper lower ctrlp params: CtrlOn TranRon TranRoff TranVon DiodeRon DiodeRoff
+  // DiodeVon` — seven values, each in the odd slot after its flag.
+  TRANSISTOR_DIODE: {
+    name: "Transistor Switch with Diode",
+    params: {
+      CtrlOn: 1, TranRon: 3, TranRoff: 5, TranVon: 7,
+      DiodeRon: 9, DiodeRoff: 11, DiodeVon: 13,
+    },
+  },
+
+  // The transformer states its windings in an embedded XML block rather than in
+  // the parameter slots, so its numbers are dug out separately (see `derived`).
+  "1P1S": { name: "Transformer" },
+
+  // The wattmeter is the two meters in one housing: a voltage path across the
+  // load and a current path through it. Both halves have to stay, or the branch
+  // the current path carries is broken — so it is the one instrument that
+  // becomes a part rather than a name (library/sub/wattmeter.lib).
+  Wattmtr: { name: "Wattmeter" },
 };
+
+/** How the multimeter is wired decides what it is; see `settleMultimeters`. */
+const MULTIMETER = "Mulmeter";
+
+/**
+ * The oscilloscope's inputs, as the net-name suffix each one earns.
+ *
+ * A scope reads and does not load: carried over as a part it would be four
+ * terminals with nothing behind them. So it goes the way a probe does — dropped,
+ * with its *name* left on the nodes it watched, which is the one thing about them
+ * worth keeping. Multisim numbers the connections and lays them out in pairs:
+ * 1/4 is channel A, 2/5 channel B, 3/6 the external trigger. Only the positive
+ * of each pair is named; the negatives are the returns and are normally grounded,
+ * so a name there would fight with the ground the net already has.
+ */
+const SCOPE_CHANNELS: Record<string, string> = { "1": "A", "2": "B", "3": "T" };
 
 /**
  * The 74xx logic packages, by the gate one of their sections is.
@@ -304,7 +394,45 @@ const PROBES = /^PROBE(_|$)/;
  * belongs to the reading, not to the emitter — the Live format states the same
  * two numbers the same way.
  */
-function derived(type: string, slots: string[]): Record<string, string> {
+/**
+ * The transformer's windings, out of the `<ComponentDefinition>` it carries.
+ *
+ * This one part keeps its numbers in an XML document stuffed into a string
+ * attribute rather than in the parameter slots, so it has to be dug out by hand:
+ * `<Primary turns="0.2" Resistance="10m"/>`, `<Secondary turns="1" …/>`,
+ * `<ConstantInductance value="50u"/>`.
+ *
+ * *Two* such blocks are present, and they disagree — the catalogue's default
+ * (turns 10 : 1) and the instance's own, edited copy (0.2 : 1). The instance's
+ * comes second, and it is the one Multisim's own generated netlist agrees with:
+ * that netlist reads `Es1 s1pos s1neg value={V(p1pos,p1neg)*1/0.2}`, i.e. a
+ * secondary five times the primary, which is 1 / 0.2 and not 1 / 10. So the last
+ * block wins. Read the first instead and this transformer would come out fifty
+ * times off — with nothing anywhere to say so.
+ */
+function transformerWindings(def: El): Record<string, string> {
+  let out: Record<string, string> = {};
+  for (const d of walk(def)) {
+    const xml = text(d.attrs.Value);
+    if (!xml.includes("<Transformer")) continue;
+    const primary = /<Primary\b[^>]*\bturns="([^"]+)"/.exec(xml);
+    const secondary = /<Secondary\b[^>]*\bturns="([^"]+)"/.exec(xml);
+    const np = parseSI(primary?.[1] ?? "");
+    const ns = parseSI(secondary?.[1] ?? "");
+    if (!np || !ns) continue;
+    const found: Record<string, string> = { Ratio: String(ns / np) };
+    const lm = /<ConstantInductance\b[^>]*\bvalue="([^"]+)"/.exec(xml)?.[1];
+    if (lm) found.Lm = lm;
+    const rp = /<Primary\b[^>]*\bResistance="([^"]+)"/.exec(xml)?.[1];
+    if (rp) found.Rp = rp;
+    const rs = /<Secondary\b[^>]*\bResistance="([^"]+)"/.exec(xml)?.[1];
+    if (rs) found.Rs = rs;
+    out = found;
+  }
+  return out;
+}
+
+function derived(type: string, slots: string[], def: El): Record<string, string> {
   // Multisim states these with SI suffixes ("100m"), so plain parseFloat would
   // read a hundred milliseconds as a hundred seconds.
   const num = (i: number) => parseSI(slots[i] ?? "") ?? NaN;
@@ -358,6 +486,8 @@ function derived(type: string, slots: string[]): Record<string, string> {
     return { "Time/Voltage pairs": pairs.join(" ") };
   }
 
+  if (type === "1P1S") return transformerWindings(def);
+
   return {};
 }
 
@@ -399,6 +529,42 @@ function matrixOf(attrs: Record<string, string>): Record<string, number> {
     c: n("Transformer-M10", 0), d: n("Transformer-M11", 1),
     e: n("Transformer-M20", 0), f: n("Transformer-M21", 0),
   };
+}
+
+/**
+ * Decide what each multimeter is, from how it was wired.
+ *
+ * Multisim's multimeter is one part with a front panel: whether it reads volts
+ * or amperes is a setting of the *instrument window*, not of the circuit, and it
+ * is not in the file at all. But the wiring says it anyway, and unambiguously —
+ * a meter in series is an ammeter, a meter across something is a voltmeter — so
+ * that is what is read here.
+ *
+ * A terminal sitting on a net with exactly two pins is the tell: the meter is
+ * then the only way out of that node, so the branch runs *through* it. Anything
+ * else and the meter hangs across a node the circuit already joins elsewhere.
+ *
+ * Getting it wrong is not symmetrical, which is why it is worth deciding rather
+ * than defaulting. A voltmeter mistaken for an ammeter puts 0 V across two live
+ * nodes — the sheet is then shorted and the answer is not merely inaccurate. An
+ * ammeter mistaken for a voltmeter puts 10 MΩ in a branch, which starves it but
+ * leaves the rest of the circuit standing.
+ *
+ * Both stand-ins are the ones Multisim's own dedicated meters already map onto,
+ * so a converted multimeter reads out exactly like a converted ammeter does.
+ */
+function settleMultimeters(parts: MsPart[], nets: MsNet[]): void {
+  /** Port id → how many pins sit on its net. */
+  const netSize = new Map<string, number>();
+  for (const net of nets) {
+    for (const q of net.pins) netSize.set(q.pin, net.pins.length);
+  }
+  for (const part of parts) {
+    if (part.typeName !== MULTIMETER) continue;
+    const inSeries = Object.values(part.connPin).some((id) => netSize.get(id) === 2);
+    part.typeName = inSeries ? "DC Voltage" : "Resistor";
+    part.params = inSeries ? { DC_mag: "0" } : { Resistance: "10Meg" };
+  }
 }
 
 /**
@@ -493,6 +659,17 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       continue;
     }
 
+    // The oscilloscope goes the same way, one name per channel (see
+    // SCOPE_CHANNELS): `XSC1_A`, `XSC1_B`. The nets it watched then carry the
+    // reading the author set the scope up to take, instead of a bare number.
+    if (ms14Type === "scope") {
+      for (const [conn, channel] of Object.entries(SCOPE_CHANNELS)) {
+        const portId = connPin[conn];
+        if (portId !== undefined) probeNames.set(portId, `${refdes}_${channel}`);
+      }
+      continue;
+    }
+
     // Ground and the supply rails are parts in this format and symbols on the
     // sheet for us, exactly as in the Live reader.
     const kind = CONNECTORS[ms14Type];
@@ -540,7 +717,7 @@ export function ms14ToSchematic(xml: string): MsSchematic {
       const v = slots[slot];
       if (v !== undefined && v !== "") params[name] = v;
     }
-    Object.assign(params, derived(ms14Type, slots));
+    Object.assign(params, derived(ms14Type, slots, def));
     // A behavioural source *is* its expression (`%S0` in its template), and it
     // still speaks Multisim's node names here — the converter translates them,
     // because only it knows what the nets end up being called.
@@ -594,6 +771,7 @@ export function ms14ToSchematic(xml: string): MsSchematic {
     else byName.set(name, { name, pins });
   }
   const nets = [...byName.values()];
+  settleMultimeters(parts, nets);
 
   // ── wires ────────────────────────────────────────────────────────────────
   // One `CIITLinkComp` is one run of points, already in sheet coordinates. It

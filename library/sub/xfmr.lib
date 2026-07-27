@@ -1,0 +1,37 @@
+* Transformator mit einer Primaer- und einer Sekundaerwicklung (Multisims 1P1S).
+*
+* Der ideale Uebertrager als gesteuertes Quellenpaar, wie Multisim ihn selbst
+* netzlistet: die Sekundaerspannung folgt der Primaerspannung im
+* Windungsverhaeltnis, der Primaerstrom dem Sekundaerstrom im selben Verhaeltnis.
+* Beides zusammen ist die Leistungsbilanz - Vp*Ip = Vs*Is, ohne dass sie
+* irgendwo hingeschrieben werden muesste.
+*
+*   ratio = Ns/Np : Vs = ratio * Vp,  Ip = ratio * Is
+*
+* Zwei gekoppelte Induktivitaeten mit einem K-Statement waeren die andere
+* Bauart. Sie ist nicht genommen worden, weil sie das Windungsverhaeltnis nur
+* mittelbar ueber die Wurzel des Induktivitaetsverhaeltnisses ausdrueckt und
+* die Kopplung nie ganz 1 sein darf - der Import hat aber genau eine Zahl aus
+* der Datei, das Verhaeltnis, und die soll unveraendert im Bauteil stehen.
+*
+* Lm ist die Hauptinduktivitaet, parallel zur Primaerseite: sie fuehrt den
+* Magnetisierungsstrom und gibt der Primaerwicklung ausserdem den
+* Gleichstrompfad, ohne den ein unbelasteter Uebertrager ein offener Knoten
+* waere. Rp und Rs sind die Wicklungswiderstaende.
+*
+* Ideal in allem uebrigen: keine Streuung, keine Saettigung, keine
+* Kernverluste. Multisim beschreibt dazu eine Kennlinie (`table(%I, ...)`), die
+* hier kein Gegenstueck hat - eine Schaltung, die den Kern in die Saettigung
+* fahren soll, verhaelt sich nicht wie das Original.
+*
+* Anschlussreihenfolge: P1 P2 (primaer), S1 S2 (sekundaer)
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt xfmr P1 P2 S1 S2 PARAMS: ratio=1 Lm=50u Rp=10m Rs=10m
+Rprim P1 PA {Rp}
+Lmag PA P2 {Lm}
+Fprim PA P2 Vsens {ratio}
+Esec SB S2 PA P2 {ratio}
+Vsens SB SC 0
+Rsec SC S1 {Rs}
+.ends xfmr

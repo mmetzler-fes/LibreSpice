@@ -34,6 +34,13 @@ await build({
   format: "esm",
   platform: "node",
   packages: "external",
+  // The converter reads the gate's pin table from ltspiceGeometry so it cannot
+  // drift from the one the parser and the canvas use — and that module's tree
+  // reaches asyParser, which asks Vite for `import.meta.glob`. Node has no such
+  // API, so it gets the same empty-symbol shim the test runner uses. No symbol
+  // artwork is needed here: the conversion places parts by coordinate.
+  define: { "import.meta.glob": "globShim", "import.meta.env": '{"BASE_URL":"/"}' },
+  inject: [resolve(__dirname, "glob-shim.js")],
   outfile,
   logLevel: "warning",
 });

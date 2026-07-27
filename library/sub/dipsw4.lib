@@ -1,0 +1,31 @@
+* DIP-Schalterblock mit vier Schaltern (Multisims DSWPK_4).
+*
+* Vier voneinander unabhaengige Schliesser in einem Gehaeuse. Multisim setzt den
+* Block als *ein* Bauteil mit acht Anschluessen; gegenueberliegende Pins
+* gehoeren zusammen, also 1-8, 2-7, 3-6, 4-5. Das ist die Nummerierung des
+* echten DIL-Gehaeuses und nicht frei gewaehlt - die Beschaltung im Schaltplan
+* haengt daran.
+*
+* Umgeschaltet wird wie beim einzelnen spst ueber `pos<n>` in den Eigenschaften,
+* mit derselben Arithmetik statt einer Fallunterscheidung (siehe spst.lib):
+* ngspice wertet `.param` frueh aus und nicht mit dem vollen Funktionsumfang
+* der B-Quelle.
+*
+*   pos<n> = 1 : Schalter n geschlossen
+*   pos<n> = 0 : Schalter n offen
+*
+* Alle vier stehen auf offen. Die gespeicherte Stellung wird beim Import *nicht*
+* uebernommen, weil sie in der Datei nicht steht: Multisim legt fuer alle vier
+* Schalter dasselbe Wertepaar ab, gleich in welcher Stellung sie gezeichnet
+* sind. Offen ist die Ruhelage, die das Bauteil im Katalog selbst nennt
+* ("Keep unused switches in OFF position").
+*
+* Anschlussreihenfolge: P1 .. P8, also wie am Gehaeuse durchgezaehlt.
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt dipsw4 P1 P2 P3 P4 P5 P6 P7 P8 PARAMS: pos1=0 pos2=0 pos3=0 pos4=0 Ron=10m Roff=1G
+R1 P1 P8 {Ron + (1-pos1)*Roff}
+R2 P2 P7 {Ron + (1-pos2)*Roff}
+R3 P3 P6 {Ron + (1-pos3)*Roff}
+R4 P4 P5 {Ron + (1-pos4)*Roff}
+.ends dipsw4

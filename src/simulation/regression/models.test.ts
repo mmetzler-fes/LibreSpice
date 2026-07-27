@@ -222,6 +222,138 @@ const CASES: Case[] = [
     const vf = last(fwd, "v(a)");
     if (!(vf > 0.4 && vf < 1.0)) fail(`forward drop is ${vf.toFixed(2)} V, not a conducting diode`);
   } },
+
+  { name: "74LS138 decodes all eight addresses and obeys its enables", run: async (fail) => {
+    // The whole truth table, not a spot check: which output goes low is the
+    // entire content of the part, and an address bit weighted wrong shows up
+    // nowhere else. Address counted up with three static sources per step.
+    const text = await shippedLib("74LS138.lib");
+    const outs = ["y0", "y1", "y2", "y3", "y4", "y5", "y6", "y7"];
+    const rig = (a: number, b: number, c: number, g1: number, g2a: number) =>
+      `* 138\nVa a 0 DC ${a}\nVb b 0 DC ${b}\nVc c 0 DC ${c}\n`
+      + `Vg1 g1 0 DC ${g1}\nVg2a g2a 0 DC ${g2a}\nVg2b g2b 0 DC 0\n`
+      + `X1 a b c g1 g2a g2b ${outs.join(" ")} 74LS138\n${text}\n.op\n.end\n`;
+    for (let n = 0; n < 8; n++) {
+      const d = await sim(rig((n & 1) * 5, (n & 2) * 2.5, (n & 4) * 1.25, 5, 0));
+      const low = outs.filter((o) => last(d, `v(${o})`) < 2.5);
+      if (low.join() !== outs[n]) {
+        fail(`address ${n}: low outputs are [${low.join(",")}], expected only ${outs[n]}`);
+        return;
+      }
+    }
+    // Disabled: G1 low, then ~G2A high. Either one must lift every output.
+    for (const [g1, g2a] of [[0, 0], [5, 5]] as const) {
+      const d = await sim(rig(0, 0, 0, g1, g2a));
+      const low = outs.filter((o) => last(d, `v(${o})`) < 2.5);
+      if (low.length) fail(`disabled with G1=${g1}, ~G2A=${g2a}: [${low.join(",")}] still low`);
+    }
+  } },
+
+  { name: "seg7a lights a segment pulled low and blocks the other way", run: async (fail) => {
+    // Common anode: a segment conducts when its own line is pulled down, and the
+    // supply must not simply run through the display when it is not.
+    const text = await shippedLib("seg7a.lib");
+    // Segment a pulled to 0 through 150 Ω — about 20 mA off 5 V, which is the
+    // point the model was fitted at. Segment b driven *high*, i.e. to the anode's
+    // own potential, which is how a common-anode display is held dark.
+    const d = await sim(
+      `* seg7a\nVcc com 0 DC 5\nX1 a b c d e f g com seg7a\n`
+      + `Ra1 a a1 150\nVa a1 0 DC 0\nVb b 0 DC 5\nRc1 c 0 1Meg\nRd1 d 0 1Meg\n`
+      + `Re1 e 0 1Meg\nRf1 f 0 1Meg\nRg1 g 0 1Meg\n${text}\n.options savecurrents\n.op\n.end\n`);
+    const vf = 5 - last(d, "v(a)");
+    if (!(vf > 1.7 && vf < 1.95)) fail(`forward drop is ${vf.toFixed(2)} V, not the fitted 1.83 V`);
+    const ia = Math.abs(last(d, "i(va)")), ib = Math.abs(last(d, "i(vb)"));
+    if (!(ia > 15e-3 && ia < 25e-3)) fail(`the lit segment draws ${(ia * 1000).toFixed(1)} mA, not about 20 mA`);
+    // Dark means dark: no anode-to-segment voltage, so no current at all.
+    if (!(ib < ia / 1e6)) fail(`the dark segment draws ${ib.toExponential(2)} A against the lit one's ${ia.toExponential(2)} A`);
+  } },
+
+  { name: "transw switches on its control and freewheels through the body diode", run: async (fail) => {
+    // Both halves of the part, and the second is why it exists: with the switch
+    // open the inductor current has to keep flowing through the diode, or the
+    // node runs away and the transient never converges.
+    const text = await shippedLib("transw.lib");
+    const d = await sim(
+      `* transw\nV1 in 0 DC 24\nX1 in sw ctrl transw\nVc ctrl 0 PULSE(0 5 0 1n 1n 5u 10u)\n`
+      + `L1 sw out 100u\nRl out 0 10\nC1 out 0 47u\nDf 0 sw DFW\n.model DFW D(Is=1e-9)\n`
+      + `${text}\n.tran 1u 400u\n.end\n`);
+    const time = d["time"], out = d["v(out)"];
+    if (!out) { fail(`no v(out): ${Object.keys(d).join(",")}`); return; }
+    const at = (us: number) => {
+      let i = 0;
+      for (let k = 0; k < time.length; k++) if (time[k] <= us * 1e-6) i = k;
+      return out[i];
+    };
+    // Half duty off 24 V, so the output settles around 12 V. Wide band: the
+    // point is that it chops at all, not what the converter's ripple is.
+    const v = at(380);
+    if (!(v > 8 && v < 18)) fail(`output settles at ${v.toFixed(2)} V, not near half of 24 V`);
+    // Never switched on at all would leave the output at zero.
+    if (at(20) < 0.5) fail("the switch never conducted");
+  } },
+
+  { name: "dipsw4 opens and closes each of its four contacts on its own", run: async (fail) => {
+    // Independence is the whole claim: one `pos` must move one contact and no
+    // other. Opposite pins are one switch (1-8, 2-7, 3-6, 4-5).
+    const text = await shippedLib("dipsw4.lib");
+    const pairs = [[1, 8], [2, 7], [3, 6], [4, 5]];
+    for (let k = 0; k < 4; k++) {
+      const pos = [0, 0, 0, 0];
+      pos[k] = 1;
+      // The subcircuit takes its terminals as P1..P8 in order, which is *not*
+      // pair order — the pairing is what the model does with them.
+      const nodes = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `p${n}`);
+      const d = await sim(
+        `* dip\n` + pairs.map(([a], i) => `V${i} p${a} 0 DC 5`).join("\n") + "\n"
+        + pairs.map(([, b], i) => `R${i} p${b} 0 1k`).join("\n") + "\n"
+        + `X1 ${nodes.join(" ")} dipsw4 pos1=${pos[0]} pos2=${pos[1]} pos3=${pos[2]} pos4=${pos[3]}\n`
+        + `${text}\n.op\n.end\n`);
+      for (let i = 0; i < 4; i++) {
+        const v = last(d, `v(p${pairs[i][1]})`);
+        const closed = i === k;
+        if (closed && !(v > 4.5)) fail(`switch ${k + 1} closed but p${pairs[i][1]} is ${v.toFixed(3)} V`);
+        if (!closed && !(v < 0.1)) fail(`switch ${i + 1} should be open but p${pairs[i][1]} is ${v.toFixed(3)} V`);
+      }
+    }
+  } },
+
+  { name: "xfmr transforms voltage up and current down by its ratio", run: async (fail) => {
+    // Both halves of an ideal transformer, and the second is the one a
+    // voltage-only model gets away with omitting until someone measures power:
+    // the primary must draw ratio times the secondary current.
+    const text = await shippedLib("xfmr.lib");
+    const d = await sim(
+      `* xfmr\nV1 p1 0 SIN(0 2 100)\nRsrc p1 pa 0.001\nX1 pa 0 s1 0 xfmr ratio=5 Lm=1\n`
+      + `Rload s1 0 10\n${text}\n.options savecurrents\n.tran 0.1m 25m\n.end\n`);
+    const time = d["time"], vs = d["v(s1)"], vp = d["v(pa)"];
+    if (!vs || !vp) { fail(`no winding voltages: ${Object.keys(d).join(",")}`); return; }
+    // Sampled at the peak of the second period, clear of the start transient.
+    let i = 0;
+    for (let k = 0; k < time.length; k++) if (time[k] <= 12.5e-3) i = k;
+    const ratio = vs[i] / vp[i];
+    if (!(ratio > 4.7 && ratio < 5.3)) fail(`secondary is ${ratio.toFixed(2)}x the primary, not 5x`);
+    // The current the source delivers: 5x the secondary's, so the power balances.
+    const ip = d["i(rsrc)"] ?? d["i(v1)"];
+    if (!ip) { fail(`no primary current: ${Object.keys(d).join(",")}`); return; }
+    const is = vs[i] / 10;
+    const got = Math.abs(ip[i]) / Math.abs(is);
+    if (!(got > 4.5 && got < 5.5)) fail(`primary draws ${got.toFixed(2)}x the secondary current, not 5x`);
+  } },
+
+  { name: "wattmeter loads neither path it is wired into", run: async (fail) => {
+    // Both halves have to be transparent: the voltage path must not bleed the
+    // node it watches and the current path must not drop anything in the branch
+    // it carries, or the reading changes what it is reading.
+    const text = await shippedLib("wattmeter.lib");
+    const d = await sim(
+      `* wm\nV1 in 0 DC 10\nX1 in mid mid out wattmeter\nRload in mid 100\nRrest out 0 100\n`
+      + `${text}\n.options savecurrents\n.op\n.end\n`);
+    const vmid = last(d, "v(mid)"), vout = last(d, "v(out)");
+    // The current path is a 0 V source, so its two ends are the same node.
+    if (Math.abs(vmid - vout) > 1e-9) fail(`the current path drops ${(vmid - vout).toExponential(2)} V`);
+    // Two equal resistors in series off 10 V: the meter must not shift the tap.
+    if (!(Math.abs(vmid - 5) < 0.01)) fail(`the divider sits at ${vmid.toFixed(4)} V, not 5 V`);
+  } },
 ];
 
 CASES.push(

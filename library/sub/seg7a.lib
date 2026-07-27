@@ -1,0 +1,33 @@
+* Sieben-Segment-Anzeige mit gemeinsamer Anode (Multisims SEVEN_SEG_COM_A).
+*
+* Nicht zu verwechseln mit seg7hex: das ist Dekoder und Anzeige in einem und hat
+* vier Binaereingaenge. Hier liegen die sieben Segmente einzeln heraus, und
+* dekodiert wird ausserhalb - im Beispiel von zwei 74LS138 und einer Reihe
+* UND-Gatter. Genau darum geht es auf so einem Blatt.
+*
+* Elektrisch sind es sieben Leuchtdioden mit zusammengelegter Anode. Ein Segment
+* leuchtet, wenn sein Anschluss nach unten gezogen wird - deshalb "gemeinsame
+* Anode"; die Segmentleitungen sind aktiv low.
+*
+* Das Diodenmodell ist auf die Angabe des Katalogeintrags gefittet:
+* Vf = 1,83 V bei 20 mA (rote GaAsP-Anzeige). Bei N = 2 und Rs = 5 Ohm liefert
+* Is = 6e-17 genau diesen Punkt. Keine Uebernahme aus einem fremden Datensatz,
+* sondern aus dieser einen Angabe gerechnet - Sperrverhalten und Kapazitaet
+* sagt sie nicht, die bleiben deshalb bei den Vorgaben.
+*
+* Was die Anzeige *zeigt*, steht nicht hier - eine leuchtende Ziffer ist kein
+* Strom, sondern eine Ablesung (dasselbe Argument wie bei seg7hex).
+*
+* Anschlussreihenfolge: A B C D E F G COM
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt seg7a A B C D E F G COM
+DA COM A SEGLED
+DB COM B SEGLED
+DC COM C SEGLED
+DD COM D SEGLED
+DE COM E SEGLED
+DF COM F SEGLED
+DG COM G SEGLED
+.model SEGLED D(Is=6e-17 N=2 Rs=5)
+.ends seg7a

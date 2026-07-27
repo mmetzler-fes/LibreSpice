@@ -33,13 +33,34 @@
  * drift apart.
  */
 
-import { routeNets, touches, entersBody, type RouteReport } from "./router.js";
+import { routeNets, type RouteReport } from "./router.js";
 import { parseSI } from "../components/base/componentValue.js";
+// The gate's pin table, so the converter cannot drift from the one the parser
+// and the canvas share (see gatePinOffsets).
+import { CENTER } from "../ltspice/ltspiceGeometry.js";
 
-/** Normalise a Multisim value for SPICE (µ → u, strip blanks). */
+/**
+ * Normalise a Multisim value for SPICE (µ → u, M → Meg, strip blanks).
+ *
+ * The `M` is the one that bites. Multisim writes a megohm `1M` and a milliohm
+ * `100 m`, telling them apart by case; SPICE is case-insensitive and reads both
+ * as milli, so `1M` arrives as a thousandth of an ohm — nine orders of magnitude
+ * out, in the direction that turns an open circuit into a short.
+ *
+ * It stayed hidden because the two ways a value reaches the netlist do not agree.
+ * A `SYMATTR Value` is read back by `parseSI`, which already knows a lone `M` is
+ * mega, so the 180 megohm resistors in the bundled files were always right. A
+ * `SYMATTR SpiceLine` is passed through *verbatim* — and that is where a switch
+ * keeps its open-contact resistance. Every converted voltage-controlled switch
+ * therefore had `Roff=1M`, i.e. a milliohm, and stood permanently closed: the
+ * `Tiefsetzsteller` chopped nothing and delivered its input voltage straight
+ * through to the load, with no error anywhere.
+ *
+ * Only an `M` that ends a number is touched, and never the `M` of `Meg`.
+ */
 function si(v: unknown): string {
   if (v === undefined || v === null || v === "") return "";
-  return String(v).replace(/[μµ]/g, "u").trim();
+  return String(v).replace(/[μµ]/g, "u").replace(/(\d)M(?![eE])\b/g, "$1Meg").trim();
 }
 
 /** A Multisim number as a plain one; NaN where there is no number to read. */
@@ -316,6 +337,48 @@ const TYPES: Record<string, PartType> = {
     value: () => "seg7hex", attrs: ["Prefix X", "SpiceModel seg7hex"],
   },
 
+  // The 74LS138, as a library part: the decoder as B-sources, in
+  // library/sub/74LS138.lib. `GND`/`VCC` are shared by the whole package and
+  // drawn on no section, so they arrive without a position and are left out like
+  // every other digital part's supplies. Multisim spells the two active-low
+  // enables with the bar in the name.
+  "74LS138": {
+    sym: "74LS138", prefix: "U", forcePrefix: "X",
+    pins: ["A", "B", "C", "G1", "~G2A", "~G2B", "Y0", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel 74LS138"],
+  },
+
+  // The bare seven-segment display — decoder and display are two parts here,
+  // unlike the `seg7hex` above which is both in one. Seven LEDs on a shared
+  // anode (library/sub/seg7a.lib), so the segment lines are active low.
+  "7-Segment Display Common Anode": {
+    sym: "seg7a", prefix: "U", forcePrefix: "X",
+    pins: ["A", "B", "C", "D", "E", "F", "G", "COM"],
+    value: () => "seg7a", attrs: ["Prefix X", "SpiceModel seg7a"],
+  },
+
+  // The wattmeter, the one virtual instrument that has to stay a part: it lies
+  // across the load *and* in series with it, so leaving it out breaks the branch
+  // its current path carries (library/sub/wattmeter.lib). Multisim numbers its
+  // four connections; the pairs are 1/2 across and 3/4 through.
+  Wattmeter: {
+    sym: "wattmeter", prefix: "XWM", forcePrefix: "X", pins: ["1", "2", "3", "4"],
+    value: () => "wattmeter", attrs: ["Prefix X", "SpiceModel wattmeter"],
+  },
+
+  // The transformer, as the ideal two-port its own netlist describes: the turns
+  // ratio and nothing else carried over (library/sub/xfmr.lib). Multisim states
+  // the two winding counts, and `ratio` is what they come to.
+  Transformer: {
+    sym: "xfmr", prefix: "T", forcePrefix: "X",
+    pins: ["p1pos", "p1neg", "s1pos", "s1neg"],
+    value: () => "xfmr", attrs: ["Prefix X", "SpiceModel xfmr"],
+    spiceLine: (p) => {
+      const n = (k: string, d: string) => si(p[k]) || d;
+      return `ratio=${n("Ratio", "1")} Lm=${n("Lm", "50u")} Rp=${n("Rp", "10m")} Rs=${n("Rs", "10m")}`;
+    },
+  },
+
   // The switches, as parts rather than as a pair of parameter resistors.
   //
   // Same story as the potentiometer: two resistor bodies took roughly three
@@ -330,12 +393,15 @@ const TYPES: Record<string, PartType> = {
   SPST: {
     sym: "spst", prefix: "S", forcePrefix: "X", pins: ["1", "2"],
     value: () => "spst", attrs: ["Prefix X", "SpiceModel spst"],
-    spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}`,
+    spiceLine: (p) => `pos=${manualSwitchClosed(p) ? 1 : 0}${switchContacts(p)}`,
   },
+  // The changeover keeps the plain reading: with no state recorded it rests on
+  // NC, and unlike the make-contact above it conducts *somewhere* either way, so
+  // an unknown position never leaves the sheet dead.
   SPDT: {
     sym: "spdt", prefix: "S", forcePrefix: "X", pins: ["2", "1", "3"],
     value: () => "spdt", attrs: ["Prefix X", "SpiceModel spdt"],
-    spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}`,
+    spiceLine: (p) => `pos=${(parseInt(p.State ?? "0", 10) || 0) === 1 ? 1 : 0}${switchContacts(p)}`,
   },
   // The dependent source SPICE has as a primitive (`E`), wrapped in a `.subckt`
   // so it can be a part with named pins like everything else. Multisim numbers
@@ -346,6 +412,34 @@ const TYPES: Record<string, PartType> = {
     sym: "vcvs", prefix: "E", forcePrefix: "X", pins: ["4", "3", "2", "1"],
     value: () => "vcvs", attrs: ["Prefix X", "SpiceModel vcvs"],
     spiceLine: (p) => `Gain=${si(p.Gain) || "1"}`,
+  },
+
+  // The DIP switch pack: four independent make-contacts in one housing, and one
+  // placed part with eight pins (library/sub/dipsw4.lib). Opposite pins belong
+  // to the same switch, which is the real package's numbering.
+  "DIP Switch 4": {
+    sym: "dipsw4", prefix: "S", forcePrefix: "X",
+    pins: ["1", "2", "3", "4", "5", "6", "7", "8"],
+    value: () => "dipsw4", attrs: ["Prefix X", "SpiceModel dipsw4"],
+    spiceLine: () => "pos1=0 pos2=0 pos3=0 pos4=0",
+  },
+
+  // A transistor used as a switch, with the body diode that makes a switching
+  // converter computable at all (library/sub/transw.lib). Unlike the Live
+  // format's plain "Transistor Switch" — still a parameter resistor below — this
+  // one keeps its control input, which for a part whose whole job is chopping is
+  // the difference between the circuit working and doing nothing.
+  //
+  // The control is single-ended against ground, exactly as Multisim's own
+  // subcircuit has it (`s1 upper lower_ ctrlp 0`).
+  "Transistor Switch with Diode": {
+    sym: "transw", prefix: "S", forcePrefix: "X", pins: ["pos", "neg", "control"],
+    value: () => "transw", attrs: ["Prefix X", "SpiceModel transw"],
+    spiceLine: (p) => {
+      const n = (k: string, d: string) => si(p[k]) || d;
+      return `Von=${n("CtrlOn", "5")} Voff=0 Ron=${n("TranRon", "1m")} Roff=${n("TranRoff", "1G")}`
+        + ` Vdrop=${n("TranVon", "0")} Drs=${n("DiodeRon", "10m")}`;
+    },
   },
 
   "Voltage Controlled SPST": {
@@ -458,6 +552,23 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   pot: [[16, 16], [64, 48], [16, 96]],
   // src/sym/seg7hex.asy, in SpiceOrder: D8 D4 D2 D1 — on Multisim's own raster.
   seg7hex: [[0, 0], [32, 0], [64, 0], [96, 0]],
+  // src/sym/seg7a.asy, in SpiceOrder: A B C D E F G COM. Segments 16 apart in a
+  // row, the common anode 208 above the first — Multisim's own raster again.
+  seg7a: [[0, 0], [16, 0], [32, 0], [48, 0], [64, 0], [80, 0], [96, 0], [0, -208]],
+  // src/sym/wattmeter.asy, in SpiceOrder: VP VN IP IN.
+  wattmeter: [[0, 0], [32, 0], [64, 0], [96, 0]],
+  // src/sym/xfmr.asy, in SpiceOrder: P1 P2 S1 S2.
+  xfmr: [[0, 0], [0, 64], [128, 0], [128, 64]],
+  // src/sym/transw.asy, in SpiceOrder: P N CTRL.
+  transw: [[0, 0], [0, 96], [-48, 48]],
+  // src/sym/dipsw4.asy, in SpiceOrder: P1..P4 along the bottom, P5..P8 back
+  // along the top — so that opposite pins are one switch, as on the package.
+  dipsw4: [[0, 0], [16, 0], [32, 0], [48, 0], [48, -80], [32, -80], [16, -80], [0, -80]],
+  // src/sym/74LS138.asy, in SpiceOrder: A B C G1 G2A G2B Y0..Y7.
+  "74LS138": [
+    [0, 0], [0, 16], [0, 32], [0, 64], [0, 80], [0, 96],
+    [192, 0], [192, 16], [192, 32], [192, 48], [192, 64], [192, 80], [192, 96], [192, 112],
+  ],
   // The switch family, in SpiceOrder. src/sym/{spst,spdt,vcspst,vcspdt}.asy —
   // drawn on Multisim's own pin raster, so a converted switch needs no bridge
   // and the wiring lands straight on the pins.
@@ -512,6 +623,42 @@ function param(p: Params, name: string): string {
 function switchThresholds(p: Params): string {
   const v = (k: string, d: string) => param(p, k) || d;
   return `Von=${v("V_ON", "1")} Voff=${v("V_OFF", "0")} Ron=${v("R_ON", "10m")} Roff=${v("R_OFF", "1G")}`;
+}
+
+/**
+ * Whether a hand-operated switch should come over closed.
+ *
+ * Multisim Live saves the position in `State` and that is what is read. Multisim
+ * 14 saves it *nowhere*: its interactive switch keeps only the hotkey that
+ * toggles it (`Space`) and its two contact resistances, so a file says nothing
+ * about which way the switch was left. Read as "not 1, therefore open" — which
+ * is what this did — every switch imported from a `.ms14` came over open, and a
+ * switch in series with the supply takes the whole sheet with it: the
+ * `Tiefsetzsteller` converted correctly in every other respect and simulated a
+ * circuit with no source connected to it.
+ *
+ * So a missing state means the switch's own resting position, which for a
+ * make-contact is the one its symbol declares (`spst.asy`: `pos=1`). An explicit
+ * state still wins wherever the format records one.
+ */
+function manualSwitchClosed(p: Params): boolean {
+  const state = p.State;
+  if (state === undefined || state === "") return true;
+  return (parseInt(state, 10) || 0) === 1;
+}
+
+/**
+ * A switch's contact resistances, where the file states them.
+ *
+ * Multisim 14 gives them per instance (100 µΩ closed, 100 MΩ open in the
+ * `Tiefsetzsteller`), and they belong on the instance here too — the models take
+ * both as parameters. Left off, every switch fell back to the model's own
+ * defaults, which are not the same numbers.
+ */
+function switchContacts(p: Params): string {
+  const ron = param(p, "R_ON");
+  const roff = param(p, "R_OFF");
+  return (ron ? ` Ron=${ron}` : "") + (roff ? ` Roff=${roff}` : "");
 }
 
 /** `AC Voltage`/`AC Current` carry a SPICE SIN() source's parameters. */
@@ -778,9 +925,9 @@ function gatePinOffsets(n: number): Pt[] {
   const span = 48;
   const offs: Pt[] = [];
   for (let i = 0; i < n; i++) {
-    offs.push([0, 40 + (n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1)))]);
+    offs.push([CENTER - 32, CENTER + (n === 1 ? 0 : Math.round(-span / 2 + (span * i) / (n - 1)))]);
   }
-  offs.push([72, 40]);
+  offs.push([CENTER + 32, CENTER]);
   return offs;
 }
 
@@ -1138,31 +1285,6 @@ function wireGroups(wires: Wire[], points: Pt[]): Union {
 }
 
 /**
- * How far a pin bridge steps out sideways before turning — one visible grid
- * square, so the stub leaves the symbol instead of running flush along its edge.
- *
- * A net label needs no such lead: it is a coordinate and simply sits on the pin
- * (see `reconcile`).
- */
-const LEAD = 16;
-/**
- * Which way a lead should point to get *out* of the part, from the pin's
- * position relative to the centre of its own part's pins. The dominant axis
- * wins, so the stub stays orthogonal.
- */
-function leadDirection(pinKey: string, pinPos: PinPos): Pt | null {
-  const prefix = pinKey.slice(0, pinKey.lastIndexOf("/") + 1);
-  const siblings = Object.entries(pinPos).filter(([k]) => k.startsWith(prefix)).map(([, p]) => p);
-  if (siblings.length < 2) return null;
-  const p = pinPos[pinKey];
-  const cx = siblings.reduce((s, q) => s + q[0], 0) / siblings.length;
-  const cy = siblings.reduce((s, q) => s + q[1], 0) / siblings.length;
-  const dx = p[0] - cx, dy = p[1] - cy;
-  if (dx === 0 && dy === 0) return null;
-  return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-}
-
-/**
  * How far a part's body reaches past its terminals, across the line they sit on.
  *
  * A two-terminal part's pins share one coordinate, so the box they span is a line
@@ -1242,7 +1364,7 @@ function onSegment(p: Pt, [x1, y1, x2, y2]: Wire): boolean {
  * another pin or on an existing wire is dropped back onto the pin, since a stub
  * into an occupied point would invent a connection Multisim never had.
  */
-function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[], bodies: Wire[], named: Set<string>): string[] {
+function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlags: string[], named: Set<string>): string[] {
   // Ground already has FLAGs from the connector symbols; take their points into
   // account so a grounded pin isn't labelled a second time under another name.
   const flagPts: Pt[] = [];
@@ -1300,50 +1422,15 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
     // the named ones, where the label is wanted for its own sake, and for the one
     // whose counterpart went missing.
     if (islands.size < 2 && !shown && !lost) continue;
-    for (const [, { p, key: pinKey }] of islands) {
+    for (const [, { p }] of islands) {
       // Already named, by a connector symbol or by another net's pin sharing the
       // point: a second FLAG on the same spot says nothing and draws twice.
       if (placed.some((q) => q[0] === p[0] && q[1] === p[1])) continue;
-      // A pin with no wire on it needs one. A name binds to the *net under it*,
-      // and a net is made of wires (see anchorNets/resolveAnchor) — so a name
-      // dropped on a bare terminal reaches nothing and the pin stays floating.
-      // That is not hypothetical: emitted without this, 106 gate inputs across
-      // six schematics fell back to ground, because a gate's pins routinely line
-      // up with no wire at all (see emitGate).
+      // The name goes *on* the pin. Always — a bare pin included.
       //
-      // One grid square, out of the part, and only where it is load-bearing.
-      //
-      // Four directions are tried, the informed one first. That is not thorough
-      // for its own sake: the lead is wire like any other, so it shorts whatever
-      // it touches, and where the pin's own way out is blocked the alternative to
-      // trying another is a name that binds to nothing.
-      if (!wires.some((w) => onSegment(p, w))) {
-        const first = leadDirection(pinKey, pinPos);
-        const dirs: Pt[] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-        if (first) dirs.unshift(first);
-        let seated = false;
-        for (const d of dirs) {
-          const lead: Wire = [p[0], p[1], p[0] + d[0] * LEAD, p[1] + d[1] * LEAD];
-          const tip: Pt = [lead[2], lead[3]];
-          // The pin it starts from carries no wire (that is why it is here), so
-          // anything the lead reaches belongs to another net — including a pin it
-          // would end on, a label already sitting there, and a part it would run
-          // into, which is not a short but reads as one.
-          const clear = !wires.some((w) => touches(lead, w))
-            && !Object.values(pinPos).some((q) => (q[0] !== p[0] || q[1] !== p[1]) && onSegment(q, lead))
-            && !placed.some((q) => onSegment(q, lead))
-            && !bodies.some((b) => entersBody(lead, b));
-          if (!clear) continue;
-          wires.push(lead);
-          placed.push(tip);
-          out.push(`FLAG ${tip[0]} ${tip[1]} ${name}`);
-          seated = true;
-          break;
-        }
-        if (seated) continue;
-      }
-
-      // Otherwise the name goes *on* the pin: no stub, and nothing joined to it.
+      // Two stubs have stood here and both are gone. The first hung the flag off
+      // a 16-unit lead on the grounds that LTSpice reads a flag sitting directly
+      // on a pin as a terminal rather than as a net name. It does not.
       //
       // This used to draw a 16-unit lead and hang the flag off its far end, on
       // the grounds that LTSpice reads a flag sitting directly on a pin as a
@@ -1355,9 +1442,16 @@ function reconcile(netList: MsNet[], pinPos: PinPos, wires: Wire[], existingFlag
       // from. A name is a coordinate: it owns no pin and no wire, and dragging it
       // moves nothing but itself. Hung on a stub, the stub stayed behind when the
       // name was dragged, and the stub's far end came back from the parser as a
-      // junction — 878 of the 953 names in the converted sheets sat on one,
-      // against 38% in the hand-drawn ones, and those sheets carried ten times
-      // the junctions per file.
+      // junction — one that could be neither selected nor deleted.
+      //
+      // The second survived only at the gates, where a name written at the file's
+      // pin missed the canvas's by 18 units and bound to nothing. That was a
+      // defect in the gate's pin table, not a fact about names, and it has been
+      // fixed at the source (see ltspiceGeometry.logicGatePinOffsets). With the
+      // two frames agreeing, a name on any bare pin binds to it — pins are
+      // zero-length routes (anchorNets.netRoutes) and a name landing on one that
+      // no wire reaches creates the net there (circuitStore.rebuildConnections),
+      // which is how LTSpice ties a supply pin to its rail with a flag alone.
       placed.push(p);
       out.push(`FLAG ${p[0]} ${p[1]} ${name}`);
     }
@@ -1692,7 +1786,7 @@ export function convert(sch: MsSchematic): ConversionResult {
       }
     }
   }
-  flags.push(...reconcile(sch.nets, pinPos, wires, flags, bodies, namedByExpr));
+  flags.push(...reconcile(sch.nets, pinPos, wires, flags, namedByExpr));
 
   // --- prune what reaches nothing -----------------------------------------
   // A wire end that meets no terminal, no other wire and no name connects

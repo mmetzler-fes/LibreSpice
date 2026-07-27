@@ -53,4 +53,21 @@
 # on supply pins — referenced by name from the converted Dual-Slope ADC.
 !/sub/comparator.lib
 !/sym/comparator.asy
+# The parts the Multisim 14 import needs, same story as everything above: a
+# converted sheet references them by name, so they have to ship or it is
+# incomplete. The 1-aus-8 decoder and the display it drives, the DIP switch
+# pack that addresses them, the transistor switch with its body diode, the
+# transformer, and the wattmeter.
+!/sub/74LS138.lib
+!/sym/74LS138.asy
+!/sub/seg7a.lib
+!/sym/seg7a.asy
+!/sub/dipsw4.lib
+!/sym/dipsw4.asy
+!/sub/transw.lib
+!/sym/transw.asy
+!/sub/xfmr.lib
+!/sym/xfmr.asy
+!/sub/wattmeter.lib
+!/sym/wattmeter.asy
 !/sym/OpAmps/

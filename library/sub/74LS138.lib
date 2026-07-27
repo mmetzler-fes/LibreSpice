@@ -1,0 +1,50 @@
+* LibreSpice — 74LS138, 1-aus-8-Dekoder (3-to-8 decoder).
+*
+* Drei Adressleitungen A B C waehlen einen von acht Ausgaengen; der gewaehlte
+* geht auf low, alle anderen bleiben high. Freigegeben ist der Baustein nur,
+* wenn G1 high liegt und ~G2A und ~G2B beide low sind - sonst sind *alle*
+* Ausgaenge high. So steht es im Datenblatt und so steht es in der d_chip-
+* Wahrheitstabelle, die Multisim mitbringt.
+*
+* Gebaut wie das ganze uebrige Digitalteil: als B-Quellen, ohne XSPICE. Der
+* Dekoder ist reine Kombinatorik, hat also keinen Speicherknoten und braucht
+* keine Kondensatorzelle wie das Flipflop - EN und SEL sind Zwischenknoten, die
+* eine Spannungsquelle festhaelt.
+*
+* Die Eingaenge bekommen einen Ableitwiderstand nach 0. Der ist nicht das
+* Verhalten eines TTL-Eingangs (der zieht sich selbst nach high), sondern der
+* Gleichstrompfad, ohne den ngspice den Knoten mangels Bezug abweist: an einem
+* Eingang, der nur *gelesen* wird und an einem offenen DIP-Schalter haengt,
+* steht sonst gar nichts, und die Matrix wird singulaer, bevor der Transient
+* startet. Dasselbe Mittel wie bei seg7hex, aus demselben Grund.
+*
+* Ideal: keine Laufzeit. Die 48 Verzoegerungspaare der Multisim-Tabelle
+* (18..41 ns je nach Pfad) haben hier kein Gegenstueck und entfallen - eine
+* Schaltung, die auf diese Laufzeitunterschiede baut, verhaelt sich nicht wie
+* der echte Baustein.
+*
+* Anschlussreihenfolge: A B C G1 G2A G2B Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
+* (G2A und G2B sind die aktiv-low-Freigaben, im Datenblatt ~G2A und ~G2B.)
+
+.SUBCKT 74LS138 A B C G1 G2A G2B Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
+
+RA A 0 1Meg
+RB B 0 1Meg
+RC C 0 1Meg
+RG1 G1 0 1Meg
+RG2A G2A 0 1Meg
+RG2B G2B 0 1Meg
+
+BEN EN 0 V = ((v(G1)>2.5) && (v(G2A)<2.5) && (v(G2B)<2.5)) ? 5 : 0
+BSEL SEL 0 V = ((v(A)>2.5) ? 1 : 0) + ((v(B)>2.5) ? 2 : 0) + ((v(C)>2.5) ? 4 : 0)
+
+BY0 Y0 0 V = ((v(EN)>2.5) && (abs(v(SEL)-0)<0.5)) ? 0 : 5
+BY1 Y1 0 V = ((v(EN)>2.5) && (abs(v(SEL)-1)<0.5)) ? 0 : 5
+BY2 Y2 0 V = ((v(EN)>2.5) && (abs(v(SEL)-2)<0.5)) ? 0 : 5
+BY3 Y3 0 V = ((v(EN)>2.5) && (abs(v(SEL)-3)<0.5)) ? 0 : 5
+BY4 Y4 0 V = ((v(EN)>2.5) && (abs(v(SEL)-4)<0.5)) ? 0 : 5
+BY5 Y5 0 V = ((v(EN)>2.5) && (abs(v(SEL)-5)<0.5)) ? 0 : 5
+BY6 Y6 0 V = ((v(EN)>2.5) && (abs(v(SEL)-6)<0.5)) ? 0 : 5
+BY7 Y7 0 V = ((v(EN)>2.5) && (abs(v(SEL)-7)<0.5)) ? 0 : 5
+
+.ENDS 74LS138

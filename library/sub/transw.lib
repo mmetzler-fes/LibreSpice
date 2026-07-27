@@ -1,0 +1,42 @@
+* Transistorschalter mit Inversdiode (Multisims TRANSISTOR_DIODE).
+*
+* Kein Transistor, sondern seine Rolle im Leistungsteil: ein Kontakt, der einem
+* Steuersignal folgt, mit der Body-Diode, ohne die kein Schaltnetzteil rechnet.
+* Genau dafuer steht es im Tiefsetzsteller - schaltet der Transistor ab, muss
+* der Drosselstrom durch die Diode weiterlaufen, sonst steht an der Drossel eine
+* beliebig hohe Spannung und ngspice bricht ab.
+*
+* Bisher wurde das Bauteil als Parameterwiderstand ersetzt und verlor dabei
+* seinen Steuereingang. Bei einem Schalter, dessen einzige Aufgabe das Takten
+* ist, heisst das: die Schaltung tut gar nichts mehr.
+*
+* Der Steuereingang ist *einpolig*, gegen Masse - so hat es Multisim
+* (`s1 upper lower_ ctrlp 0`). Das ist der Unterschied zum vcspst, der ein
+* Steuerpaar hat; wo das Steuersignal auf einem eigenen Bezug liegt, ist der
+* vcspst das richtige Bauteil.
+*
+* Ein- und Ausschaltschwelle werden wie dort in Mittelwert und Hysterese
+* umgerechnet, damit sich das Bauteil auch von Hand mit Datenblattzahlen
+* bestuecken laesst.
+*
+* Die Hysterese ist dabei etwas schmaler als der Abstand der beiden Schwellen
+* (0,45 statt 0,5). Sonst faellt die Einschaltschwelle Vt+Vh genau auf Von, und
+* ngspice schaltet erst *oberhalb* - ein Takt, der wie hier bis genau 5 V geht
+* und Von = 5 V hat, laesst den Schalter dann nie schliessen. Genau dieser Fall
+* ist der Normalfall: Multisim traegt als CtrlOn den Pegel des Taktes ein.
+*
+* Die Inversdiode ist bewusst nahezu ideal (kleines N, kleiner Rs): Multisim
+* beschreibt sie stueckweise linear mit einem Knick bei DiodeVon und der
+* Steigung 1/DiodeRon, also ohne Diffusionsspannung. Eine Siliziumdiode mit
+* 0,7 V an der Stelle waere ein anderes Bauteil.
+*
+* Anschlussreihenfolge: P N CTRL
+*
+* Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+.subckt transw P N CTRL PARAMS: Von=5 Voff=0 Ron=1m Roff=1G Vdrop=0 Drs=10m
+S1 P NX CTRL 0 SWT
+.model SWT SW(Ron={Ron} Roff={Roff} Vt={(Von+Voff)/2} Vh={0.45*abs(Von-Voff)})
+VF NX N {Vdrop}
+D1 N P DBODY
+.model DBODY D(Is=1e-6 N=0.05 Rs={Drs})
+.ends transw

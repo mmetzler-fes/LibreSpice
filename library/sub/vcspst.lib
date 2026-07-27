@@ -12,8 +12,14 @@
 * im Konverter, damit das Bauteil auch von Hand mit den Zahlen aus dem
 * Datenblatt bestueckt werden kann.
 *
+* Die Hysterese ist dabei etwas schmaler als der halbe Schwellenabstand (0,45
+* statt 0,5). Sonst faellt die Einschaltschwelle Vt+Vh genau auf V_ON, und
+* ngspice schaltet erst *oberhalb* - ein Steuersignal, das bis genau V_ON geht,
+* schliesst den Kontakt dann nie. Das ist kein Sonderfall: Multisim traegt als
+* V_ON regelmaessig den Pegel des Steuersignals selbst ein.
+*
 * Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
 .subckt vcspst A B CP CN PARAMS: Von=1 Voff=0 Ron=10m Roff=1G
 S1 A B CP CN SWC
-.model SWC SW(Ron={Ron} Roff={Roff} Vt={(Von+Voff)/2} Vh={abs(Von-Voff)/2})
+.model SWC SW(Ron={Ron} Roff={Roff} Vt={(Von+Voff)/2} Vh={0.45*abs(Von-Voff)})
 .ends vcspst

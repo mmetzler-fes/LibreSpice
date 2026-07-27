@@ -14,10 +14,16 @@
 *   Steuerspannung unter der Schwelle : COM-NC geschlossen (Ruhelage)
 *   ueber der Schwelle                : COM-NO geschlossen
 *
+* Die Hysterese ist etwas schmaler als der halbe Schwellenabstand (0,45 statt
+* 0,5). Sonst faellt die Einschaltschwelle Vt+Vh genau auf Von, und ngspice
+* schaltet erst *oberhalb* - ein Steuersignal, das bis genau Von geht, legt den
+* Schalter dann nie um. Das ist kein Sonderfall: Multisim traegt als Von
+* regelmaessig den Pegel des Steuersignals selbst ein.
+*
 * Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
 .subckt vcspdt COM NC NO CP CN PARAMS: Von=1 Voff=0 Ron=10m Roff=1G
 S1 COM NO CP CN SWC
 S2 COM NC CP CN SWO
-.model SWC SW(Ron={Ron} Roff={Roff} Vt={(Von+Voff)/2} Vh={abs(Von-Voff)/2})
-.model SWO SW(Ron={Roff} Roff={Ron} Vt={(Von+Voff)/2} Vh={abs(Von-Voff)/2})
+.model SWC SW(Ron={Ron} Roff={Roff} Vt={(Von+Voff)/2} Vh={0.45*abs(Von-Voff)})
+.model SWO SW(Ron={Roff} Roff={Ron} Vt={(Von+Voff)/2} Vh={0.45*abs(Von-Voff)})
 .ends vcspdt
