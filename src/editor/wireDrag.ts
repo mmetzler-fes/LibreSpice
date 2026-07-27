@@ -1,3 +1,4 @@
+import { orthoVertices } from "@core/geometry/ortho.js";
 import { snapToGrid } from "./pinGeometry.js";
 
 /**
@@ -108,7 +109,81 @@ export function movedWaypoints(
 ): DragPoint[] {
   const next = waypoints.slice();
   next.splice(grab.index, grab.replace ? 1 : 0, { x: snapToGrid(to.x), y: snapToGrid(to.y) });
-  return tidyWaypoints(alignToNeighbours(next, grab.index, ends));
+  return unknot(tidyWaypoints(alignToNeighbours(next, grab.index, ends)), grab.index, ends);
+}
+
+/**
+ * Pull the slack out of a wire that has tied itself in a knot.
+ *
+ * `tidyWaypoints` drops points that say nothing — repeats, and corners on the
+ * straight line between their neighbours. That is not enough for the shape this
+ * is named after. A rectangle standing in the middle of a wire is made of points
+ * that are *not* collinear with anything: the route leaves, turns, comes back
+ * across its own path and turns again, and every one of its corners looks
+ * necessary from where it stands.
+ *
+ * What gives it away is the path as a whole. A wire that runs over itself — two
+ * legs that are not neighbours sharing any point at all — is knotted, whatever
+ * its individual corners say. So the test is on the drawn polyline, and the cure
+ * is to drop waypoints until it comes out simple: like letting a rubber band go
+ * slack, right angles and all, rather than straightening it by force.
+ *
+ * The point just placed is kept if there is any way to keep it — it is the one
+ * the user has hold of. The others are tried newest first, since the knot is
+ * nearly always made of the corners left behind by earlier corrections.
+ *
+ * Bounded by the number of waypoints, and it gives up rather than emptying the
+ * list: a wire the user has genuinely routed through a tight spot may have no
+ * simple path at all, and forcing one would throw their work away.
+ */
+function unknot(
+  waypoints: DragPoint[], keep: number, ends?: [DragPoint, DragPoint],
+): DragPoint[] {
+  if (!ends || waypoints.length < 2) return waypoints;
+  let points = waypoints;
+  let held = points[keep];
+  for (let guard = points.length; guard > 0 && knotted(points, ends); guard--) {
+    const order = points
+      .map((_, i) => i)
+      .filter((i) => points[i] !== held)
+      .reverse();
+    const next = order.find((i) => !knotted(without(points, i), ends));
+    if (next !== undefined) { points = without(points, next); continue; }
+    // Nothing on its own untangles it: drop the newest and try again, and let
+    // the held point go last of all.
+    const drop = order[0];
+    if (drop === undefined) { held = undefined as unknown as DragPoint; continue; }
+    points = without(points, drop);
+  }
+  return points;
+}
+
+const without = (points: DragPoint[], i: number) => points.filter((_, k) => k !== i);
+
+/** Does the drawn route run over itself? */
+function knotted(waypoints: DragPoint[], ends: [DragPoint, DragPoint]): boolean {
+  const verts = orthoVertices([ends[0], ...waypoints, ends[1]]);
+  const segs: [DragPoint, DragPoint][] = [];
+  for (let i = 0; i < verts.length - 1; i++) {
+    if (verts[i].x !== verts[i + 1].x || verts[i].y !== verts[i + 1].y) segs.push([verts[i], verts[i + 1]]);
+  }
+  // Neighbouring legs share their corner by construction; anything further apart
+  // touching at all means the path has come back to where it already was.
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 2; j < segs.length; j++) {
+      if (segmentsTouch(segs[i], segs[j])) return true;
+    }
+  }
+  return false;
+}
+
+/** Do two axis-aligned segments share any point? */
+function segmentsTouch([a, b]: [DragPoint, DragPoint], [c, d]: [DragPoint, DragPoint]): boolean {
+  const ax1 = Math.min(a.x, b.x), ax2 = Math.max(a.x, b.x);
+  const ay1 = Math.min(a.y, b.y), ay2 = Math.max(a.y, b.y);
+  const bx1 = Math.min(c.x, d.x), bx2 = Math.max(c.x, d.x);
+  const by1 = Math.min(c.y, d.y), by2 = Math.max(c.y, d.y);
+  return ax1 <= bx2 && bx1 <= ax2 && ay1 <= by2 && by1 <= ay2;
 }
 
 /**

@@ -178,7 +178,51 @@ const CASES: Case[] = [
       if (wps.length !== 3) fail(`the detour was flattened to ${wps.length} points`);
     },
   },
+  {
+    name: "a rectangle loop is pulled out of the wire",
+    run: (fail) => {
+      // The shape from the report: the route leaves, turns, comes back across
+      // its own path and turns again. Every corner looks necessary on its own —
+      // what gives it away is the path running over itself.
+      const ends: [DragPoint, DragPoint] = [P(0, 0), P(400, 0)];
+      const knot = [P(300, 0), P(300, 100), P(100, 100), P(100, 0)];
+      const before = orthoVertices([ends[0], ...knot, ends[1]]);
+      if (!overlaps(before)) { fail("the fixture is not knotted, so the case proves nothing"); return; }
+      const after = movedWaypoints(knot, { index: 0, replace: true }, P(300, 0), ends);
+      const verts = orthoVertices([ends[0], ...after, ends[1]]);
+      if (overlaps(verts)) {
+        fail(`still knotted: ${verts.map((p) => `${p.x},${p.y}`).join(" ")}`);
+      }
+    },
+  },
+  {
+    name: "a plain corner survives the untangling",
+    run: (fail) => {
+      // Right angles stay possible — only the knots go. A single corner off the
+      // straight line makes no self-overlap and must be left alone.
+      const ends: [DragPoint, DragPoint] = [P(0, 0), P(400, 0)];
+      const after = movedWaypoints([P(200, 160)], { index: 0, replace: true }, P(200, 160), ends);
+      if (after.length !== 1 || after[0].y !== 160) {
+        fail(`the corner was removed: ${after.map((p) => `${p.x},${p.y}`).join(" ")}`);
+      }
+    },
+  },
 ];
+
+/** Does a drawn route run over itself? (the test's own reading of "knotted") */
+function overlaps(verts: DragPoint[]): boolean {
+  const segs: [DragPoint, DragPoint][] = [];
+  for (let i = 0; i < verts.length - 1; i++) {
+    if (verts[i].x !== verts[i + 1].x || verts[i].y !== verts[i + 1].y) segs.push([verts[i], verts[i + 1]]);
+  }
+  const touch = ([a, b]: [DragPoint, DragPoint], [c, d]: [DragPoint, DragPoint]) =>
+    Math.min(a.x, b.x) <= Math.max(c.x, d.x) && Math.min(c.x, d.x) <= Math.max(a.x, b.x)
+    && Math.min(a.y, b.y) <= Math.max(c.y, d.y) && Math.min(c.y, d.y) <= Math.max(a.y, b.y);
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 2; j < segs.length; j++) if (touch(segs[i], segs[j])) return true;
+  }
+  return false;
+}
 
 export function runWireDragTests(): TestReport {
   const failures: { name: string; reason: string }[] = [];
