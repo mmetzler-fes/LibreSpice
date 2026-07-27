@@ -60,6 +60,8 @@
 # transformer, and the wattmeter.
 !/sub/74LS138.lib
 !/sym/74LS138.asy
+!/sub/74LS139.lib
+!/sym/74LS139.asy
 !/sub/seg7a.lib
 !/sym/seg7a.asy
 !/sub/dipsw4.lib

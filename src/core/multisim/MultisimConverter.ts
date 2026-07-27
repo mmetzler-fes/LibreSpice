@@ -348,6 +348,38 @@ const TYPES: Record<string, PartType> = {
     value: () => "", attrs: ["Prefix X", "SpiceModel 74LS138"],
   },
 
+  // The 74LS139: the 138's smaller twin, and one *half* of the real package —
+  // Multisim places a section at a time, so what is on the sheet is a 1-of-4
+  // decoder with its own enable (library/sub/74LS139.lib). Two sections on a
+  // sheet are two instances, which is electrically what they are.
+  //
+  // Both spellings, because the Live format names it after the ordering code and
+  // the 14 format after the type; the entry is the same either way.
+  ...Object.fromEntries(["74LS139", "74LS139D"].map((n) => [n, {
+    sym: "74LS139", prefix: "U", forcePrefix: "X",
+    pins: ["A", "B", "~G", "Y0", "Y1", "Y2", "Y3"],
+    value: () => "", attrs: ["Prefix X", "SpiceModel 74LS139"],
+  }])),
+
+  // Multisim's thermal-noise source: a resistor whose *noise* is the point. It
+  // states the resistance, the temperature and the bandwidth, and the RMS that
+  // follows from them is Johnson noise, sqrt(4kTRB) — 129 nV for the 1 kΩ at
+  // 27 °C over 1 kHz in the Wien oscillator here.
+  //
+  // It converts to the resistor it is. That is right for the operating point and
+  // right for a `.noise` run, where ngspice models a resistor's thermal noise
+  // itself — but *not* for a transient, which ngspice computes noiselessly. In
+  // the Wien oscillator that matters: the noise is what kicks the loop into
+  // oscillation, so the converted sheet sits at its operating point instead of
+  // swinging. Said out loud in the report rather than papered over.
+  //
+  // A behavioural source over `trrandom(2, …)` would model it properly and was
+  // tried; this ngspice build has no such function and stops with a fatal error.
+  "Thermal Noise": {
+    sym: "res", euro: "Misc\\EuropeanResistor", prefix: "R", forcePrefix: "R",
+    pins: ["1", "2"], value: (p) => si(p.Resistance) || "1k",
+  },
+
   // The bare seven-segment display — decoder and display are two parts here,
   // unlike the `seg7hex` above which is both in one. Seven LEDs on a shared
   // anode (library/sub/seg7a.lib), so the segment lines are active low.
@@ -504,6 +536,17 @@ const TYPES: Record<string, PartType> = {
 };
 
 /**
+ * Parts that convert through the ordinary table but are not quite the same
+ * thing afterwards — worth a line in the report, since nothing on the sheet
+ * would say so.
+ */
+const SUBSTITUTE_NOTES: Record<string, string> = {
+  "Thermal Noise": "Thermal Noise (als Widerstand; das Rauschen selbst hat im "
+    + "Transienten kein Gegenstueck, ein Oszillator schwingt damit nicht von "
+    + "allein an)",
+};
+
+/**
  * Discrete parts Multisim names after the real device. They all use the generic
  * symbol plus the part number as the model, so a `.model`/`.lib` line added
  * later resolves them.
@@ -564,6 +607,8 @@ const PIN_OFFSETS: Record<string, Pt[]> = {
   // src/sym/dipsw4.asy, in SpiceOrder: P1..P4 along the bottom, P5..P8 back
   // along the top — so that opposite pins are one switch, as on the package.
   dipsw4: [[0, 0], [16, 0], [32, 0], [48, 0], [48, -80], [32, -80], [16, -80], [0, -80]],
+  // src/sym/74LS139.asy, in SpiceOrder: A B G Y0..Y3 — on Multisim's own raster.
+  "74LS139": [[0, 0], [0, 16], [0, 48], [192, 0], [192, 16], [192, 32], [192, 48]],
   // src/sym/74LS138.asy, in SpiceOrder: A B C G1 G2A G2B Y0..Y7.
   "74LS138": [
     [0, 0], [0, 16], [0, 32], [0, 64], [0, 80], [0, 96],
@@ -1635,6 +1680,11 @@ export function convert(sch: MsSchematic): ConversionResult {
       skipped.push(bp.name);
       continue;
     }
+    // A part that converts to something it is not quite says so. The switches and
+    // the gates report themselves above; these are the ones that come through the
+    // ordinary table and would otherwise arrive silently changed.
+    const note = SUBSTITUTE_NOTES[bp.name];
+    if (note) substituted.push(note);
     const offsets = PIN_OFFSETS[type.sym] ?? [];
 
     // Prefer the IEC artwork when Multisim used it — these are German teaching

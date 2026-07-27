@@ -249,6 +249,29 @@ const CASES: Case[] = [
     }
   } },
 
+  { name: "74LS139 decodes all four addresses and obeys its enable", run: async (fail) => {
+    // The 138's twin, and the same reason for walking the whole table rather
+    // than spot-checking: which output goes low is the entire content of the
+    // part, and an address bit weighted wrong shows up nowhere else.
+    const text = await shippedLib("74LS139.lib");
+    const outs = ["y0", "y1", "y2", "y3"];
+    const rig = (a: number, b: number, g: number) =>
+      `* 139\nVa a 0 DC ${a}\nVb b 0 DC ${b}\nVg g 0 DC ${g}\n`
+      + `X1 a b g ${outs.join(" ")} 74LS139\n${text}\n.op\n.end\n`;
+    for (let n = 0; n < 4; n++) {
+      const d = await sim(rig((n & 1) * 5, (n & 2) * 2.5, 0));
+      const low = outs.filter((o) => last(d, `v(${o})`) < 2.5);
+      if (low.join() !== outs[n]) {
+        fail(`address ${n}: low outputs are [${low.join(",")}], expected only ${outs[n]}`);
+        return;
+      }
+    }
+    // ~G high disables: every output must lift, whatever the address says.
+    const d = await sim(rig(0, 0, 5));
+    const low = outs.filter((o) => last(d, `v(${o})`) < 2.5);
+    if (low.length) fail(`disabled with ~G high: [${low.join(",")}] still low`);
+  } },
+
   { name: "seg7a lights a segment pulled low and blocks the other way", run: async (fail) => {
     // Common anode: a segment conducts when its own line is pulled down, and the
     // supply must not simply run through the display when it is not.

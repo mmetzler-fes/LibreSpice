@@ -1,0 +1,40 @@
+* LibreSpice — 74LS139, 1-aus-4-Dekoder (dual 2-to-4 decoder).
+*
+* Zwei Adressleitungen A und B waehlen einen von vier Ausgaengen; der gewaehlte
+* geht auf low, alle anderen bleiben high. Freigegeben ist der Baustein, solange
+* ~G low liegt - liegt ~G high, sind alle vier Ausgaenge high.
+*
+* Der Baustein enthaelt zwei solche Dekoder. Multisim setzt eine Haelfte auf
+* einmal, und genau die ist hier beschrieben: ein Abschnitt mit A, B, ~G und
+* Y0..Y3. Zwei Abschnitte auf dem Blatt sind zwei Instanzen dieses Modells,
+* was elektrisch dasselbe ist - die beiden Haelften teilen sich im echten
+* Gehaeuse nur die Versorgung, sonst nichts.
+*
+* Gebaut wie der 74LS138 nebenan und aus demselben Grund so: als B-Quellen,
+* ohne XSPICE. Reine Kombinatorik, kein Speicherknoten, also auch keine
+* Kondensatorzelle wie beim Flipflop.
+*
+* Die Eingaenge bekommen ihren Ableitwiderstand nach 0 - nicht als Abbild eines
+* TTL-Eingangs (der zieht sich selbst nach high), sondern als Gleichstrompfad,
+* ohne den ngspice einen nur gelesenen Knoten mangels Bezug abweist.
+*
+* Ideal: keine Laufzeit. Die Verzoegerungen des echten Bausteins haben hier kein
+* Gegenstueck und entfallen.
+*
+* Anschlussreihenfolge: A B G Y0 Y1 Y2 Y3
+* (G ist die aktiv-low-Freigabe, im Datenblatt ~G.)
+
+.SUBCKT 74LS139 A B G Y0 Y1 Y2 Y3
+
+RA A 0 1Meg
+RB B 0 1Meg
+RG G 0 1Meg
+
+BSEL SEL 0 V = ((v(A)>2.5) ? 1 : 0) + ((v(B)>2.5) ? 2 : 0)
+
+BY0 Y0 0 V = ((v(G)<2.5) && (abs(v(SEL)-0)<0.5)) ? 0 : 5
+BY1 Y1 0 V = ((v(G)<2.5) && (abs(v(SEL)-1)<0.5)) ? 0 : 5
+BY2 Y2 0 V = ((v(G)<2.5) && (abs(v(SEL)-2)<0.5)) ? 0 : 5
+BY3 Y3 0 V = ((v(G)<2.5) && (abs(v(SEL)-3)<0.5)) ? 0 : 5
+
+.ENDS 74LS139
