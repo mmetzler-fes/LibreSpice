@@ -9,7 +9,11 @@ if git diff --cached --name-only HEAD 2>/dev/null | grep -q '^examples/Multisim_
   echo "pre-push: examples/Multisim_converted/ darf nicht gepusht werden." >&2
   exit 1
 fi
-for ref in $(git rev-list --all 2>/dev/null | head -400); do
+# Only what is actually pushable: refs/heads. `--all` would sweep in the
+# refs/original/* backups a history rewrite leaves behind, and those are meant to
+# still contain the path — reading them as a failure blocks exactly the push that
+# the rewrite was performed to allow.
+for ref in $(git rev-list --branches 2>/dev/null | head -600); do
   if git ls-tree -r --name-only "$ref" 2>/dev/null | grep -q '^examples/Multisim_converted/'; then
     echo "pre-push: examples/Multisim_converted/ steckt noch in der Historie ($ref)." >&2
     echo "          Erst mit einem Rewrite entfernen, dann pushen." >&2
