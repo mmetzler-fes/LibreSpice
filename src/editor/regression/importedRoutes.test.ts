@@ -1,6 +1,7 @@
 import type { Edge } from "@xyflow/react";
 import { forgetImportedRoutes } from "../importedRoutes.js";
 import { orthoVertices } from "@core/geometry/ortho.js";
+import { wireRoutes, type PinLookup } from "@core/geometry/wireRoutes.js";
 import type { TestReport } from "./svgExport.test.js";
 
 /**
@@ -149,6 +150,61 @@ CASES.push(
       const path = orthoVertices([{ x: 480, y: 128 }, to], { avoid: [PIN_D] });
       const last = path[path.length - 1];
       if (last.x !== to.x || last.y !== to.y) fail(`route does not reach its end: ${JSON.stringify(path)}`);
+    },
+  },
+);
+
+/**
+ * The same rule, on the path that actually writes the file.
+ *
+ * The first fix put the avoidance into the canvas's own hints (`edgeRouteHints`)
+ * and stopped there. That covers the drawing and the SVG export — but the `.asc`
+ * exporter and the net-name resolution both go through `wireRoutes.routeOf`,
+ * which builds its own hints, and the rule never reached them. So the schematic
+ * on screen stepped round the foreign pin while the file saved from it ran
+ * straight over it: the two stopped agreeing, which is worse than either being
+ * wrong on its own.
+ *
+ * Exercised through `wireRoutes` rather than `orthoVertices` for exactly that
+ * reason — a test on the geometry alone passed the whole time this was broken.
+ */
+CASES.push(
+  {
+    name: "the route the file is written from also avoids a foreign pin",
+    run: (fail) => {
+      const pins: Record<string, { x: number; y: number }> = {
+        "U8|q": { x: 480, y: 544 },
+        "U8|d": { x: 416, y: 544 },
+        "X1|D1": { x: 332, y: 480 },
+      };
+      const lookup: PinLookup = {
+        at: (id, h) => pins[`${id}|${h}`],
+        all: () => Object.entries(pins).map(([key, p]) => ({ key, ...p })),
+      };
+      const e = { id: "w", source: "U8", sourceHandle: "q", target: "X1", targetHandle: "D1", data: {} } as unknown as Edge;
+      const [route] = wireRoutes([e], lookup);
+      if (!route) { fail("no route produced"); return; }
+      const d = pins["U8|d"];
+      for (let i = 0; i < route.verts.length - 1; i++) {
+        const a = route.verts[i], b = route.verts[i + 1];
+        const on = a.x === b.x
+          ? d.x === a.x && d.y >= Math.min(a.y, b.y) && d.y <= Math.max(a.y, b.y)
+          : a.y === b.y && d.y === a.y && d.x >= Math.min(a.x, b.x) && d.x <= Math.max(a.x, b.x);
+        if (on) { fail(`route ${JSON.stringify(route.verts)} runs over U8.d`); return; }
+      }
+    },
+  },
+  {
+    name: "a lookup that cannot enumerate its pins still routes",
+    run: (fail) => {
+      // `all` is optional; without it the wire is routed as before rather than
+      // not at all.
+      const lookup: PinLookup = {
+        at: (id) => (id === "A" ? { x: 0, y: 0 } : { x: 64, y: 32 }),
+      };
+      const e = { id: "w", source: "A", sourceHandle: "p", target: "B", targetHandle: "p", data: {} } as unknown as Edge;
+      const [route] = wireRoutes([e], lookup);
+      if (!route || route.verts.length < 2) fail("no route without an `all` lookup");
     },
   },
 );

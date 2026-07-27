@@ -46,6 +46,11 @@ function flowPins(nodes: Node[], norm: SymbolNorm): PinLookup {
   return {
     at: (nodeId, handle) => at.get(`${nodeId}|${handle}`) ?? centre.get(nodeId),
     axis: (nodeId, handle) => axis.get(`${nodeId}|${handle}`),
+    // The same list the exporter supplies, so both measure a route the same way
+    // — the canvas resolves names against these routes and the file is written
+    // from the exporter's; a route that differed between them would name one net
+    // on screen and another on disk.
+    all: () => [...at].map(([key, p]) => ({ key, x: p.x, y: p.y })),
   };
 }
 

@@ -365,6 +365,14 @@ export class LTSpiceExporter {
     const symbolPins: PinLookup = {
       at: (nodeId, handle) => pinCoord.get(`${nodeId}-${handle}`),
       axis: (nodeId, handle) => pinAxis.get(`${nodeId}-${handle}`),
+      // Every pin, so a route can be kept off the ones it does not belong to
+      // (see PinLookup.all). `pinCoord` is keyed `<node>-<handle>`; the route
+      // wants `<node>|<handle>`, and the split has to be on the *last* dash
+      // because a handle may contain one.
+      all: () => [...pinCoord].map(([k, p]) => {
+        const i = k.lastIndexOf("-");
+        return { key: `${k.slice(0, i)}|${k.slice(i + 1)}`, x: p.x, y: p.y };
+      }),
     };
 
     // Flag coordinates, used to break wires the way LTSpice does.

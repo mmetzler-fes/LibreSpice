@@ -28,6 +28,17 @@ export interface PinLookup {
   at(nodeId: string, handle: string | null | undefined): RoutePoint | undefined;
   /** Outward direction, so a lead leaves the symbol squarely instead of along its flank. */
   axis?(nodeId: string, handle: string | null | undefined): Axis | undefined;
+  /**
+   * Every pin on the sheet, keyed `<nodeId>|<handle>`, so a route can be kept
+   * off the terminals that are not its own.
+   *
+   * Optional only so a caller that has no cheap way to enumerate them still
+   * works; every caller in the app supplies it. Without it a wire re-routing
+   * after a part moved can come to rest exactly on a foreign pin, and the `.asc`
+   * has no way to say "this one merely passes by" — it is written as a crossing
+   * and read back as a connection.
+   */
+  all?(): { key: string; x: number; y: number }[];
 }
 
 export interface WireRoute {
@@ -63,9 +74,25 @@ export function routeOf(edge: Edge, a: RoutePoint, b: RoutePoint, pins: PinLooku
 
   // A tapped end is pinned to a point on another wire, so it has no outward
   // direction of its own — forcing one would drag the tap off that wire.
+  //
+  // `avoid` carries every *other* pin. This is the one place it can be applied
+  // and reach everything: the file is written from these routes, and so is the
+  // net a name resolves to. Applied only at the canvas's own routing — where it
+  // was first put — the drawing stepped round a foreign pin while the saved file
+  // still ran straight over it, which is the worse of the two failures: what you
+  // see and what you get stop agreeing.
+  //
+  // The wire's own two ends are excluded by identity rather than by position.
+  // Two parts whose pins sit on the same point are already joined, and treating
+  // that point as forbidden would leave the wire between them unroutable.
+  const own = new Set([
+    `${edge.source}|${edge.sourceHandle}`,
+    `${edge.target}|${edge.targetHandle}`,
+  ]);
   const hints: RouteHints = {
     startAxis: edge.data?.sourceTap ? undefined : pins.axis?.(edge.source, edge.sourceHandle),
     endAxis: edge.data?.targetTap ? undefined : pins.axis?.(edge.target, edge.targetHandle),
+    avoid: pins.all?.().filter((p) => !own.has(p.key)).map((p) => ({ x: p.x, y: p.y })),
   };
   return orthoVertices([a, ...wps, b], hints);
 }
