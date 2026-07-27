@@ -1,3 +1,5 @@
+import { snapToGrid } from "./pinGeometry.js";
+
 /**
  * Correcting a drawn wire by hand: which point of it a press has taken hold of,
  * and what the wire's waypoints become when that point is moved.
@@ -79,9 +81,121 @@ export function grabWire(
   return { index, replace: false };
 }
 
-/** The waypoint list after the grabbed point has been moved to `to`. */
-export function movedWaypoints(waypoints: DragPoint[], grab: WireGrab, to: DragPoint): DragPoint[] {
+/**
+ * The waypoint list after the grabbed point has been moved to `to`.
+ *
+ * Snapped and tidied, not merely inserted. Both matter for the shape that comes
+ * out, and neither was done:
+ *
+ *  - **Snapped**, like every part and every name. An off-grid waypoint puts a
+ *    kink of one to three units into an otherwise straight run — invisible until
+ *    it is saved, where it becomes a `WIRE` line that no longer meets the grid
+ *    the rest of the sheet lives on.
+ *  - **Tidied**, which is what stops the loops. Each leg between two consecutive
+ *    points is right-angled *on its own*, so a waypoint that lies behind its
+ *    neighbour makes the two legs run against each other: the wire leaves, comes
+ *    back past where it started and goes out again, enclosing a rectangle. Drag
+ *    a corner across the wire's own path and that is exactly what happens.
+ *
+ * Tidying is done on the waypoints, deliberately, and not on the drawn polyline.
+ * The polyline is what a net name is resolved against (see anchorNets), so
+ * shortening it could move a wire out from under a label; the waypoints are the
+ * user's own marks, and dropping one that says nothing changes no geometry that
+ * anything else depends on.
+ */
+export function movedWaypoints(
+  waypoints: DragPoint[], grab: WireGrab, to: DragPoint, ends?: [DragPoint, DragPoint],
+): DragPoint[] {
   const next = waypoints.slice();
-  next.splice(grab.index, grab.replace ? 1 : 0, { x: to.x, y: to.y });
-  return next;
+  next.splice(grab.index, grab.replace ? 1 : 0, { x: snapToGrid(to.x), y: snapToGrid(to.y) });
+  return tidyWaypoints(alignToNeighbours(next, grab.index, ends));
+}
+
+/**
+ * How far a dragged corner reaches for a straight line with its neighbours.
+ *
+ * Three grid steps: close enough that it only catches a corner the user was
+ * plainly aiming to line up, far enough that they do not have to hit the pixel.
+ * The same idea as the anchor's magnet, for the same reason — the alternative to
+ * a magnet is a tolerance nobody can see.
+ */
+const STRAIGHTEN = 12;
+
+/**
+ * Pull a dragged corner onto line with what sits either side of it.
+ *
+ * Wires want to be straight, and dragging one should make it more so, not less.
+ * Without this every correction leaves a small step behind: the corner lands two
+ * or six units off the run it belongs to, the route inserts a jog to reach it,
+ * and the wire grows a staircase that no one drew and no one can quite remove.
+ *
+ * Only the point just moved is touched, and only across the axis it is already
+ * near. Its neighbours are left alone — straightening those would move parts of
+ * the wire the user is not pointing at.
+ *
+ * `ends` are the wire's two endpoints. They matter for the first and last
+ * waypoint, whose neighbour on one side is a pin rather than another waypoint:
+ * without them a corner dragged towards its own pin never quite lines up with
+ * it, which is the commonest correction there is.
+ */
+function alignToNeighbours(
+  points: DragPoint[], index: number, ends?: [DragPoint, DragPoint],
+): DragPoint[] {
+  const p = points[index];
+  if (!p) return points;
+  const before = points[index - 1] ?? ends?.[0];
+  const after = points[index + 1] ?? ends?.[1];
+  let { x, y } = p;
+  for (const n of [before, after]) {
+    if (!n) continue;
+    if (Math.abs(n.x - x) <= STRAIGHTEN) x = n.x;
+    if (Math.abs(n.y - y) <= STRAIGHTEN) y = n.y;
+  }
+  if (x === p.x && y === p.y) return points;
+  const out = points.slice();
+  out[index] = { x, y };
+  return out;
+}
+
+/**
+ * Drop the waypoints that say nothing: repeats, and points a route would pass
+ * through anyway.
+ *
+ * A waypoint earns its place by making the wire turn somewhere it otherwise
+ * would not. One that repeats its neighbour is noise; one that sits on the
+ * straight line between its neighbours is a corner the router would have drawn
+ * itself. Both survive a drag today and accumulate: every correction of the same
+ * corner leaves another one behind, and the route starts folding over itself.
+ *
+ * Endpoints are not in this list — it is the waypoints alone — so nothing here
+ * can detach a wire from a pin.
+ */
+export function tidyWaypoints(waypoints: DragPoint[]): DragPoint[] {
+  const out: DragPoint[] = [];
+  for (const p of waypoints) {
+    const last = out[out.length - 1];
+    if (last && last.x === p.x && last.y === p.y) continue;
+    out.push(p);
+  }
+  // Collinear middles, repeatedly: removing one can leave its neighbours in line
+  // with each other.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      const a = out[i - 1], b = out[i], c = out[i + 1];
+      const straight = (a.x === b.x && b.x === c.x) || (a.y === b.y && b.y === c.y);
+      if (!straight) continue;
+      // Only when `b` lies *between* its neighbours. A point beyond them is a
+      // genuine there-and-back the user drew, and removing it would silently
+      // straighten a detour they meant to keep.
+      const between = a.x === c.x
+        ? b.y >= Math.min(a.y, c.y) && b.y <= Math.max(a.y, c.y)
+        : b.x >= Math.min(a.x, c.x) && b.x <= Math.max(a.x, c.x);
+      if (!between) continue;
+      out.splice(i, 1);
+      changed = true;
+      break;
+    }
+  }
+  return out;
 }

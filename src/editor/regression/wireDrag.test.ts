@@ -64,8 +64,10 @@ const CASES: Case[] = [
       if (!grab) { fail("nothing grabbed between the two waypoints"); return; }
       if (grab.replace) { fail("took the press for one of the existing waypoints"); return; }
       if (grab.index !== 1) fail(`inserted at ${grab.index}, not between the two`);
+      // 152, not 150: a dragged point snaps to the grid like everything else.
+      // What this case is about is the *order*, which the snap does not touch.
       const wps = movedWaypoints([w1, w2], grab, P(150, 120));
-      if (wps.map((p) => p.x).join(",") !== "100,150,200") fail(`order came out ${wps.map((p) => p.x).join(",")}`);
+      if (wps.map((p) => p.x).join(",") !== "100,152,200") fail(`order came out ${wps.map((p) => p.x).join(",")}`);
     },
   },
   {
@@ -105,6 +107,75 @@ const CASES: Case[] = [
       if (!second?.replace) { fail("the second grab did not find the point it had just placed"); return; }
       wps = movedWaypoints(wps, second, P(40, 160));
       if (wps.length !== 1) fail(`${wps.length} waypoints after two drags of one point`);
+    },
+  },
+  {
+    name: "a dragged corner lands on the grid",
+    run: (fail) => {
+      const a = P(0, 0), b = P(300, 0);
+      const grab = grabWire(drawn(a, [], b), [], P(150, 0));
+      if (!grab) { fail("nothing grabbed"); return; }
+      const [w] = movedWaypoints([], grab, P(151, 122));
+      if (w.x % 4 !== 0 || w.y % 4 !== 0) fail(`landed at ${w.x},${w.y}`);
+    },
+  },
+  {
+    name: "a corner dragged near a straight line is pulled onto it",
+    run: (fail) => {
+      // The magnetism: aiming for alignment should *achieve* alignment, or every
+      // correction leaves a small step behind and the wire grows a staircase.
+      const w1 = P(100, 200), w2 = P(300, 200);
+      const grab = { index: 1, replace: true };
+      const [, mid] = movedWaypoints([w1, P(200, 208), w2], grab, P(200, 206));
+      if (mid.y !== 200) fail(`corner stayed at y=${mid.y} instead of lining up with 200`);
+    },
+  },
+  {
+    name: "a corner dragged clear of the line is left where it is put",
+    run: (fail) => {
+      const w1 = P(100, 200), w2 = P(300, 200);
+      const grab = { index: 1, replace: true };
+      const [, mid] = movedWaypoints([w1, P(200, 208), w2], grab, P(200, 260));
+      if (mid.y !== 260) fail(`corner was dragged to 260 but came out at ${mid.y}`);
+    },
+  },
+  {
+    name: "the ends attract too, so a corner lines up with its own pin",
+    run: (fail) => {
+      const a = P(0, 100), b = P(400, 100);
+      const grab = { index: 0, replace: true };
+      const [w] = movedWaypoints([P(200, 108)], grab, P(200, 106), [a, b]);
+      if (w.y !== 100) fail(`corner stayed at y=${w.y} instead of lining up with the ends`);
+    },
+  },
+  {
+    name: "dragging simplifies rather than accumulates",
+    run: (fail) => {
+      // What the wire is *for*: a point that no longer makes the route turn is
+      // dropped, so repeated corrections cannot pile up into a staircase.
+      const wps = movedWaypoints(
+        [P(100, 200), P(200, 200), P(300, 200)],
+        { index: 1, replace: true }, P(200, 200),
+      );
+      // Two, not one: the *middle* point is the redundant one. The outer two are
+      // the ends of the list and have no neighbour beyond them to be in line
+      // with, so nothing says they are superfluous.
+      if (wps.length !== 2 || wps[0].x !== 100 || wps[1].x !== 300) {
+        fail(`three collinear points came out as ${wps.map((p) => `${p.x},${p.y}`).join(" ")}`);
+      }
+    },
+  },
+  {
+    name: "a there-and-back the user drew is kept",
+    run: (fail) => {
+      // Only points *between* their neighbours are dropped. One beyond them is a
+      // deliberate detour, and straightening it would undo an edit nobody asked
+      // to undo.
+      const wps = movedWaypoints(
+        [P(100, 200), P(400, 200), P(300, 200)],
+        { index: 1, replace: true }, P(400, 200),
+      );
+      if (wps.length !== 3) fail(`the detour was flattened to ${wps.length} points`);
     },
   },
 ];

@@ -137,15 +137,16 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
   };
 
   const stored = (data?.waypoints as FlowPoint[] | undefined) ?? [];
-  // While a point of this wire is being dragged the route is drawn through it,
-  // and only the release writes it down.
-  const waypoints = held ? movedWaypoints(stored, held.grab, held.at) : stored;
   // When an endpoint taps an existing wire, draw only to the junction point
   // instead of routing all the way to the (electrical) target port.
   const sourceTap = data?.sourceTap as FlowPoint | undefined;
   const targetTap = data?.targetTap as FlowPoint | undefined;
   const start = sourceTap ?? pinCenter(source, sourceHandleId) ?? { x: sourceX, y: sourceY };
   const end = targetTap ?? pinCenter(target, targetHandleId) ?? { x: targetX, y: targetY };
+  // While a point of this wire is being dragged the route is drawn through it,
+  // and only the release writes it down. The ends go along so a corner dragged
+  // towards its own pin lines up with it (see alignToNeighbours).
+  const waypoints = held ? movedWaypoints(stored, held.grab, held.at, [start, end]) : stored;
   // An end that taps a wire is not on a pin, so it contributes no direction.
   // One place decides how a wire is routed, for the canvas and both exports
   // alike (see edgeRouteHints) — with the taps taken off the ends here, since
@@ -207,7 +208,7 @@ export function WireEdge({ id, source, sourceHandleId, target, targetHandleId, s
         setHeld(null);
         if (!done) return;
         updateEdgeData(id, {
-          waypoints: movedWaypoints(stored, done.grab, done.at),
+          waypoints: movedWaypoints(stored, done.grab, done.at, [start, end]),
           autoRoute: undefined,
           diagonal: undefined,
         });
