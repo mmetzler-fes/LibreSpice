@@ -47,16 +47,34 @@ import { netVoltageExpr, netCurrentExpr, currentExprDevice, compVoltageExpr, com
 import { usePlotStore } from "@simulation/plotStore.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import { isLongPressPointer, trackLongPress } from "./longPress.js";
-import { trackPointerDrag } from "./pointerDrag.js";
+import { isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 import { forgetImportedRoutes } from "./importedRoutes.js";
 import { FragmentGhost } from "./FragmentGhost.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { resolveAnchors } from "./anchorNets.js";
+import { anchorBoxes, anchorsInBand } from "./anchorHitBox.js";
 
 const NODE_TYPES = { component: ComponentNode };
 const EDGE_TYPES = { wire: WireEdge };
 let wireCounter = 1;
+
+/**
+ * How far a press has to travel before it counts as a rubber band rather than a
+ * click. Below it the pane's click handlers own the gesture — without the slop
+ * every click on empty canvas would end by selecting whatever names a
+ * zero-sized rectangle happens to touch.
+ */
+const BAND_SLOP = 3;
+
+/**
+ * How long after a node drag a click on that node is ignored.
+ *
+ * React Flow delivers the release of a drag as a click on the node it ended on,
+ * and that click must not be read as "the user picked this one part" — see
+ * onNodeClick.
+ */
+const CLICK_AFTER_DRAG_MS = 200;
 
 function CanvasInner() {
   const reactFlowInstance = useReactFlow();
@@ -68,6 +86,15 @@ function CanvasInner() {
   // committed on pointerup (below), so onPaneClick must not also place then and
   // create a duplicate; it stays the placement path for the mouse only.
   const lastPointerTypeRef = useRef<string>("mouse");
+  /**
+   * The names travelling with the node drag in progress (see onNodeDragStart),
+   * and when the last one ended.
+   *
+   * Up here with the other refs because `onNodeClick` reads the second one, and
+   * that callback is declared long before the drag handlers are.
+   */
+  const dragAnchors = useRef<{ ids: string[]; x: number; y: number } | null>(null);
+  const draggedAt = useRef(0);
 
   const {
     nodes, edges,
@@ -91,7 +118,7 @@ function CanvasInner() {
     editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
-    setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorId, setSelectedAnchorId, selectedTextBoxId, setSelectedTextBoxId,
+    setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorIds, setSelectedAnchorId, setSelectedAnchorIds, selectedTextBoxId, setSelectedTextBoxId,
   } = useUIStore();
 
   const theme = useTheme();
@@ -436,6 +463,11 @@ function CanvasInner() {
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
+      // A drag that ends on the node it started from still arrives here as a
+      // click. Left unguarded, dragging a block by one of its parts would clear
+      // the names that were selected with it — at the *end* of the gesture, so
+      // they would visibly travel along and then let go again.
+      if (Date.now() - draggedAt.current < CLICK_AFTER_DRAG_MS) return;
       setSelectedComponentId(node.id);
       // A part, a name and a note are three selections in three layers; picking
       // one lets go of the others, so the properties panel never shows something
@@ -529,6 +561,22 @@ function CanvasInner() {
   );
 
   // Right-click a wire → menu to annotate the net's potential / current.
+  /**
+   * Clicking a wire lets go of the names, exactly as clicking a part does.
+   *
+   * It did not, and that was survivable only while names could not be deleted
+   * with a selection: a name selected some time ago stayed selected behind the
+   * user's back, and Delete on a wire would now take it along. Rather than teach
+   * the delete to tell a fresh name selection from a stale one — which it cannot
+   * see — the stale case is removed. A rubber band is unaffected: it selects
+   * wires and names together without firing any click.
+   */
+  const onEdgeClick = useCallback(() => {
+    setSelectedComponentId(null);
+    setSelectedAnchorId(null);
+    setSelectedTextBoxId(null);
+  }, [setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId]);
+
   const onEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: Edge) => {
       event.preventDefault();
@@ -594,9 +642,54 @@ function CanvasInner() {
     [clientToFlow],
   );
 
+  /**
+   * Take the names the rubber band caught, alongside the parts React Flow takes.
+   *
+   * React Flow draws and evaluates its own selection rectangle and never tells
+   * anyone where it was, so the band is measured a second time here — from the
+   * same pointer, so the two cannot disagree about the gesture even though they
+   * disagree about what they can see. Nothing is captured or prevented, so React
+   * Flow's own handling of the press is untouched; this only watches.
+   *
+   * Only for a band actually dragged on empty canvas: a press that turns out to
+   * be a click leaves the selection to the click handlers, or every click on the
+   * pane would end by selecting the names under a zero-sized rectangle.
+   */
+  const trackAnchorBand = useCallback(
+    (e: React.PointerEvent) => {
+      const start = clientToFlow(e.clientX, e.clientY);
+      const additive = e.shiftKey;
+      const before = useUIStore.getState().selectedAnchorIds;
+      let dragged = false;
+      trackPointerDrag(
+        e,
+        (ev) => {
+          const now = clientToFlow(ev.clientX, ev.clientY);
+          if (!dragged && Math.abs(now.x - start.x) + Math.abs(now.y - start.y) < BAND_SLOP) return;
+          dragged = true;
+          const { nodes: ns, edges: es, netAnchors: as } = useCircuitStore.getState();
+          const boxes = anchorBoxes(as, ns, es, useUIStore.getState().symbolNorm);
+          const hit = anchorsInBand(boxes, { x1: start.x, y1: start.y, x2: now.x, y2: now.y });
+          // Live, not on release: the parts inside the band highlight as it is
+          // drawn, and a name that only lit up afterwards would read as having
+          // been added by the release rather than caught by the band.
+          setSelectedAnchorIds(additive ? [...new Set([...before, ...hit])] : hit);
+        },
+      );
+    },
+    [clientToFlow, setSelectedAnchorIds],
+  );
+
   const onWrapperPointerDown = useCallback(
     (e: React.PointerEvent) => {
       lastPointerTypeRef.current = e.pointerType;
+      // The rubber band, in the two ways it can be started: the area-select
+      // toggle (which is how it is reached on a tablet) and React Flow's own
+      // Shift+drag. Watched for every pointer type, before the long-press guard
+      // below turns the mouse away.
+      if (editorMode === "select" && !canvasLocked && (areaSelect || e.shiftKey) && isDragPointer(e)) {
+        trackAnchorBand(e);
+      }
       if (!isLongPressPointer(e)) return;
       // Carrying a cut/copied block: the ghost follows the finger and the block
       // lands where it lifts. Without this a touch device could pick a block up
@@ -629,7 +722,7 @@ function CanvasInner() {
         else if (edge) openEdgeMenu(edge, x, y);
       });
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu, dropPendingFragment],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu, dropPendingFragment, areaSelect, canvasLocked, trackAnchorBand],
   );
 
   /** Add a component data-point (voltage across / current through). Placed just
@@ -757,6 +850,65 @@ function CanvasInner() {
     },
     [clientToFlow, placeComponent],
   );
+
+  /**
+   * The names that travel with a node drag, settled once when it starts.
+   *
+   * Two kinds, and the second is not a convenience:
+   *
+   *  - the names the user *selected*, which is the whole point of being able to
+   *    rubber-band them alongside the parts;
+   *  - the names lying on a wire whose both ends are being dragged. Those have
+   *    to come along or the drag breaks them: the wire moves with its parts, the
+   *    name stays behind, and a name that is no longer on its wire silently
+   *    names nothing — or worse, names whatever wire it landed on instead. This
+   *    is the same rule copy/paste already uses to decide which names belong to
+   *    a block (see ascFragment.buildFragment), for the same reason.
+   */
+
+  const onNodeDragStart = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const { nodes: ns, edges: es, netAnchors: as } = useCircuitStore.getState();
+      const moving = ns.filter((n) => n.selected || n.id === node.id);
+      const ids = new Set(useUIStore.getState().selectedAnchorIds);
+      const movingIds = new Set(moving.map((n) => n.id));
+      const inner = es.filter((e) => movingIds.has(e.source) && movingIds.has(e.target));
+      const carried = resolveAnchors(
+        { nodes: moving, edges: inner, netAnchors: as, circuit: useCircuitStore.getState().circuit },
+        useUIStore.getState().symbolNorm,
+      );
+      for (const id of carried.keys()) ids.add(id);
+      dragAnchors.current = ids.size ? { ids: [...ids], x: node.position.x, y: node.position.y } : null;
+    },
+    [],
+  );
+
+  const onNodeDrag = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const d = dragAnchors.current;
+      if (!d) return;
+      const dx = node.position.x - d.x;
+      const dy = node.position.y - d.y;
+      if (dx === 0 && dy === 0) return;
+      d.x = node.position.x;
+      d.y = node.position.y;
+      useCircuitStore.getState().moveNetAnchorsBy(d.ids, dx, dy);
+    },
+    [],
+  );
+
+  const onNodeDragStop = useCallback(() => {
+    const had = dragAnchors.current;
+    dragAnchors.current = null;
+    draggedAt.current = Date.now();
+    // The nets only need re-deriving once the block has landed. During the drag
+    // it moves rigidly — a name and the wire under it travel together, so which
+    // net it lies on cannot change — and rebuilding on every step of a group drag
+    // is the one thing that would make it stutter on a full sheet. It *can*
+    // change at the end, for a selected name that was sitting on a wire outside
+    // the block, which is what this is for.
+    if (had) setTimeout(() => rebuildConnections(), 0);
+  }, [rebuildConnections]);
 
   /** Forget the imported path of the wires on a moved part (see importedRoutes). */
   const dropImportedRoutes = useCallback((movedIds: Set<string>) => {
@@ -904,8 +1056,12 @@ function CanvasInner() {
             onNodesChange={onNodesChange as never}
             onEdgesChange={onEdgesChange as never}
             onNodeClick={onNodeClick}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDrag={onNodeDrag}
+            onNodeDragStop={onNodeDragStop}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeContextMenu={onNodeContextMenu}
+            onEdgeClick={onEdgeClick}
             onEdgeContextMenu={onEdgeContextMenu}
             onPaneClick={onPaneClick}
             snapToGrid
@@ -1033,7 +1189,7 @@ function CanvasInner() {
             {/* A selected *name* shows its own properties; a selected wire shows
                 none, because a wire has none the file can hold — its name is a
                 flag at a point, which is the panel above. */}
-            {selectedAnchorId ? <NetAnchorPanel />
+            {selectedAnchorIds.length ? <NetAnchorPanel />
               : selectedTextBoxId ? <TextBoxPanel />
               : <PropertiesPanel />}
             <NetLabelsPanel />

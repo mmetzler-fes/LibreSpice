@@ -34,6 +34,42 @@ export interface NetAnchor {
   name: string;
   /** Set only for a connector: the `IOPIN` direction it declares. */
   portType?: PortType;
+  /**
+   * Where the *readable* tag sits, relative to the anchor point above.
+   *
+   * The anchor decides what is named; this decides only where the name is read.
+   * Splitting the two is what lets a label be dragged clear of a crowded corner
+   * without letting go of its net — the point stays on the wire and a leader
+   * line runs out to the tag (see NetAnchorLayer).
+   *
+   * Absent means "wherever the automatic layout puts it", which is the normal
+   * case and how every label starts out: LTSpice stores no offset either, and a
+   * file that never needed one should not grow one. Only a tag the user has
+   * actually dragged carries a pair here.
+   *
+   * Deliberately *not* in the `.asc`. There is no room for it in `FLAG x y name`
+   * and no attribute line to hang it on, so it rides in our own snapshot
+   * (share links, autosave) and is dropped on export. A schematic reopened in
+   * LTSpice draws the name beside its point, which is where it belongs anyway —
+   * the wiring is unaffected, so the loss is cosmetic and total, never partial.
+   */
+  tx?: number;
+  ty?: number;
+}
+
+/**
+ * How far a tag may sit from its anchor before the leader line is drawn.
+ *
+ * Below this the line would be shorter than the gap it spans and reads as a
+ * smudge on the terminal; the automatic layout already puts every tag inside
+ * this radius (`netLabelShape`'s reach is 14), so an untouched sheet draws no
+ * leader lines at all. One grid step and a half.
+ */
+export const LEADER_MIN = 24;
+
+/** The tag's own position: the anchor plus its offset, when it has one. */
+export function tagOffset(a: NetAnchor): { dx: number; dy: number } | null {
+  return a.tx === undefined || a.ty === undefined ? null : { dx: a.tx, dy: a.ty };
 }
 
 /**

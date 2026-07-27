@@ -4,6 +4,7 @@ import { symbolByName, symbolForType, symbolBounds, type SymbolNorm } from "@sym
 import { AsyGeometry, mapSymbol } from "@sym/AsySymbol.js";
 import { NODE_SIZE, GRID, getNodePins, getLocalPins, edgeRouteHints } from "./pinGeometry.js";
 import { netLabelShape, tagBoxOrigin } from "./netLabelShape.js";
+import { LEADER_MIN, tagOffset } from "@core/circuit/netAnchor.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import type { PortType } from "@core/components/special/Special.js";
@@ -318,9 +319,22 @@ export function buildSchematicSvg(
     const tagW = Math.max(20, a.name.length * 6.8 + 12);
     // Sheet coordinates for the tag's top-left: its anchor is local to the node
     // frame, so it is shifted out of that frame once, here.
-    const local = tagBoxOrigin(shape.tag, tagW, TAG_H);
+    //
+    // A tag the user has dragged off keeps its own offset instead, centred on
+    // the point it was dragged to — the export has to show the sheet the way it
+    // is on screen, and a picture that pulled every name back to its anchor
+    // would be a different drawing from the one being exported. (The `.asc` does
+    // pull them back, but that is a format without room for the offset; an image
+    // has no such excuse — see NetAnchor.tx.)
+    const off = tagOffset(a);
+    const local = off
+      ? { x: NODE_SIZE / 2 + off.dx - tagW / 2, y: NODE_SIZE / 2 + off.dy - TAG_H / 2 }
+      : tagBoxOrigin(shape.tag, tagW, TAG_H);
     const tag = { x: a.x - NODE_SIZE / 2 + local.x, y: a.y - NODE_SIZE / 2 + local.y };
-    return { a, shape, portType, tagW, tag };
+    const leader = off && Math.hypot(off.dx, off.dy) >= LEADER_MIN
+      ? { x1: a.x, y1: a.y, x2: a.x + off.dx, y2: a.y + off.dy }
+      : null;
+    return { a, shape, portType, tagW, tag, leader };
   });
 
   // Bounding box over symbols, pins and every wire vertex (so a hand-routed
@@ -370,8 +384,15 @@ export function buildSchematicSvg(
   // the editor uses. Which way each one faces comes from the wire it lies on, by
   // the same rule as on screen (see terminalDirection), so the exported sheet is
   // laid out exactly like the one the user is looking at.
-  const labels = anchorLayouts.map(({ a, shape, portType, tagW, tag }) => (
+  const labels = anchorLayouts.map(({ a, shape, portType, tagW, tag, leader }) => (
     <g key={a.id}>
+      {/* The leader line back to the anchor, where the tag has been dragged far
+          enough that the pairing would otherwise be guesswork. Dashed and thin,
+          as on screen: it points, it does not connect. */}
+      {leader && (
+        <line x1={leader.x1} y1={leader.y1} x2={leader.x2} y2={leader.y2}
+          stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" />
+      )}
       {/* The circle and arrow are laid out in the old node's local frame, whose
           centre is the dock — hence the shift by half a node box. The name tag is
           drawn in sheet coordinates instead: it is always upright, and keeping it

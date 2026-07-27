@@ -60,14 +60,23 @@ interface UIState {
    */
   canvasLocked: boolean;
   /**
-   * The name (net anchor) the user has hold of, or null.
+   * The names (net anchors) the user has hold of.
    *
    * Kept here rather than on the anchor itself: a name is not a React Flow node,
-   * so it is outside the selection React Flow manages — and it must not join it,
-   * or "delete selection" would take a name along with the parts it happens to
-   * sit near.
+   * so it is outside the selection React Flow manages and has to be tracked
+   * beside it.
+   *
+   * It used to be a single id, and outside the selection on purpose — the worry
+   * being that "delete selection" would take a name along with the parts it
+   * happens to sit *near*. That worry is answered by making the selection
+   * explicit rather than by keeping names out of it: a name joins only when the
+   * rubber band actually caught its tag, or when it was clicked. Nothing is
+   * selected by proximity, so nothing is deleted by proximity either.
+   *
+   * A list, because a rubber band across a block catches several at once, and
+   * because that block then has to move as one.
    */
-  selectedAnchorId: string | null;
+  selectedAnchorIds: string[];
   /** The text box whose settings the properties panel shows, or null. */
   selectedTextBoxId: string | null;
   /**
@@ -107,7 +116,12 @@ interface UIActions {
   setSymbolNorm: (norm: SymbolNorm) => void;
   toggleAutoProbeCurrent: () => void;
   toggleCanvasLocked: () => void;
+  /** Select exactly this name, or clear the selection with `null`. */
   setSelectedAnchorId: (id: string | null) => void;
+  /** Replace the whole name selection — what the rubber band hands over. */
+  setSelectedAnchorIds: (ids: string[]) => void;
+  /** Add or remove one name, for a shift-click on top of an existing selection. */
+  toggleSelectedAnchorId: (id: string) => void;
   setSelectedTextBoxId: (id: string | null) => void;
   toggleAreaSelect: () => void;
   setPendingFragment: (text: string | null) => void;
@@ -131,7 +145,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   symbolNorm: "en",
   autoProbeCurrent: true,
   canvasLocked: false,
-  selectedAnchorId: null,
+  selectedAnchorIds: [],
   selectedTextBoxId: null,
   areaSelect: false,
   pendingFragment: null,
@@ -155,8 +169,17 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
-  setSelectedAnchorId: (selectedAnchorId) => set({ selectedAnchorId, selectedTextBoxId: null }),
-  setSelectedTextBoxId: (selectedTextBoxId) => set({ selectedTextBoxId, selectedAnchorId: null }),
+  setSelectedAnchorId: (id) => set({ selectedAnchorIds: id ? [id] : [], selectedTextBoxId: null }),
+  setSelectedAnchorIds: (selectedAnchorIds) =>
+    set({ selectedAnchorIds, ...(selectedAnchorIds.length ? { selectedTextBoxId: null } : {}) }),
+  toggleSelectedAnchorId: (id) =>
+    set((s) => ({
+      selectedAnchorIds: s.selectedAnchorIds.includes(id)
+        ? s.selectedAnchorIds.filter((x) => x !== id)
+        : [...s.selectedAnchorIds, id],
+      selectedTextBoxId: null,
+    })),
+  setSelectedTextBoxId: (selectedTextBoxId) => set({ selectedTextBoxId, selectedAnchorIds: [] }),
   toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
   setPendingFragment: (pendingFragment) => set({ pendingFragment }),
 }));

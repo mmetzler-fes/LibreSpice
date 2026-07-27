@@ -6,6 +6,7 @@ import { useTheme } from "../theme.js";
 import { getProbeCandidates, netLabel } from "@core/circuit/probeUtils.js";
 import { isParametricValue, parseValueInput, valueFieldText } from "@core/components/base/componentValue.js";
 import { parsePwlFile } from "@core/components/sources/pwlFile.js";
+import { anchorsByPort } from "./anchorNets.js";
 
 /**
  * Text input for a component value: an SI-prefixed number (`4.7k`) or a
@@ -116,6 +117,107 @@ function PwlFileButton({ onLoad }: { onLoad: (points: string) => void }) {
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * The names on the nets this part is wired to, editable where they sit.
+ *
+ * The question a schematic built out of labels rather than lines constantly
+ * raises, and which nothing answered: click an input of the 7-segment decoder
+ * and there was no way to find out what its net was called short of hunting for
+ * the tag on the canvas. Renaming happens here too — having found the name, the
+ * next thing anyone wants is to correct it, and sending them back to the canvas
+ * to double-click a 11px tag is the wrong answer.
+ *
+ * A port with no name on its net is listed all the same. On these sheets that is
+ * information, not an empty row: an input whose net nobody named is one that has
+ * not been joined to anything by name.
+ */
+function NetNamesForPart({ componentId }: { componentId: string }) {
+  const nodes = useCircuitStore((s) => s.nodes);
+  const edges = useCircuitStore((s) => s.edges);
+  const netAnchors = useCircuitStore((s) => s.netAnchors);
+  const circuit = useCircuitStore((s) => s.circuit);
+  const updateNetAnchor = useCircuitStore((s) => s.updateNetAnchor);
+  const symbolNorm = useUIStore((s) => s.symbolNorm);
+  const setSelectedAnchorId = useUIStore((s) => s.setSelectedAnchorId);
+  const theme = useTheme();
+  useCircuitStore((s) => s.netVersion);
+
+  const ports = anchorsByPort({ nodes, edges, netAnchors, circuit }, componentId, symbolNorm);
+  if (ports.length === 0) return null;
+
+  const comp = circuit.components.get(componentId);
+  /** The pin's own name, not the internal port id (`R1-1`). */
+  const pinName = (portId: string) => portId.slice(componentId.length + 1) || portId;
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${theme.borderMuted}` }}>
+      <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: theme.heading }}>
+        Netznamen
+      </strong>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {ports.map((p) => {
+          const net = p.netId ? circuit.nets.get(p.netId) : undefined;
+          const anchors = p.anchorIds
+            .map((id) => netAnchors.find((a) => a.id === id))
+            .filter((a): a is NonNullable<typeof a> => !!a);
+          return (
+            <div key={p.portId}>
+              <div style={{ fontSize: 10, color: "#94a3b8", display: "flex", justifyContent: "space-between", gap: 6 }}>
+                <span>Pin {pinName(p.portId)}</span>
+                <code style={{ color: theme.textMuted }}>{net?.nodeLabel ?? p.netId ?? "—"}</code>
+              </div>
+              {anchors.length === 0 ? (
+                <div style={{ fontSize: 10, color: "#94a3b8", fontStyle: "italic", padding: "2px 0" }}>
+                  kein Netzname
+                </div>
+              ) : (
+                anchors.map((a) => (
+                  <div key={a.id} style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 3 }}>
+                    {/* Uncontrolled and re-keyed, exactly as in NetAnchorPanel: a
+                        half-typed name must not be pushed through the store,
+                        which would re-resolve every net on every keystroke. */}
+                    <input
+                      key={`${a.id}:${a.name}`}
+                      type="text"
+                      defaultValue={a.name}
+                      onBlur={(e) => updateNetAnchor(a.id, { name: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      style={{
+                        flex: 1, minWidth: 0,
+                        padding: "3px 6px", border: `1px solid ${theme.border}`, borderRadius: 4,
+                        background: theme.inputBg, color: theme.text,
+                        fontFamily: "monospace", fontSize: 11,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      title="Auf dem Blatt auswählen"
+                      onClick={() => setSelectedAnchorId(a.id)}
+                      style={{
+                        padding: "3px 6px", fontSize: 10, cursor: "pointer",
+                        border: `1px solid ${theme.border}`, borderRadius: 4,
+                        background: theme.inputBg, color: theme.text,
+                      }}
+                    >
+                      ⌖
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {comp && (
+        <p style={{ margin: "8px 0 0", fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>
+          Gleiche Namen sind elektrisch verbunden. Die Namen an diesem Bauteil sind
+          auf dem Blatt hervorgehoben.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -252,6 +354,8 @@ export function PropertiesPanel() {
           </label>
         ))}
       </div>
+
+      <NetNamesForPart componentId={component.id} />
 
       {!isGround && (
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${dynBorder}` }}>

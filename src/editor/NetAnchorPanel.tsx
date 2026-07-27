@@ -26,12 +26,41 @@ export function NetAnchorPanel() {
   const symbolNorm = useUIStore((s) => s.symbolNorm);
   const update = useCircuitStore((s) => s.updateNetAnchor);
   const remove = useCircuitStore((s) => s.removeNetAnchor);
-  const selectedId = useUIStore((s) => s.selectedAnchorId);
+  const moveTag = useCircuitStore((s) => s.moveNetAnchorTag);
+  const selectedIds = useUIStore((s) => s.selectedAnchorIds);
   const setSelected = useUIStore((s) => s.setSelectedAnchorId);
+  const removeMany = useCircuitStore((s) => s.removeNetAnchors);
   const theme = useTheme();
   useCircuitStore((s) => s.netVersion);
 
-  const anchor = anchors.find((a) => a.id === selectedId);
+  // Several names at once have nothing in common to edit — their texts differ by
+  // definition, and a single field over all of them would rename the lot. So the
+  // panel says what is held and offers the one action that does make sense on a
+  // group; the fields come back as soon as it is down to one.
+  if (selectedIds.length > 1) {
+    return (
+      <div style={{ padding: "10px 16px", borderTop: `1px solid ${theme.borderMuted}` }}>
+        <strong style={{ display: "block", marginBottom: 8, fontSize: 12, color: theme.heading }}>
+          {selectedIds.length} Netznamen
+        </strong>
+        <p style={{ margin: 0, fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>
+          Werden zusammen verschoben. Zum Umbenennen einen einzelnen anklicken.
+        </p>
+        <button
+          onClick={() => { removeMany(selectedIds); setSelected(null); }}
+          style={{
+            marginTop: 8, padding: "4px 8px", fontSize: 11, cursor: "pointer",
+            border: `1px solid ${theme.border}`, borderRadius: 4,
+            background: "transparent", color: "#dc2626",
+          }}
+        >
+          Alle {selectedIds.length} entfernen
+        </button>
+      </div>
+    );
+  }
+
+  const anchor = anchors.find((a) => a.id === selectedIds[0]);
 
   if (!anchor) return null;
 
@@ -83,11 +112,28 @@ export function NetAnchorPanel() {
         </select>
       </label>
 
-      <p style={{ margin: "8px 0 0", fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>
+      <p style={{ margin: "8px 0 0", fontSize: 10, color: net ? "#94a3b8" : "#d97706", lineHeight: 1.4 }}>
         {net
           ? <>Liegt auf Netz <code>{net.nodeLabel}</code>. Gleiche Namen sind elektrisch verbunden.</>
-          : <>Liegt auf keiner Leitung — dieser Name benennt zurzeit nichts.</>}
+          : <>⚠ Liegt auf keiner Leitung — dieser Name benennt zurzeit nichts. Den
+             Anschlusspunkt (den Punkt am Namen) auf eine Leitung ziehen.</>}
       </p>
+
+      {/* Only where there is something to undo. The offset is pure layout, so the
+          way back to the automatic placement has to be one click — otherwise a
+          tag nudged somewhere awkward can only be nudged back by eye. */}
+      {anchor.tx !== undefined && (
+        <button
+          onClick={() => moveTag(anchor.id, null)}
+          style={{
+            marginTop: 8, padding: "4px 8px", fontSize: 11, cursor: "pointer",
+            border: `1px solid ${theme.border}`, borderRadius: 4,
+            background: "transparent", color: theme.text,
+          }}
+        >
+          Schild zurück an den Anker
+        </button>
+      )}
 
       <button
         onClick={() => { remove(anchor.id); setSelected(null); }}

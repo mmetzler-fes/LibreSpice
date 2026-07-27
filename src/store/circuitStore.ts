@@ -124,7 +124,12 @@ interface CircuitActions {
   /** Rename an anchor, or change its port type. An empty name removes it. */
   updateNetAnchor: (id: string, patch: { name?: string; portType?: PortType }) => void;
   moveNetAnchor: (id: string, x: number, y: number) => void;
+  /** Put the readable tag at an offset from its anchor; `null` restores the automatic layout. */
+  moveNetAnchorTag: (id: string, offset: { dx: number; dy: number } | null) => void;
+  /** Shift several names by one delta, tags and all — the group drag. */
+  moveNetAnchorsBy: (ids: string[], dx: number, dy: number) => void;
   removeNetAnchor: (id: string) => void;
+  removeNetAnchors: (ids: string[]) => void;
   addDataFlag: (x: number, y: number, expr: string) => void;
   removeDataFlag: (id: string) => void;
   addTextBox: (x: number, y: number) => string;
@@ -595,8 +600,48 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     get().rebuildConnections();
   },
 
+  moveNetAnchorTag: (id, offset) => {
+    // Only the reading position changes, so no net can change with it — and the
+    // rebuild is skipped on purpose. Dragging a tag is a layout gesture; running
+    // the whole net resolution on every pointer move for something that cannot
+    // affect it is what made the anchor drag feel heavy on a full sheet.
+    set((state) => ({
+      netAnchors: state.netAnchors.map((a) => {
+        if (a.id !== id) return a;
+        if (!offset) { const { tx: _tx, ty: _ty, ...rest } = a; return rest; }
+        return { ...a, tx: Math.round(offset.dx), ty: Math.round(offset.dy) };
+      }),
+    }));
+  },
+
+  moveNetAnchorsBy: (ids, dx, dy) => {
+    if (!ids.length || (dx === 0 && dy === 0)) return;
+    const move = new Set(ids);
+    set((state) => ({
+      netAnchors: state.netAnchors.map((a) =>
+        move.has(a.id) ? { ...a, x: Math.round(a.x + dx), y: Math.round(a.y + dy) } : a),
+    }));
+    // No rebuild here, unlike moveNetAnchor. This is a step of a group drag: the
+    // parts, their wires and the names on them move together, so which net a
+    // name lies on cannot change while it runs — and re-deriving every net on
+    // every pointer step of a block drag is what would make it stutter. The
+    // caller rebuilds once the block has landed (SchematicCanvas.onNodeDragStop),
+    // which is where it *can* have changed: a selected name that was sitting on
+    // a wire outside the block has been carried onto something else.
+    //
+    // Tag offsets are untouched on purpose — they are relative to the anchor, so
+    // a block that moves as one keeps its layout exactly.
+  },
+
   removeNetAnchor: (id) => {
     set((state) => ({ netAnchors: state.netAnchors.filter((a) => a.id !== id) }));
+    get().rebuildConnections();
+  },
+
+  removeNetAnchors: (ids) => {
+    if (!ids.length) return;
+    const drop = new Set(ids);
+    set((state) => ({ netAnchors: state.netAnchors.filter((a) => !drop.has(a.id)) }));
     get().rebuildConnections();
   },
 
@@ -977,26 +1022,31 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
       setEdges(edges.filter(e => !e.selected));
       changed = true;
     }
-    if (changed) {
-      setTimeout(() => rebuildConnections(), 0);
-      return;
-    }
-
-    // A name is the third thing that can be selected, and the only one Delete
-    // never reached: it is neither a node nor an edge, so nothing above saw it
+    // Names are the third thing that can be selected, and the only one Delete
+    // never reached: they are neither nodes nor edges, so nothing above saw them
     // and the key quietly did nothing. That is worst right after deleting the
     // wire a name was lying on — the name stays, correctly (a `FLAG` is a point,
     // not a property of a wire), but Delete is exactly the key reached for next,
     // and with it dead the label read as undeletable.
     //
-    // Only when nothing else went: selecting a wire does not clear the name
-    // selection, so a name left selected from earlier must not be swept along
-    // with the wire the user actually meant to delete.
-    const anchorId = useUIStore.getState().selectedAnchorId;
-    if (anchorId && get().netAnchors.some((a) => a.id === anchorId)) {
-      get().removeNetAnchor(anchorId);
-      useUIStore.getState().setSelectedAnchorId(null);
+    // Taken together with the parts now, not only when nothing else went. A
+    // rubber band across a block catches its names along with its parts, and
+    // deleting that block has to delete what was visibly selected — leaving the
+    // names behind, hanging over the hole where the circuit was, is the reading
+    // nobody expects. The old "only if nothing else went" guard was there
+    // because a name could linger selected from an earlier click while the user
+    // meant to delete a wire; that cannot happen now, since clicking anything on
+    // the canvas clears the name selection (see SchematicCanvas.onPaneClick and
+    // onNodeClick).
+    const anchorIds = useUIStore.getState().selectedAnchorIds
+      .filter((id) => get().netAnchors.some((a) => a.id === id));
+    if (anchorIds.length) {
+      get().removeNetAnchors(anchorIds);
+      useUIStore.getState().setSelectedAnchorIds([]);
+      changed = true;
     }
+
+    if (changed) setTimeout(() => rebuildConnections(), 0);
   },
 
   rebuildConnections: () => {

@@ -114,6 +114,37 @@ export function resolveAnchors(sheet: AnchorSheet, norm: SymbolNorm = "default")
 }
 
 /**
+ * The names sitting on the nets a given part is wired to, by port.
+ *
+ * The reverse of the question the anchor panel answers. A name knows which net
+ * it lies on because it lies on it; a *part* has no idea what its nets are
+ * called, and on a sheet where the wiring is mostly labels rather than lines
+ * that is exactly what one wants to know from it — "this input of the display,
+ * what is the net called, and where is the name that says so".
+ *
+ * One entry per port, including ports with no name on their net: an input whose
+ * net nobody has named is worth showing as such, since it is the thing that has
+ * to be fixed before two halves of a schematic join up.
+ */
+export function anchorsByPort(
+  sheet: AnchorSheet, componentId: string, norm: SymbolNorm = "default",
+): { portId: string; netId: string | null; anchorIds: string[] }[] {
+  const comp = sheet.circuit.components.get(componentId);
+  if (!comp) return [];
+  const byAnchor = resolveAnchors(sheet, norm);
+  return comp.ports.map((p) => {
+    const netId = p.netId ?? null;
+    return {
+      portId: p.id,
+      netId,
+      anchorIds: netId
+        ? sheet.netAnchors.filter((a) => byAnchor.get(a.id) === netId).map((a) => a.id)
+        : [],
+    };
+  });
+}
+
+/**
  * The net under each anchor, by anchor id. Anchors that reach nothing are left
  * out — a name floating on the sheet names nothing, which LTSpice allows and
  * `leitungstest.asc` contains two of (`x3`, `nc3`).

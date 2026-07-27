@@ -3,6 +3,7 @@ import { useUIStore } from "@store/uiStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { formatAnchor, isGroundAnchor, anchorsFromNodes, type NetAnchor } from "@core/circuit/netAnchor.js";
 import { resolveAnchors } from "@editor/anchorNets.js";
+import { anchorBoxes, anchorsInBand } from "@editor/anchorHitBox.js";
 import { withSymbols } from "./withSymbols.js";
 
 /**
@@ -289,29 +290,163 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       st().deleteSelected();
       await tick();
       if (st().netAnchors.some((a) => a.id === id)) fail("Delete removes the selected name", "the name survived");
-      if (ui.getState().selectedAnchorId !== null) fail("Delete removes the selected name", "the selection was left pointing at a deleted name");
+      if (ui.getState().selectedAnchorIds.length) fail("Delete removes the selected name", "the selection was left pointing at a deleted name");
     } catch (e) {
       fail("Delete removes the selected name", `threw: ${(e as Error).message}`);
     }
 
-    // …but only what the user is actually pointing at. Clicking a wire does not
-    // clear the name selection, so deleting a wire must not sweep along a name
-    // selected some time earlier.
+    // …but only what the user is actually pointing at. A name nobody selected is
+    // never swept up by deleting something else, however near it happens to lie —
+    // which is the whole reason names are selected explicitly rather than by
+    // proximity (see uiStore.selectedAnchorIds).
     total++;
     try {
       const ui = useUIStore;
       st().clearCircuit();
       await tick();
       const id = st().addNetAnchor(160, 160, "VX");
-      ui.getState().setSelectedAnchorId(id);
+      ui.getState().setSelectedAnchorIds([]);
       st().setEdges([{ id: "e_sel", source: "a", target: "b", selected: true } as never]);
       st().deleteSelected();
       await tick();
       if (!st().netAnchors.some((a) => a.id === id)) {
-        fail("deleting a wire leaves a selected name alone", "the name went with the wire");
+        fail("deleting a wire leaves an unselected name alone", "the name went with the wire");
       }
     } catch (e) {
-      fail("deleting a wire leaves a selected name alone", `threw: ${(e as Error).message}`);
+      fail("deleting a wire leaves an unselected name alone", `threw: ${(e as Error).message}`);
+    }
+
+    // A block selected as one is deleted as one. This is the half the old
+    // behaviour got wrong: names were kept out of the selection entirely, so a
+    // rubber band across a circuit deleted its parts and left its names hanging
+    // over the hole.
+    total++;
+    try {
+      const ui = useUIStore;
+      st().clearCircuit();
+      await tick();
+      const keep = st().addNetAnchor(600, 600, "FAR");
+      const goes = st().addNetAnchor(160, 160, "VX");
+      ui.getState().setSelectedAnchorIds([goes]);
+      st().setEdges([{ id: "e_sel", source: "a", target: "b", selected: true } as never]);
+      st().deleteSelected();
+      await tick();
+      const left = st().netAnchors.map((a) => a.id);
+      if (left.includes(goes)) fail("a selected block takes its names with it", "the selected name survived");
+      if (!left.includes(keep)) fail("a selected block takes its names with it", "an unselected name went too");
+    } catch (e) {
+      fail("a selected block takes its names with it", `threw: ${(e as Error).message}`);
+    }
+
+    // ── The tag offset ─────────────────────────────────────────────────────
+    // Where the name is *read* is not where it is *attached*. The offset moves
+    // the first and must never touch the second — that separation is what lets a
+    // label be dragged clear of a crowded corner without losing its net.
+    total++;
+    try {
+      st().clearCircuit();
+      await tick();
+      const id = st().addNetAnchor(160, 160, "VX");
+      st().moveNetAnchorTag(id, { dx: 48, dy: -64 });
+      await tick();
+      const moved = st().netAnchors.find((a) => a.id === id)!;
+      if (moved.x !== 160 || moved.y !== 160) {
+        fail("moving the tag leaves the anchor put", `anchor drifted to ${moved.x},${moved.y}`);
+      }
+      if (moved.tx !== 48 || moved.ty !== -64) {
+        fail("moving the tag leaves the anchor put", `offset is ${moved.tx},${moved.ty}`);
+      }
+      // The `.asc` knows nothing about it: the exported line is the anchor's,
+      // unchanged, which is what keeps a file with dragged tags readable by
+      // LTSpice (and identical to one without them).
+      if (formatAnchor(moved).join("\n") !== "FLAG 160 160 VX") {
+        fail("moving the tag leaves the anchor put", `exported as ${formatAnchor(moved).join(" | ")}`);
+      }
+      st().moveNetAnchorTag(id, null);
+      await tick();
+      const reset = st().netAnchors.find((a) => a.id === id)!;
+      if (reset.tx !== undefined || reset.ty !== undefined) {
+        fail("moving the tag leaves the anchor put", "the offset survived being cleared");
+      }
+    } catch (e) {
+      fail("moving the tag leaves the anchor put", `threw: ${(e as Error).message}`);
+    }
+
+    // A group move carries anchor and tag together, so a block keeps its layout.
+    total++;
+    try {
+      st().clearCircuit();
+      await tick();
+      const a1 = st().addNetAnchor(100, 100, "A");
+      const a2 = st().addNetAnchor(200, 200, "B");
+      st().moveNetAnchorTag(a1, { dx: 32, dy: 32 });
+      st().moveNetAnchorsBy([a1], 48, -16);
+      await tick();
+      const m = st().netAnchors.find((a) => a.id === a1)!;
+      const still = st().netAnchors.find((a) => a.id === a2)!;
+      if (m.x !== 148 || m.y !== 84) fail("a group move carries the tag along", `anchor at ${m.x},${m.y}`);
+      if (m.tx !== 32 || m.ty !== 32) fail("a group move carries the tag along", `offset changed to ${m.tx},${m.ty}`);
+      if (still.x !== 200 || still.y !== 200) fail("a group move carries the tag along", "an unlisted name moved too");
+    } catch (e) {
+      fail("a group move carries the tag along", `threw: ${(e as Error).message}`);
+    }
+
+    // ── What a rubber band catches ─────────────────────────────────────────
+    // Names are drawn by an overlay, so React Flow's selection rectangle cannot
+    // see them and the hit test is ours (see anchorHitBox). It is pure geometry
+    // and therefore the one part of the selection that *can* be checked here —
+    // the harness renders no React Flow, so how it feels is a manual question,
+    // but where the boxes are is not.
+    total++;
+    try {
+      const boxes = anchorBoxes(
+        [
+          { id: "a1", x: 100, y: 100, name: "VX" },
+          { id: "a2", x: 400, y: 400, name: "FAR" },
+          // Anchor far outside the band, tag dragged into it: the band should
+          // still take it, because the tag is the thing the user drew around.
+          { id: "a3", x: 900, y: 100, name: "PULLED", tx: -700, ty: 0 },
+        ],
+        [], [],
+      );
+      const hit = anchorsInBand(boxes, { x1: 60, y1: 60, x2: 260, y2: 200 });
+      if (!hit.includes("a1")) fail("the rubber band catches the names inside it", "missed a name inside the band");
+      if (hit.includes("a2")) fail("the rubber band catches the names inside it", "caught a name well outside it");
+      if (!hit.includes("a3")) fail("the rubber band catches the names inside it", "missed a name whose tag was dragged into the band");
+    } catch (e) {
+      fail("the rubber band catches the names inside it", `threw: ${(e as Error).message}`);
+    }
+
+    // The band is drawn in any direction; dragging up-left must select the same
+    // names as dragging down-right over the same rectangle.
+    total++;
+    try {
+      const boxes = anchorBoxes([{ id: "a1", x: 100, y: 100, name: "VX" }], [], []);
+      const down = anchorsInBand(boxes, { x1: 60, y1: 60, x2: 200, y2: 200 });
+      const up = anchorsInBand(boxes, { x1: 200, y1: 200, x2: 60, y2: 60 });
+      if (down.join() !== up.join()) {
+        fail("the band works in every direction", `down-right ${down.join()} vs up-left ${up.join()}`);
+      }
+    } catch (e) {
+      fail("the band works in every direction", `threw: ${(e as Error).message}`);
+    }
+
+    // A tag dragged off has to *be* where the drawing puts it, or the band
+    // catches a box the user cannot see. Both read the offset the same way —
+    // this is the check that they agree.
+    total++;
+    try {
+      const [box] = anchorBoxes([{ id: "a1", x: 200, y: 200, name: "CLK", tx: 48, ty: -64 }], [], []);
+      const cx = box.tag.x + box.tag.w / 2;
+      const cy = box.tag.y + box.tag.h / 2;
+      if (Math.abs(cx - 248) > 0.5 || Math.abs(cy - 136) > 0.5) {
+        fail("a dragged tag is measured where it is drawn", `tag centre ${cx},${cy}, expected 248,136`);
+      }
+      if (box.point.x !== 200 || box.point.y !== 200) {
+        fail("a dragged tag is measured where it is drawn", `anchor point moved to ${box.point.x},${box.point.y}`);
+      }
+    } catch (e) {
+      fail("a dragged tag is measured where it is drawn", `threw: ${(e as Error).message}`);
     }
 
     // ── The shape of an anchor ─────────────────────────────────────────────
