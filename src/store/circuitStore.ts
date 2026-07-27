@@ -1086,7 +1086,9 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // Remove all nets, then (re)create the single ground net "0" if any ground
     // component exists. Recreating it even when it was lost keeps GND robust.
     const prevGround = circuit.nets.get("0");
-    circuit.nets.clear();
+    // Numbering starts over with them, or the same net comes back under a new id
+    // on every rebuild (see Circuit.resetNets).
+    circuit.resetNets();
     const hasGround = [...circuit.components.values()].some((c) => c.id.startsWith("ground_"));
     if (hasGround) {
       const groundNet = prevGround ?? new Net("0", "GND");

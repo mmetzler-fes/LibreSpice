@@ -68,6 +68,30 @@ export class Circuit {
 
   clear(): void {
     this.components.clear();
+    this.resetNets();
+  }
+
+  /**
+   * Drop every net and start numbering again from one.
+   *
+   * The counter has to go back with them. A rebuild derives the nets afresh from
+   * the wiring, so the *same* net comes out with a new id every time — and while
+   * the ids were being minted from a counter that only ever went up, two
+   * consecutive rebuilds of an untouched schematic produced entirely different
+   * ones. On a six-net sheet the names had climbed to `net94` by the time anyone
+   * looked, which is what put a reader on to this.
+   *
+   * That matters beyond the odd name. An unnamed net *is* its id as far as the
+   * netlist and the waveform names are concerned, so a trace plotted against one
+   * stopped resolving the moment anything was touched — and nothing that wants to
+   * remember a net across an edit could do so at all.
+   *
+   * With the reset the ids are a function of the circuit rather than of how often
+   * it has been rebuilt: identical wiring, identical numbering. Nothing stores
+   * them (`.asc` has no net ids either — LTSpice derives its nets from the
+   * geometry the same way), so nothing has to migrate.
+   */
+  resetNets(): void {
     this.nets.clear();
     this._netCounter = 1;
   }
