@@ -8,10 +8,19 @@
  * batch report. It bundles the TypeScript module the same way the regression
  * runner does.
  *
+ * Both Multisim formats go through here. They differ only in the reader — the
+ * Live export (`.msjs`) and the Multisim 14 file (`.ms14`) both become the same
+ * neutral schematic, and `convert` is one function for either (see model.ts). So
+ * the extension picks the reader and nothing else changes.
+ *
+ * Subdirectories are searched too. The Multisim 14 examples are filed in folders
+ * per exercise — two thirds of them are nested — and a flat scan found a third
+ * of the corpus.
+ *
  * Usage: node scripts/convert-multisim.mjs <input-dir> [--out <dir>]
  */
 import { build } from "esbuild";
-import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve, basename } from "node:path";
 
@@ -26,6 +35,8 @@ await build({
     contents: `
       export { convert, R_CLOSED, R_OPEN } from "./src/core/multisim/MultisimConverter.ts";
       export { readMsjs, msjsToSchematic } from "./src/core/multisim/msjs.ts";
+      export { readMs14 } from "./src/core/multisim/ms14.ts";
+      export { ms14ToSchematic } from "./src/core/multisim/ms14Schematic.ts";
     `,
     resolveDir: root,
     loader: "ts",
@@ -45,7 +56,28 @@ await build({
   logLevel: "warning",
 });
 
-const { readMsjs, msjsToSchematic, convert, R_CLOSED, R_OPEN } = await import(pathToFileURL(outfile).href);
+const { readMsjs, msjsToSchematic, readMs14, ms14ToSchematic, convert, R_CLOSED, R_OPEN } =
+  await import(pathToFileURL(outfile).href);
+
+/** Which reader a file needs, by extension. Everything after this is shared. */
+const READERS = {
+  ".msjs": (buf) => msjsToSchematic(readMsjs(buf)),
+  ".ms14": (buf) => ms14ToSchematic(readMs14(buf)),
+};
+
+/** Every Multisim file under `dir`, however deeply filed. */
+function sourceFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir).sort()) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...sourceFiles(p));
+    else {
+      const ext = Object.keys(READERS).find((e) => name.endsWith(e));
+      if (ext) out.push({ path: p, ext, name: basename(name, ext) });
+    }
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Report
@@ -62,7 +94,7 @@ function buildReport(results) {
   const total = results.length;
   const clean = results.filter((r) => !r.error && !r.skipped.length);
 
-  L.push("Konvertierung Multisim Live (.msjs) -> LTSpice (.asc)");
+  L.push("Konvertierung Multisim -> LTSpice (.asc)");
   L.push("=".repeat(60));
   L.push("");
   L.push(`Erzeugt am:            ${new Date().toISOString().slice(0, 10)}`);
@@ -205,16 +237,17 @@ function main() {
   }
   mkdirSync(outDir, { recursive: true });
 
-  const files = readdirSync(inDir).filter((f) => f.endsWith(".msjs")).sort();
+  const files = sourceFiles(inDir);
   let ok = 0;
   const gaps = [];
   const shorted = [];
   const results = [];
   for (const f of files) {
-    const name = basename(f, ".msjs");
+    const name = f.name;
     try {
-      const buf = readFileSync(join(inDir, f));
-      const { asc, skipped, substituted, shorts, unmapped, unconnected, route } = convert(msjsToSchematic(readMsjs(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))));
+      const buf = readFileSync(f.path);
+      const sch = READERS[f.ext](buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      const { asc, skipped, substituted, shorts, unmapped, unconnected, route } = convert(sch);
       writeFileSync(join(outDir, `${name}.asc`), asc, "latin1");
       ok++;
       results.push({ name, skipped, substituted, shorts, unmapped, unconnected, route });

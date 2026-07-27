@@ -20,6 +20,7 @@ examples/*
 # Ergebnis nach jedem Lauf im Diff durchsehen laesst — aber die Schaltungen
 # stammen von Dritten und gehoeren nicht in ein oeffentliches Repository. Sie
 # werden weiterhin versioniert, nur in einem eigenen Repository im Ordner selbst
-# (examples/Multisim_converted/.git), das nie gepusht wird. `npm run
+# (examples/Multisim_converted/
+examples/Multisim14_converted/.git), das nie gepusht wird. `npm run
 # convert:multisim` erzeugt sie jederzeit aus den Quellen neu.
 examples/Multisim_converted/

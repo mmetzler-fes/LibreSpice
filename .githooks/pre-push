@@ -2,11 +2,12 @@
 # Refuse to push the converted Multisim schematics.
 #
 # They are third-party teaching circuits: versioned locally (in their own
-# repository under examples/Multisim_converted/) but never published. The
+# repository beside them) but never published. Both output folders — the Live
+# corpus and the Multisim 14 one — are covered. The
 # .gitignore already keeps them out of the index; this is the second lock, for
 # the day someone reaches for `git add -f`.
-if git diff --cached --name-only HEAD 2>/dev/null | grep -q '^examples/Multisim_converted/'; then
-  echo "pre-push: examples/Multisim_converted/ darf nicht gepusht werden." >&2
+if git diff --cached --name-only HEAD 2>/dev/null | grep -qE '^examples/Multisim(14)?_converted/'; then
+  echo "pre-push: Konvertate duerfen nicht gepusht werden." >&2
   exit 1
 fi
 # Only what is actually pushable: refs/heads. `--all` would sweep in the
@@ -14,8 +15,8 @@ fi
 # still contain the path — reading them as a failure blocks exactly the push that
 # the rewrite was performed to allow.
 for ref in $(git rev-list --branches 2>/dev/null | head -600); do
-  if git ls-tree -r --name-only "$ref" 2>/dev/null | grep -q '^examples/Multisim_converted/'; then
-    echo "pre-push: examples/Multisim_converted/ steckt noch in der Historie ($ref)." >&2
+  if git ls-tree -r --name-only "$ref" 2>/dev/null | grep -qE '^examples/Multisim(14)?_converted/'; then
+    echo "pre-push: Konvertate stecken noch in der Historie ($ref)." >&2
     echo "          Erst mit einem Rewrite entfernen, dann pushen." >&2
     exit 1
   fi

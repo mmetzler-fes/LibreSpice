@@ -13,7 +13,8 @@
     "test:library": "node scripts/run-library-tests.mjs",
     "test:editor": "node scripts/run-editor-tests.mjs",
     "apply:links": "node scripts/apply-scratchpad-links.mjs",
-    "convert:multisim": "node scripts/convert-multisim.mjs examples/Sicherung_Multisim_Circuits"
+    "convert:multisim": "node scripts/convert-multisim.mjs examples/Sicherung_Multisim_Circuits",
+    "convert:multisim14": "node scripts/convert-multisim.mjs examples/Multisim14 --out examples/Multisim14_converted"
   },
   "author": "Martin Metzler",
   "license": "AGPL-3.0-or-later",
