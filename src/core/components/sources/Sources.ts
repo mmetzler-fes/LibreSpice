@@ -106,14 +106,31 @@ export class VoltageSource extends Source {
   /** The SPICE source specification (after the node names). */
   protected spec(): string {
     if (this.rawSpec) return normalizeMicro(this.rawSpec);
+    // The small-signal amplitude, in front of whatever the source does in the
+    // time domain.
+    //
+    // These are two independent things and SPICE keeps them apart: the waveform
+    // drives `.tran`, the `AC` magnitude drives `.ac`, and a source without the
+    // second contributes *nothing* to a frequency sweep. Not "a little" — the
+    // analysis is linear about the operating point, so the answer is exactly
+    // zero at every node and every frequency.
+    //
+    // It used to be written for a DC source only, which is where the field was
+    // offered. Pick any waveform and the amplitude was neither shown nor
+    // emitted, so an `.ac` run over an imported filter returned zeros — with no
+    // error anywhere, because a circuit driven by nothing is not a broken
+    // circuit. LTSpice has both fields on the same dialog for this reason.
+    const ac = this.acAmplitude ? `AC ${this.acAmplitude} ` : "";
     switch (this.sourceType) {
       case "Sine":
-        return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
+        return `${ac}SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
       case "Pulse":
-        return `PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
+        return `${ac}PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
       case "PWL":
-        return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
+        return `${ac}PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
       case "Behavioral":
+        // A behavioural source *is* its expression; there is no separate
+        // small-signal amplitude to give it.
         return `V = ${normalizeMicro(this.bExpr.trim())}`;
       default:
         return `DC ${this.dcValue}${this.acAmplitude ? ` AC ${this.acAmplitude}` : ""}`;
@@ -172,9 +189,13 @@ export class VoltageSource extends Source {
     } else {
       props.push(
         { key: "dcValue", label: "DC Value", value: this.dcValue, unit: "V", type: "number" },
-        { key: "acAmplitude", label: "AC Amplitude", value: this.acAmplitude, unit: "V", type: "number" },
       );
     }
+    // Offered whatever the source does in the time domain — the two are
+    // independent (see spec()). Hidden behind the DC type, as it was, an `.ac`
+    // sweep over any waveform source could only ever return zeros, and there was
+    // no field anywhere to say otherwise.
+    props.push({ key: "acAmplitude", label: "AC Amplitude (.ac)", value: this.acAmplitude, unit: "V", type: "number" });
     props.push(
       { key: "seriesR", label: "Series Resistance", value: this.seriesR, unit: "Ω", type: "number" },
       { key: "parallelC", label: "Parallel Capacitance", value: this.parallelC, unit: "F", type: "number" },
@@ -267,11 +288,14 @@ export class CurrentSource extends Source {
   /** The SPICE source specification (after the node names). */
   protected spec(): string {
     if (this.rawSpec) return normalizeMicro(this.rawSpec);
+    // Same two independent quantities as on the voltage source above, and the
+    // same reason for carrying the AC magnitude alongside every waveform.
+    const ac = this.acAmplitude ? `AC ${this.acAmplitude} ` : "";
     if (this.sourceType === "Sine") {
-      return `SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
+      return `${ac}SIN(${this.sOffset} ${this.sAmpl} ${this.sFreq} ${this.sTd} ${this.sTheta} ${this.sPhi})`;
     }
     if (this.sourceType === "PWL") {
-      return `PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
+      return `${ac}PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
     }
     if (this.sourceType === "Behavioral") return `I = ${normalizeMicro(this.bExpr.trim())}`;
     return `DC ${this.dcValue} AC ${this.acAmplitude}`;
@@ -310,11 +334,11 @@ export class CurrentSource extends Source {
         { key: "pwlRepeat", label: "Repeat", value: this.pwlRepeat ? "yes" : "no", type: "select", options: ["no", "yes"] },
       );
     } else {
-      props.push(
-        { key: "dcValue", label: "DC Current", value: this.dcValue, unit: "A", type: "number" },
-        { key: "acAmplitude", label: "AC Amplitude", value: this.acAmplitude, unit: "A", type: "number" },
-      );
+      props.push({ key: "dcValue", label: "DC Current", value: this.dcValue, unit: "A", type: "number" });
     }
+    // Whatever the waveform, as on the voltage source: the small-signal
+    // amplitude is what an `.ac` sweep runs on, and nothing else supplies it.
+    props.push({ key: "acAmplitude", label: "AC Amplitude (.ac)", value: this.acAmplitude, unit: "A", type: "number" });
     return props;
   }
 

@@ -706,10 +706,26 @@ function switchContacts(p: Params): string {
   return (ron ? ` Ron=${ron}` : "") + (roff ? ` Roff=${roff}` : "");
 }
 
-/** `AC Voltage`/`AC Current` carry a SPICE SIN() source's parameters. */
+/**
+ * `AC Voltage`/`AC Current` carry a SPICE SIN() source's parameters — and its
+ * small-signal amplitude, which is a different thing entirely.
+ *
+ * `SINE(...)` drives a `.tran` run. A `.ac` sweep is linear about the operating
+ * point and reads only the `AC` magnitude, so a source without one contributes
+ * exactly zero at every node and every frequency — no error, no warning, just a
+ * flat nothing. Every converted filter behaved that way: sweep the active
+ * bandpass and the answer was 0 across the band.
+ *
+ * Multisim's part is the one place the two are *not* independent. It is called
+ * an AC source and its amplitude is what its own AC analysis uses, so the same
+ * number belongs in both fields. A user who wants them apart can still say so;
+ * arriving with the frequency response blanked out is not a starting point
+ * anyone would choose.
+ */
 function sine(p: Params): string {
   const f = (k: string, d: string) => si(p[k]) || d;
-  return `SINE(${f("VO", "0")} ${f("VA", "1")} ${f("Freq", "1k")} ${f("TD", "0")} ${f("DF", "0")} ${f("Phase", "0")})`;
+  const amp = f("VA", "1");
+  return `AC ${amp} SINE(${f("VO", "0")} ${amp} ${f("Freq", "1k")} ${f("TD", "0")} ${f("DF", "0")} ${f("Phase", "0")})`;
 }
 
 /**
