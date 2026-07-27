@@ -7,7 +7,7 @@ import type { SheetShape } from "@core/circuit/sheetShape.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
 import { getValueLabel, createSpiceComponent, createSubcircuitComponent } from "@editor/componentFactory.js";
-import { getNodePins, NODE_SIZE } from "@editor/pinGeometry.js";
+import { getNodePins, snapToGrid, NODE_SIZE } from "@editor/pinGeometry.js";
 import { reseatTwoPinEdges } from "@editor/pinReseat.js";
 import { useUIStore } from "./uiStore.js";
 import type { FlowPoint } from "@editor/WireTool.js";
@@ -596,7 +596,22 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // once — so the net rebuild runs on every move, not just at the end of the
     // drag. That is what makes the anchor model behave: the name follows the
     // geometry instead of remembering what it used to be attached to.
-    set((state) => ({ netAnchors: state.netAnchors.map((a) => (a.id === id ? { ...a, x: Math.round(x), y: Math.round(y) } : a)) }));
+    //
+    // Snapped to the grid, like every part and every wire end. This is the
+    // *anchor*, the point that decides which net is named — so it has to be able
+    // to land exactly on a wire, and a wire only ever runs between grid points.
+    // Rounded merely to whole numbers, as it was, a dragged name came to rest
+    // beside its wire rather than on it and held on only by the 8-unit
+    // resolution tolerance: `FLAG 303 487` and `FLAG 312 484` in a hand-tidied
+    // sheet, two thirds of a grid step off, one nudge from naming nothing — or
+    // from reaching the wire next door.
+    //
+    // The readable tag is deliberately *not* snapped (see moveNetAnchorTag): it
+    // decides nothing, so it may sit wherever it reads best.
+    set((state) => ({
+      netAnchors: state.netAnchors.map((a) =>
+        (a.id === id ? { ...a, x: snapToGrid(x), y: snapToGrid(y) } : a)),
+    }));
     get().rebuildConnections();
   },
 
@@ -619,7 +634,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     const move = new Set(ids);
     set((state) => ({
       netAnchors: state.netAnchors.map((a) =>
-        move.has(a.id) ? { ...a, x: Math.round(a.x + dx), y: Math.round(a.y + dy) } : a),
+        // Snapped like the single move, and for the same reason. The delta comes
+        // from a part, which snaps itself, so an anchor that started on the grid
+        // stays on it either way — but one that did not (an older sheet, a name
+        // dragged before this rule) is pulled onto it here rather than carried
+        // off-grid for ever.
+        move.has(a.id) ? { ...a, x: snapToGrid(a.x + dx), y: snapToGrid(a.y + dy) } : a),
     }));
     // No rebuild here, unlike moveNetAnchor. This is a step of a group drag: the
     // parts, their wires and the names on them move together, so which net a

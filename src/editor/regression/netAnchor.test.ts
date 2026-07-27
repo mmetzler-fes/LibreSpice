@@ -338,6 +338,46 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       fail("a selected block takes its names with it", `threw: ${(e as Error).message}`);
     }
 
+    // ── The grid ───────────────────────────────────────────────────────────
+    // The anchor snaps, the tag does not, and the split is the point: the anchor
+    // decides which net is named, so it has to be able to land *exactly* on a
+    // wire — and a wire only ever runs between grid points. Rounded merely to
+    // whole numbers, a dragged name came to rest beside its wire and held on by
+    // the resolution tolerance alone (`FLAG 303 487` in a hand-tidied sheet, two
+    // thirds of a step off). The tag decides nothing, so it may sit wherever it
+    // reads best.
+    total++;
+    try {
+      st().clearCircuit();
+      await tick();
+      const id = st().addNetAnchor(0, 0, "VX");
+      st().moveNetAnchor(id, 303.4, 487.8);
+      await tick();
+      const a = st().netAnchors.find((x) => x.id === id)!;
+      if (a.x % 4 !== 0 || a.y % 4 !== 0) fail("a dragged name lands on the grid", `landed at ${a.x},${a.y}`);
+      st().moveNetAnchorsBy([id], 7, 7);
+      await tick();
+      const b = st().netAnchors.find((x) => x.id === id)!;
+      if (b.x % 4 !== 0 || b.y % 4 !== 0) fail("a dragged name lands on the grid", `group move left it at ${b.x},${b.y}`);
+    } catch (e) {
+      fail("a dragged name lands on the grid", `threw: ${(e as Error).message}`);
+    }
+
+    total++;
+    try {
+      st().clearCircuit();
+      await tick();
+      const id = st().addNetAnchor(160, 160, "VX");
+      st().moveNetAnchorTag(id, { dx: 33, dy: -47 });
+      await tick();
+      const a = st().netAnchors.find((x) => x.id === id)!;
+      if (a.tx !== 33 || a.ty !== -47) {
+        fail("the tag is free of the grid", `offset snapped to ${a.tx},${a.ty}`);
+      }
+    } catch (e) {
+      fail("the tag is free of the grid", `threw: ${(e as Error).message}`);
+    }
+
     // ── The tag offset ─────────────────────────────────────────────────────
     // Where the name is *read* is not where it is *attached*. The offset moves
     // the first and must never touch the second — that separation is what lets a
