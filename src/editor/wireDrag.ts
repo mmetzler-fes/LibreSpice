@@ -109,7 +109,8 @@ export function movedWaypoints(
 ): DragPoint[] {
   const next = waypoints.slice();
   next.splice(grab.index, grab.replace ? 1 : 0, { x: snapToGrid(to.x), y: snapToGrid(to.y) });
-  return unknot(tidyWaypoints(alignToNeighbours(next, grab.index, ends)), grab.index, ends);
+  const held = next[grab.index];
+  return slacken(unknot(tidyWaypoints(alignToNeighbours(next, grab.index, ends)), grab.index, ends), held, ends);
 }
 
 /**
@@ -159,6 +160,56 @@ function unknot(
 }
 
 const without = (points: DragPoint[], i: number) => points.filter((_, k) => k !== i);
+
+/** Total length of the route these waypoints produce. */
+function routeLength(waypoints: DragPoint[], ends: [DragPoint, DragPoint]): number {
+  const v = orthoVertices([ends[0], ...waypoints, ends[1]]);
+  let n = 0;
+  for (let i = 0; i < v.length - 1; i++) n += Math.abs(v[i + 1].x - v[i].x) + Math.abs(v[i + 1].y - v[i].y);
+  return n;
+}
+
+/**
+ * Let the rest of the wire go slack.
+ *
+ * `unknot` deals with a route that runs over itself. It says nothing about the
+ * other shape that keeps turning up: a square tab standing off an otherwise
+ * straight run — out, along, and back to the same line. Nothing overlaps there,
+ * every corner is a right angle, and the wire is simply longer than it needs to
+ * be for no reason anyone can point at.
+ *
+ * A rubber band has no such shapes because it pulls itself in wherever it can.
+ * So: any waypoint whose removal makes the route *shorter* without knotting it
+ * is slack, and goes. What is left are the corners that actually take the wire
+ * somewhere — and the one under the cursor, which is held whatever it costs.
+ *
+ * The held point is why this is safe to apply on every drag rather than only on
+ * demand. Correcting a wire moves one corner and lets the rest settle; it never
+ * takes away the corner being placed. Older corners do go, and that is the
+ * intent — they are what a route accumulates while being tidied by hand, and
+ * keeping them is how a wire ends up as a staircase nobody drew.
+ */
+function slacken(
+  waypoints: DragPoint[], held: DragPoint | undefined, ends?: [DragPoint, DragPoint],
+): DragPoint[] {
+  if (!ends || waypoints.length === 0) return waypoints;
+  let points = waypoints;
+  for (let guard = points.length; guard > 0; guard--) {
+    const now = routeLength(points, ends);
+    let best: number | undefined;
+    for (let i = 0; i < points.length; i++) {
+      if (held && points[i].x === held.x && points[i].y === held.y) continue;
+      const rest = without(points, i);
+      if (routeLength(rest, ends) >= now) continue;
+      if (knotted(rest, ends)) continue;
+      best = i;
+      break;
+    }
+    if (best === undefined) return points;
+    points = without(points, best);
+  }
+  return points;
+}
 
 /** Does the drawn route run over itself? */
 function knotted(waypoints: DragPoint[], ends: [DragPoint, DragPoint]): boolean {

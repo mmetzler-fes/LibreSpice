@@ -207,6 +207,34 @@ const CASES: Case[] = [
       }
     },
   },
+  {
+    name: "a square tab is pulled flat",
+    run: (fail) => {
+      // The shape from the report: out, along, and back to the same line. Nothing
+      // overlaps, every corner is a right angle — the wire is just longer than it
+      // needs to be, and a rubber band would not hold that shape.
+      const ends: [DragPoint, DragPoint] = [P(0, 200), P(400, 200)];
+      const tab = [P(40, 150), P(140, 150)];
+      const after = movedWaypoints(tab, { index: 1, replace: true }, P(140, 200), ends);
+      const verts = orthoVertices([ends[0], ...after, ends[1]]);
+      const ys = new Set(verts.map((p) => p.y));
+      if (ys.size !== 1 || !ys.has(200)) {
+        fail(`the tab survived: ${verts.map((p) => `${p.x},${p.y}`).join(" ")}`);
+      }
+    },
+  },
+  {
+    name: "the corner under the cursor is never pulled away",
+    run: (fail) => {
+      // Slackening must not undo the edit being made. The held point stays even
+      // though dropping it would shorten the route.
+      const ends: [DragPoint, DragPoint] = [P(0, 200), P(400, 200)];
+      const after = movedWaypoints([P(200, 200)], { index: 0, replace: true }, P(200, 120), ends);
+      if (!after.some((p) => p.y === 120)) {
+        fail(`the held corner went: ${after.map((p) => `${p.x},${p.y}`).join(" ")}`);
+      }
+    },
+  },
 ];
 
 /** Does a drawn route run over itself? (the test's own reading of "knotted") */
