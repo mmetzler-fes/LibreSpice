@@ -45,14 +45,15 @@ const st = () => useCircuitStore.getState();
  */
 const FIDELITY_BUDGET: Record<string, number> = {
   "06-2-3_RC_BP1.asc": 2,
-  "InvSummierverstaerker.asc": 5,
+  // 5 → 4: die Datei wurde durch das Original ersetzt, das eine Leitung weniger
+  // doppelt zeichnet. Die Suite meldet ein zu grosszuegiges Budget selbst.
+  "InvSummierverstaerker.asc": 4,
   "OP-inv_Verstärker.asc": 7,
   "RL-Parallelkompensation4b.asc": 2,
   "RLC_Reihenschwingkreis.asc": 2,
   "Spannungsteiler_unbelastet.asc": 2,
   "TGM-Abi2025_A2-2-6.asc": 0,
   "TGM-Abi2025_A2-2-9.asc": 2,
-  "test.asc": 3,
   "test_belastungskennlinie.asc": 6,
 };
 

@@ -160,6 +160,8 @@ interface CircuitActions {
   moveNetAnchorTag: (id: string, offset: { dx: number; dy: number } | null) => void;
   /** Shift several names by one delta, tags and all — the group drag. */
   moveNetAnchorsBy: (ids: string[], dx: number, dy: number) => void;
+  /** Carry the drawn shape of wires whose both ends are moving. Not undoable on its own. */
+  moveEdgeShapesBy: (edgeIds: string[], dx: number, dy: number) => void;
   removeNetAnchor: (id: string) => void;
   removeNetAnchors: (ids: string[]) => void;
   addDataFlag: (x: number, y: number, expr: string) => void;
@@ -685,6 +687,55 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         return { ...a, tx: Math.round(offset.dx), ty: Math.round(offset.dy) };
       }),
     }));
+  },
+
+  /**
+   * Carry a wire's drawn shape along with the parts it joins.
+   *
+   * A wire is not its two ends. Its corner points — and a tap's anchor — are
+   * absolute coordinates in `edge.data`, and moving only the parts leaves them
+   * behind: the ends follow their pins while the middle stays put, so the wire
+   * is re-routed into a shape nobody drew. `pasteFragment` already shifts them
+   * for exactly this reason (see its comment there); a drag has the same problem
+   * and had no such step, which is why this exists.
+   *
+   * It is not cosmetic. Measured on `examples/OP-inv_Verstärker.asc`: moving the
+   * *whole* sheet by (128, 64) — a rigid translation, which by rights cannot
+   * change anything — left 12 of 17 wires re-routed, and the name `U-` came to
+   * rest on a wire it had not been on. It stopped naming the inverting input and
+   * started naming the negative supply. A schematic that quietly changes what it
+   * is when you slide it across the canvas.
+   *
+   * Only for wires whose *both* ends move: one end moving is a genuine reshape,
+   * and its waypoints belong to the sheet, not to the block. That is the same
+   * rule that decides which names travel (`SchematicCanvas.onNodeDragStart`).
+   */
+  moveEdgeShapesBy: (edgeIds, dx, dy) => {
+    if (!edgeIds.length || (dx === 0 && dy === 0)) return;
+    const move = new Set(edgeIds);
+    const shift = (p?: { x: number; y: number }) => (p ? { x: p.x + dx, y: p.y + dy } : p);
+    set((state) => ({
+      edges: state.edges.map((e) => {
+        if (!move.has(e.id)) return e;
+        const d = (e.data ?? {}) as {
+          waypoints?: { x: number; y: number }[];
+          sourceTap?: { x: number; y: number };
+          targetTap?: { x: number; y: number };
+        };
+        if (!d.waypoints?.length && !d.sourceTap && !d.targetTap) return e;
+        return {
+          ...e,
+          data: {
+            ...d,
+            ...(d.waypoints ? { waypoints: d.waypoints.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : {}),
+            ...(d.sourceTap ? { sourceTap: shift(d.sourceTap) } : {}),
+            ...(d.targetTap ? { targetTap: shift(d.targetTap) } : {}),
+          },
+        };
+      }),
+    }));
+    // No rebuild, for the same reason as moveNetAnchorsBy: this is one step of a
+    // group drag and the caller rebuilds once the block has landed.
   },
 
   moveNetAnchorsBy: (ids, dx, dy) => {

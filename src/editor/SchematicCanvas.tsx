@@ -94,7 +94,7 @@ function CanvasInner() {
    * Up here with the other refs because `onNodeClick` reads the second one, and
    * that callback is declared long before the drag handlers are.
    */
-  const dragAnchors = useRef<{ ids: string[]; x: number; y: number } | null>(null);
+  const dragAnchors = useRef<{ ids: string[]; edgeIds: string[]; x: number; y: number } | null>(null);
   const draggedAt = useRef(0);
 
   const {
@@ -894,7 +894,15 @@ function CanvasInner() {
         useUIStore.getState().symbolNorm,
       );
       for (const id of carried.keys()) ids.add(id);
-      dragAnchors.current = ids.size ? { ids: [...ids], x: node.position.x, y: node.position.y } : null;
+      // The wires wholly inside the block travel too — not just their ends. A
+      // wire's corners are absolute coordinates in its `data`, so parts that move
+      // without them leave the middle of the wire behind and it re-routes into a
+      // shape nobody drew. See `circuitStore.moveEdgeShapesBy` for what that did
+      // to the name `U-` on a sheet that was merely slid sideways.
+      const innerIds = inner.map((e) => e.id);
+      dragAnchors.current = ids.size || innerIds.length
+        ? { ids: [...ids], edgeIds: innerIds, x: node.position.x, y: node.position.y }
+        : null;
     },
     [],
   );
@@ -909,6 +917,7 @@ function CanvasInner() {
       d.x = node.position.x;
       d.y = node.position.y;
       useCircuitStore.getState().moveNetAnchorsBy(d.ids, dx, dy);
+      useCircuitStore.getState().moveEdgeShapesBy(d.edgeIds, dx, dy);
     },
     [],
   );

@@ -40,6 +40,8 @@ import { runDcSweepTests } from "../../simulation/regression/dcSweep.test.js";
 import { runModelTests } from "../../simulation/regression/models.test.js";
 import { runConvertedNetlistTests } from "../../simulation/regression/convertedNetlist.test.js";
 import { runLibraryLinkTests } from "../../simulation/regression/libraryLink.test.js";
+import { runSheetLoadTests } from "./sheetLoad.test.js";
+import { runSelectionDragTests } from "./selectionDrag.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -86,6 +88,9 @@ export async function runAllSuites(): Promise<Suite[]> {
     // A part named in a `.asc` and defined in the library: does it still find
     // its definition when the library is late, or absent?
     { name: "Library part linking", ...(await runLibraryLinkTests()) },
+    // Oeffnet jedes mitgelieferte Blatt richtig: Pins, Leitungsenden,
+    // Teilschaltungen, und liegt jeder Netzname auf seiner Leitung?
+    { name: "Sheets open correctly", ...(await runSheetLoadTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },
@@ -98,6 +103,9 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Net terminal round-trip", ...(await runNetTerminalRoundTripTests()) },
     // A name near the moved end of a wire that crosses a selection boundary.
     { name: "Drag carries boundary names", ...(await runDragCarryTests()) },
+    // Eine Auswahl aufnehmen und woanders absetzen darf die Schaltung nicht
+    // umverdrahten -- ueber echte Blaetter, ganz und halb.
+    { name: "Selection drag keeps the circuit", ...(await runSelectionDragTests()) },
     { name: "Text boxes", ...(await runTextBoxTests()) },
     { name: "Sheet shapes", ...(await runSheetShapeTests()) },
     // Share links/QR codes decompress asynchronously.
