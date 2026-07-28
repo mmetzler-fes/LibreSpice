@@ -4,10 +4,9 @@ import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { withSymbols } from "@editor/regression/withSymbols.js";
 import { surveySheet } from "@editor/regression/sheetSurvey.js";
-import type { TestReport } from "@editor/regression/svgExport.test.js";
 
 /**
- * Does every sheet that carries an analysis directive actually run?
+ * Does a sheet that carries an analysis directive actually run?
  *
  * The load suite (`sheetLoad.test.ts`) proves a schematic opens; this proves it
  * computes. They are not the same question, and the gap between them is where
@@ -25,32 +24,27 @@ import type { TestReport } from "@editor/regression/svgExport.test.js";
  * teacher, and pinning values here would turn every edited exercise into a red
  * suite. `models.test.ts` checks numbers where they are ours to check.
  *
- * This is the slow half of the corpus and lives in its own runner
- * (`npm run test:examples`, `scripts/run-example-sims.mjs`) rather than in
- * `test:editor`: a `.tran 1e-3 2` is legitimately slow, and the pre-commit run
- * has to stay one people actually run.
+ * **One sheet per module, on purpose.** This exports the run for a *single*
+ * file; the walking, the timing out and the reporting live in
+ * `scripts/run-example-sims.mjs`, which gives each sheet its own process. In one
+ * process a budget cannot be enforced: ngspice is a WASM call, `Promise.race`
+ * only stops waiting for it, and the abandoned run keeps a core busy while the
+ * next sheets queue behind it. Measured before the split, 77 sheets took over
+ * three quarters of an hour, most of it spent by runs nobody was waiting for any
+ * more. A child process can simply be killed.
  */
 
-const DIRS = [
-  "examples",
-  "examples/Rahm",
-  "examples/Multisim_converted",
-  "examples/Multisim14_converted",
-];
-
-/** Wall clock a single sheet may take before it is reported as too slow. */
-const BUDGET_MS = 20_000;
-
-/** Node's `fs`/`path`, via a runtime specifier so `tsc` stays out of it. */
-async function nodeApi(): Promise<any> {
-  const load = (m: string) => import(/* @vite-ignore */ m);
-  const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
-  return { fs, path, proc: (globalThis as any).process };
-}
+/** What one sheet's run came to. */
+export type SimOutcome =
+  | { kind: "ok"; vectors: number; analyses: string[] }
+  | { kind: "skip" }
+  | { kind: "error"; detail: string; analyses: string[] };
 
 /** The served library, as the app would have fetched it from `library/sub`. */
 async function loadServedLibrary(): Promise<void> {
-  const { fs, path, proc } = await nodeApi();
+  const load = (m: string) => import(/* @vite-ignore */ m);
+  const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+  const proc = (globalThis as any).process;
   const dir = path.join(proc.cwd(), "library/sub");
   const entries: { entry: unknown; scope: string }[] = [];
   if (fs.existsSync(dir)) {
@@ -66,102 +60,41 @@ async function loadServedLibrary(): Promise<void> {
   useLibraryStore.setState({ entries, serverAvailable: true } as never);
 }
 
-/** What one sheet's run came to. */
-type Outcome =
-  | { kind: "ok"; vectors: number }
-  | { kind: "slow"; ms: number }
-  | { kind: "error"; detail: string };
-
 /**
- * Runs one netlist, bounded by the budget.
+ * Load one `.asc`, netlist it, run it.
  *
- * The race does not cancel the run — ngspice is a WASM call and keeps going —
- * so a sheet over budget is reported and the process moves on; the runner exits
- * when the report is written, which ends the stragglers with it.
+ * Returns rather than throws for a refused circuit: "ngspice said no" is a
+ * result to report, not an accident. A genuine exception (a sheet that will not
+ * load at all) is left to the caller, whose process is about to end anyway.
  */
-async function runBounded(netlist: string): Promise<Outcome> {
-  const started = Date.now();
-  useSimulationStore.getState().setStatus("running");
-  useSimulationStore.getState().setLog("");
-  const timeout = Symbol("timeout");
-  let result: Awaited<ReturnType<typeof runSimulation>> | typeof timeout;
-  try {
-    result = await Promise.race([
-      runSimulation(netlist),
-      new Promise<typeof timeout>((r) => setTimeout(() => r(timeout), BUDGET_MS)),
-    ]);
-  } catch (err) {
-    return { kind: "error", detail: `throws — ${String((err as Error)?.message ?? err)}` };
-  }
-  if (result === timeout) return { kind: "slow", ms: Date.now() - started };
-
-  const log = useSimulationStore.getState().log ?? "";
-  // ngspice reports a refused circuit on its own line; the message matters
-  // because "unknown subckt: x1 … unknown" is a different fix from a singular
-  // matrix, and a bare "it failed" would send the reader back to the terminal.
-  const errLine = log.split(/\r?\n/).find((l) => /^\s*Error:/i.test(l));
-  if (errLine) return { kind: "error", detail: errLine.trim() };
-
-  const vectors = Object.keys(result.data ?? {}).length;
-  if (vectors === 0) return { kind: "error", detail: "ngspice returned no data vectors" };
-  return { kind: "ok", vectors };
-}
-
-type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> };
-
-function dirCase(dir: string): Case {
-  return {
-    name: `every analysed sheet in ${dir} runs`,
-    run: async (fail) => {
-      const { fs, path, proc } = await nodeApi();
-      const full = path.join(proc.cwd(), dir);
-      if (!fs.existsSync(full)) return; // git-ignored corpus, absent in a fresh clone
-      const files: string[] = fs.readdirSync(full).filter((n: string) => n.endsWith(".asc")).sort();
-
-      const failures: string[] = [];
-      let ran = 0;
-      let slow = 0;
-      for (const f of files) {
-        let survey;
-        try {
-          survey = await surveySheet(fs.readFileSync(path.join(full, f), "latin1"));
-        } catch (err) {
-          failures.push(`${f}: load throws — ${String((err as Error)?.message ?? err)}`);
-          continue;
-        }
-        // No analysis line means the sheet is a drawing, not a simulation — the
-        // exercise sheets are full of them and they are not failures.
-        if (survey.analyses.length === 0) continue;
-
-        const outcome = await runBounded(survey.netlist);
-        if (outcome.kind === "ok") ran++;
-        else if (outcome.kind === "slow") {
-          // Over budget is reported, not failed: some sheets simulate two
-          // seconds of real time and are entitled to take a while.
-          slow++;
-          console.log(`   ~ ${dir}/${f}: over ${BUDGET_MS / 1000}s (${survey.analyses.join(",")})`);
-        } else failures.push(`${f} [${survey.analyses.join(",")}]: ${outcome.detail}`);
-      }
-      console.log(`   ${dir}: ${ran} gerechnet, ${slow} ueber Budget, ${failures.length} fehlerhaft`);
-      if (failures.length) {
-        fail(failures.slice(0, 10).join(" | ") + (failures.length > 10 ? ` (+${failures.length - 10} more)` : ""));
-      }
-    },
-  };
-}
-
-export async function runExampleSimTests(only?: string[]): Promise<TestReport> {
+export async function simulateSheet(ascText: string): Promise<SimOutcome> {
   return await withSymbols(async () => {
     await loadServedLibrary();
-    const cases = (only?.length ? only : DIRS).map(dirCase);
-    const failures: { name: string; reason: string }[] = [];
-    for (const c of cases) {
-      try {
-        await c.run((reason) => failures.push({ name: c.name, reason }));
-      } catch (err) {
-        failures.push({ name: c.name, reason: String((err as Error)?.message ?? err) });
-      }
+    const survey = await surveySheet(ascText);
+    // No analysis line means the sheet is a drawing, not a simulation — the
+    // exercise sheets are full of them and they are not failures.
+    if (survey.analyses.length === 0) return { kind: "skip" };
+
+    useSimulationStore.getState().setStatus("running");
+    useSimulationStore.getState().setLog("");
+    let result;
+    try {
+      result = await runSimulation(survey.netlist);
+    } catch (err) {
+      return { kind: "error", detail: `throws — ${String((err as Error)?.message ?? err)}`, analyses: survey.analyses };
     }
-    return { total: cases.length, passed: cases.length - failures.length, failures };
+
+    const log = useSimulationStore.getState().log ?? "";
+    // ngspice reports a refused circuit on its own line; the message matters
+    // because "unknown subckt: x1 … unknown" is a different fix from a singular
+    // matrix, and a bare "it failed" would send the reader back to the terminal.
+    const errLine = log.split(/\r?\n/).find((l) => /^\s*Error:/i.test(l));
+    if (errLine) return { kind: "error", detail: errLine.trim(), analyses: survey.analyses };
+
+    const vectors = Object.keys(result.data ?? {}).length;
+    if (vectors === 0) {
+      return { kind: "error", detail: "ngspice returned no data vectors", analyses: survey.analyses };
+    }
+    return { kind: "ok", vectors, analyses: survey.analyses };
   });
 }

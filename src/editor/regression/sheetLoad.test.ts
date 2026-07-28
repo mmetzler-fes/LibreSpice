@@ -64,12 +64,6 @@ const KNOWN_LOOSE: Record<string, string> = {
   "examples/InvSummierverstaerker.asc": "doppelter FLAG-Block in der Vorlage",
   // Von Hand verschobene Namen (krumme Koordinaten: 481,291).
   "examples/Rahm/1_3_2_PT100-Sensor_mit_Brueckenschaltung.asc": "Namen von Hand verschoben, nicht auf dem Raster",
-  // Keine Konverterausgabe mehr: das Blatt wurde im Programm ueberarbeitet
-  // (Bauteile verschoben, Quelle von SINE auf DC, .tran auf .ac), und dabei
-  // wurden `Ue`/`Ua` von Hand 16 Einheiten neben die Leitung gesetzt. Im
-  // Original ist `Ua` eine Messsonde und `Ue` kommt gar nicht vor; frisch
-  // konvertiert ist das Blatt sauber.
-  "examples/Multisim_converted/10_1_Passiver_RC_Tiefpass.asc": "von Hand ueberarbeitet, Namen daneben gesetzt",
 };
 
 type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> };
