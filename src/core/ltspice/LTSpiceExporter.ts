@@ -11,6 +11,7 @@ import { encodeTextBox, TEXT_SIZE_DEFAULT, type TextBox } from "@core/circuit/te
 import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 import { sameAttrValue, shiftWindowLine, formatEng, type AscRaw, type AscPreserved } from "./ascPreserve.js";
 import { formatAnchor, formatBusTap } from "@core/circuit/netAnchor.js";
+import { splitPortId } from "../components/base/Port.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -367,11 +368,10 @@ export class LTSpiceExporter {
       axis: (nodeId, handle) => pinAxis.get(`${nodeId}-${handle}`),
       // Every pin, so a route can be kept off the ones it does not belong to
       // (see PinLookup.all). `pinCoord` is keyed `<node>-<handle>`; the route
-      // wants `<node>|<handle>`, and the split has to be on the *last* dash
-      // because a handle may contain one.
+      // wants `<node>|<handle>` (see splitPortId for why the first dash).
       all: () => [...pinCoord].map(([k, p]) => {
-        const i = k.lastIndexOf("-");
-        return { key: `${k.slice(0, i)}|${k.slice(i + 1)}`, x: p.x, y: p.y };
+        const { componentId, handle } = splitPortId(k);
+        return { key: `${componentId}|${handle}`, x: p.x, y: p.y };
       }),
     };
 

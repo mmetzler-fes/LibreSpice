@@ -23,6 +23,7 @@ import type { RoutedNet as RoutedNetLike } from "@core/circuit/anchorResolve.js"
 import { ANCHOR_TOLERANCE, distToRoute, distToRoutes, bindAnchor, bindAnchorTo, anchorFromBinding, type AnchorBinding } from "@core/circuit/anchorResolve.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
+import { splitPortId } from "@core/components/base/Port.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { useSimulationStore } from "./simulationStore.js";
 import { usePlotStore, currentPlotSettings } from "@simulation/plotStore.js";
@@ -284,7 +285,7 @@ function pinOfNet(circuit: Circuit, nodes: Node[], netId: string): FlowPoint | n
       if (port.netId !== netId) continue;
       const node = nodes.find((n) => n.id === comp.id);
       if (!node) continue;
-      const handle = port.id.slice(port.id.lastIndexOf("-") + 1);
+      const handle = splitPortId(port.id).handle;
       const p = getNodePins(node, useUIStore.getState().symbolNorm).find((q) => q.handleId === handle);
       if (p) return { x: Math.round(p.x), y: Math.round(p.y) };
     }
@@ -294,7 +295,7 @@ function pinOfNet(circuit: Circuit, nodes: Node[], netId: string): FlowPoint | n
 
 /** The net a port is on, by the port id the circuit uses (`comp_1-a`). */
 function portNet(circuit: Circuit, portId: string): string | undefined {
-  const compId = portId.slice(0, portId.lastIndexOf("-"));
+  const compId = splitPortId(portId).componentId;
   return circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
 }
 
@@ -1322,7 +1323,7 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         // answer when nothing else is closer.
         if (distToRoutes(at, routes) <= best) continue;
 
-        const comp = circuit.components.get(hit.portId.slice(0, hit.portId.lastIndexOf("-")));
+        const comp = circuit.components.get(splitPortId(hit.portId).componentId);
         const port = comp?.ports.find((p) => p.id === hit!.portId);
         if (!port) continue;
         const netId = freeNetId(circuit);

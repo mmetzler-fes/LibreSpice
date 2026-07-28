@@ -39,7 +39,7 @@ const DIRS = [
 ];
 
 /** Wall clock a single sheet may take before it is reported as too slow. */
-const BUDGET_MS = 30_000;
+const BUDGET_MS = 20_000;
 
 /** Node's `fs`/`path`, via a runtime specifier so `tsc` stays out of it. */
 async function nodeApi(): Promise<any> {

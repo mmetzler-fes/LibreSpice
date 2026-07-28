@@ -46,12 +46,12 @@ const DIRS = [
  * got worse without saying where, and no list at all would mean the suite could
  * never be green and would stop being read.
  *
- * The Multisim entries are one fault, not four: the converter drops the name 16
- * units below the wire it names (`WIRE 308 320 368 320` / `FLAG 340 336 Ua` in
- * `10_1_Passiver_RC_Tiefpass.asc`). It is not fixed here because converter
- * geometry is not a thing to change casually — five rebuilds of it were taken
- * back in one day — and because the fix belongs with a before/after measurement
- * over the whole converted corpus (`scripts/measure-conversion.mjs`).
+ * The Multisim entries that used to stand here are gone: they looked like a
+ * converter fault ("the name is written 16 units off the wire") and were not one.
+ * The converter had put every name exactly on its pin; the *editor* could not
+ * read a pin back whose name ends in a dash — the op-amp's `In-` — and so the
+ * name bound to nothing. Fixed at the source (see `splitPortId`), which took a
+ * freshly converted corpus from 105/108 to 108/108.
  *
  * Keyed by `<directory>/<file>`, not by file name: the same sheet name occurs in
  * several corpora — `1_3_2_PT100-Sensor_mit_Brueckenschaltung.asc` is loose
@@ -64,12 +64,12 @@ const KNOWN_LOOSE: Record<string, string> = {
   "examples/InvSummierverstaerker.asc": "doppelter FLAG-Block in der Vorlage",
   // Von Hand verschobene Namen (krumme Koordinaten: 481,291).
   "examples/Rahm/1_3_2_PT100-Sensor_mit_Brueckenschaltung.asc": "Namen von Hand verschoben, nicht auf dem Raster",
-  // Konverter setzt den Namen 16-32 Einheiten neben die Leitung.
-  "examples/Multisim_converted/10_1_Passiver_RC_Tiefpass.asc": "Konverter-Versatz",
-  "examples/Multisim_converted/9_5_Dreieck-Rechteck-Generator.asc": "Konverter-Versatz",
-  "examples/Multisim_converted/9_6_PWM_Dreieck-Rechteck-Generator (1).asc": "Konverter-Versatz",
-  "examples/Multisim_converted/Trigger.asc": "Konverter-Versatz",
-  "examples/Multisim14_converted/9_5_Dreieck-Rechteck-Generator.asc": "Konverter-Versatz",
+  // Keine Konverterausgabe mehr: das Blatt wurde im Programm ueberarbeitet
+  // (Bauteile verschoben, Quelle von SINE auf DC, .tran auf .ac), und dabei
+  // wurden `Ue`/`Ua` von Hand 16 Einheiten neben die Leitung gesetzt. Im
+  // Original ist `Ua` eine Messsonde und `Ue` kommt gar nicht vor; frisch
+  // konvertiert ist das Blatt sauber.
+  "examples/Multisim_converted/10_1_Passiver_RC_Tiefpass.asc": "von Hand ueberarbeitet, Namen daneben gesetzt",
 };
 
 type Case = { name: string; run: (fail: (r: string) => void) => Promise<void> };

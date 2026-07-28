@@ -7,6 +7,7 @@ import {
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { getNodePins, pinOutwardAxis, NODE_SIZE } from "./pinGeometry.js";
 import type { SymbolNorm } from "@sym/asyParser.js";
+import { splitPortId } from "@core/components/base/Port.js";
 
 /**
  * Which net each coordinate-anchored name belongs to.
@@ -118,7 +119,7 @@ export interface AnchorSheet {
 export function anchorRoutes(sheet: AnchorSheet, norm: SymbolNorm = "default"): RoutedNet[] {
   const nets: PortNets = {
     netOf: (portId) => {
-      const compId = portId.slice(0, portId.lastIndexOf("-"));
+      const compId = splitPortId(portId).componentId;
       return sheet.circuit.components.get(compId)?.ports.find((p) => p.id === portId)?.netId ?? undefined;
     },
   };
