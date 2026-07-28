@@ -29,6 +29,7 @@ import { runSymbolSourceTests } from "./symbolSources.test.js";
 import { runImportedRouteTests } from "./importedRoutes.test.js";
 import { runWireDragTests } from "./wireDrag.test.js";
 import { runNetTerminalRoundTripTests } from "./netTerminalRoundTrip.test.js";
+import { runDragCarryTests } from "./dragCarry.test.js";
 import { runTextBoxTests, runSheetShapeTests } from "./textBox.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
@@ -91,6 +92,8 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Grabbing a point of a drawn wire and moving it (see wireDrag.ts).
     { name: "Wire correction by hand", ...runWireDragTests() },
     { name: "Net terminal round-trip", ...(await runNetTerminalRoundTripTests()) },
+    // A name near the moved end of a wire that crosses a selection boundary.
+    { name: "Drag carries boundary names", ...(await runDragCarryTests()) },
     { name: "Text boxes", ...(await runTextBoxTests()) },
     { name: "Sheet shapes", ...(await runSheetShapeTests()) },
     // Share links/QR codes decompress asynchronously.

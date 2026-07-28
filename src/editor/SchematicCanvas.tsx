@@ -914,16 +914,20 @@ function CanvasInner() {
   );
 
   const onNodeDragStop = useCallback(() => {
-    const had = dragAnchors.current;
     dragAnchors.current = null;
     draggedAt.current = Date.now();
     // The nets only need re-deriving once the block has landed. During the drag
     // it moves rigidly — a name and the wire under it travel together, so which
     // net it lies on cannot change — and rebuilding on every step of a group drag
     // is the one thing that would make it stutter on a full sheet. It *can*
-    // change at the end, for a selected name that was sitting on a wire outside
-    // the block, which is what this is for.
-    if (had) setTimeout(() => rebuildConnections(), 0);
+    // change at the end: a selected name that was sitting on a wire outside the
+    // block, or — the case `had` used to gate this on and get wrong — a name that
+    // was never "carried" at all because it sits nearer the far, unselected end of
+    // a wire whose near end just moved. That wire is reshaped either way, and
+    // skipping the rebuild left such a name's binding pointing at geometry that no
+    // longer existed under it, with nothing left to ever re-fasten it. Always
+    // rebuilding here — once, not per step — is what catches that case too.
+    setTimeout(() => rebuildConnections(), 0);
   }, [rebuildConnections]);
 
   /** Forget the imported path of the wires on a moved part (see importedRoutes). */
