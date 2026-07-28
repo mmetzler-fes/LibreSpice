@@ -37,16 +37,27 @@ export interface RoutedNet {
 /**
  * Where a name is fastened: which route, how far along it, and how far off it.
  *
- * The offset is not a refinement — without it the binding is lossy. A name may
- * lie up to {@link ANCHOR_TOLERANCE} beside its wire and still name it, which is
- * what makes it something a person can place rather than a coordinate they have
- * to hit. Recomputing from `t` alone puts it *on* the wire, so merely loading a
- * schematic and saving it again moved every such name.
+ * Measured in *units from the nearer end*, not as a fraction of the length. A
+ * fraction only holds while the wire keeps its length, and re-routing is exactly
+ * what changes it: move the part at one end of an L and the wire grows a long
+ * detour, so "80% along" is suddenly somewhere else entirely. On two Schmitt
+ * trigger sheets that walked `UE+` off the + input and onto a wire belonging to
+ * another net — the failure this whole binding exists to prevent, reintroduced
+ * by the measure. From the near end, the same name stays 16 units from the pin it
+ * was 16 units from, whatever happened at the far end.
+ *
+ * The offset is not a refinement either — without it the binding is lossy. A
+ * name may lie up to {@link ANCHOR_TOLERANCE} beside its wire and still name it,
+ * which is what makes it something a person can place rather than a coordinate
+ * they have to hit. Recomputing without it puts the name *on* the wire, so merely
+ * loading a schematic and saving it again moved every such name.
  */
 export interface AnchorBinding {
   key: string;
-  /** Position along the route, as a fraction of its length. */
-  t: number;
+  /** Distance along the route from the end given by `fromEnd`. */
+  s: number;
+  /** Measured back from the route's last vertex rather than forward from its first. */
+  fromEnd: boolean;
   /** Offset from that point, so an unchanged wire yields the coordinate back exactly. */
   ox: number;
   oy: number;
@@ -106,9 +117,9 @@ function routeLength(verts: RoutePoint[]): number {
 }
 
 /**
- * Where along `verts` the point nearest `p` lies, as a fraction of the length.
- * Zero for a degenerate route (a bare pin): it has no length to be partway
- * along, and needs none.
+ * How far along `verts` the point nearest `p` lies, in units from the first
+ * vertex. Zero for a degenerate route (a bare pin): it has no length to be
+ * partway along, and needs none.
  */
 export function positionAlong(p: RoutePoint, verts: RoutePoint[]): number {
   const total = routeLength(verts);
@@ -124,15 +135,15 @@ export function positionAlong(p: RoutePoint, verts: RoutePoint[]): number {
     if (d < best) { best = d; at = walked + t * len; }
     walked += len;
   }
-  return at / total;
+  return at;
 }
 
-/** The point a fraction `t` along `verts`. */
-export function pointAlong(verts: RoutePoint[], t: number): RoutePoint | null {
+/** The point `s` units along `verts` from its first vertex. */
+export function pointAlong(verts: RoutePoint[], s: number): RoutePoint | null {
   if (verts.length === 0) return null;
   const total = routeLength(verts);
   if (total === 0) return { x: Math.round(verts[0].x), y: Math.round(verts[0].y) };
-  let want = Math.max(0, Math.min(1, t)) * total;
+  let want = Math.max(0, Math.min(total, s));
   for (let i = 0; i < verts.length - 1; i++) {
     const a = verts[i], b = verts[i + 1];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -163,13 +174,38 @@ export function bindAnchor(
     if (d <= bestDist) { bestDist = d; best = r; }
   }
   if (!best) return null;
-  const t = positionAlong(p, best.verts);
-  const on = pointAlong(best.verts, t) ?? p;
-  return { key: best.key!, t, ox: p.x - on.x, oy: p.y - on.y, netId: best.netId };
+  return bindAnchorTo(p, best);
+}
+
+/**
+ * Fasten a name to one particular route, chosen by the caller.
+ *
+ * The caller that matters is the re-fastening at the end of a rebuild: a name
+ * that is still lying on the wire it was already fastened to must be fastened to
+ * *that* wire again, not to whichever route is now nearest. Otherwise a part
+ * dragged so that one of its pins lands on a named point quietly takes the name
+ * over — the binding hops to the pin, and from then on the name is that pin's.
+ */
+export function bindAnchorTo(
+  p: RoutePoint, route: RoutedNet,
+): (AnchorBinding & { netId: string }) | null {
+  const best = route;
+  if (!best.key) return null;
+  const at = positionAlong(p, best.verts);
+  // From whichever end is nearer: that is the end whose geometry the name is
+  // about — the pin it labels, the corner it sits beside — and the one least
+  // likely to be the end that moves.
+  const total = routeLength(best.verts);
+  const fromEnd = at > total / 2;
+  const on = pointAlong(best.verts, at) ?? p;
+  return {
+    key: best.key!, s: fromEnd ? total - at : at, fromEnd,
+    ox: p.x - on.x, oy: p.y - on.y, netId: best.netId,
+  };
 }
 
 /** The coordinate a binding stands for on the route it names. */
 export function anchorFromBinding(verts: RoutePoint[], b: AnchorBinding): RoutePoint | null {
-  const on = pointAlong(verts, b.t);
+  const on = pointAlong(verts, b.fromEnd ? routeLength(verts) - b.s : b.s);
   return on ? { x: Math.round(on.x + b.ox), y: Math.round(on.y + b.oy) } : null;
 }

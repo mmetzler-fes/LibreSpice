@@ -5,6 +5,9 @@ import { NODE_SIZE, snapToGrid } from "./pinGeometry.js";
 import { netLabelShape, tagTransform } from "./netLabelShape.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useUIStore } from "@store/uiStore.js";
+import { useCircuitStore } from "@store/circuitStore.js";
+import { netRoutes } from "./anchorNets.js";
+import { nearestRoute } from "./anchorMagnet.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 
 interface PlacementGhostProps {
@@ -32,8 +35,17 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
     const onMove = (e: PointerEvent) => {
       const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       // The very snap the placement uses, so the ghost marks the exact spot the
-      // component's docking point will land on.
-      setFlowPos({ x: snapToGrid(flow.x), y: snapToGrid(flow.y) });
+      // component's docking point will land on — including the magnet that pulls
+      // a name onto the wire it is aimed at (see SchematicCanvas.placeComponent).
+      // The ghost jumping onto the wire *is* the feedback that the name will be
+      // connected; without it the user only finds out afterwards.
+      const aimed = { x: snapToGrid(flow.x), y: snapToGrid(flow.y) };
+      if (type !== "netlabel" && type !== "netconnector") { setFlowPos(aimed); return; }
+      const { nodes, edges } = useCircuitStore.getState();
+      const near = nearestRoute(
+        aimed, netRoutes(nodes, edges, { netOf: (id) => id }, useUIStore.getState().symbolNorm),
+      );
+      setFlowPos(near ? { x: snapToGrid(near.point.x), y: snapToGrid(near.point.y) } : aimed);
     };
     const onLeave = () => setFlowPos(null);
     el.addEventListener("pointermove", onMove);
@@ -44,7 +56,7 @@ export function PlacementGhost({ wrapperRef, type }: PlacementGhostProps) {
       el.removeEventListener("pointerdown", onMove);
       el.removeEventListener("pointerleave", onLeave);
     };
-  }, [wrapperRef, screenToFlowPosition]);
+  }, [wrapperRef, screenToFlowPosition, type]);
 
   if (!flowPos) return null;
   const rect = wrapperRef.current?.getBoundingClientRect();

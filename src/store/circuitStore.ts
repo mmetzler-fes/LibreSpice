@@ -20,7 +20,7 @@ import type { DataFlag } from "@core/circuit/dataExpr.js";
 import type { NetAnchor, BusTap } from "@core/circuit/netAnchor.js";
 import { resolveAnchors, anchorRoutes } from "@editor/anchorNets.js";
 import type { RoutedNet as RoutedNetLike } from "@core/circuit/anchorResolve.js";
-import { ANCHOR_TOLERANCE, distToRoute, distToRoutes, bindAnchor, anchorFromBinding, type AnchorBinding } from "@core/circuit/anchorResolve.js";
+import { ANCHOR_TOLERANCE, distToRoute, distToRoutes, bindAnchor, bindAnchorTo, anchorFromBinding, type AnchorBinding } from "@core/circuit/anchorResolve.js";
 import type { PortType } from "@core/components/special/Special.js";
 import { useLibraryStore } from "./libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
@@ -1176,6 +1176,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // it first, so everything below sees where it actually belongs. A name with
     // no binding — just placed, just dragged, or its wire gone — stays exactly
     // where it is and resolves geometrically, as before.
+    //
+    // The binding also decides the ties, but not here: `resolveAnchors` reads it
+    // off the state it is handed (see anchorNets.anchorNets), so the canvas, the
+    // panels and this all give the same answer to "which net is that name on".
     {
       const bind = get()._anchorBind;
       const byKey = new Map<string, RoutedNetLike>();
@@ -1295,12 +1299,27 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     // Re-fasten every name to whatever it is now lying on. At the end, so a name
     // just dragged onto another wire binds to *that* one: the binding follows the
     // geometry, never the other way round.
+    //
+    // With one thing held fixed: a name still lying on the wire it was already
+    // fastened to stays fastened to that wire, and only its measurements along it
+    // are taken again. Re-choosing the nearest route each time is what let a name
+    // be taken over — drag a part so a pin lands on a named point and the binding
+    // hops from the wire to the pin, which is a different net, without the name
+    // or the wire having moved at all. Dropping the binding (moveNetAnchor does,
+    // deliberately) is what re-opens the choice.
     {
       const routes = anchorRoutes(get(), norm);
+      const byKey = new Map<string, RoutedNetLike>();
+      for (const r of routes) if (r.key) byKey.set(r.key, r);
+      const prev = get()._anchorBind;
       const bind: Record<string, AnchorBinding> = {};
       for (const a of get().netAnchors) {
-        const b = bindAnchor({ x: a.x, y: a.y }, routes);
-        if (b) bind[a.id] = { key: b.key, t: b.t, ox: b.ox, oy: b.oy };
+        const at = { x: a.x, y: a.y };
+        const held = prev[a.id] ? byKey.get(prev[a.id].key) : undefined;
+        const b = held && distToRoute(at, held.verts) <= ANCHOR_TOLERANCE
+          ? bindAnchorTo(at, held)
+          : bindAnchor(at, routes);
+        if (b) bind[a.id] = { key: b.key, s: b.s, fromEnd: b.fromEnd, ox: b.ox, oy: b.oy };
       }
       set({ _anchorBind: bind });
     }

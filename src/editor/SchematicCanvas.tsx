@@ -52,7 +52,8 @@ import { forgetImportedRoutes } from "./importedRoutes.js";
 import { FragmentGhost } from "./FragmentGhost.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
-import { resolveAnchors } from "./anchorNets.js";
+import { resolveAnchors, netRoutes } from "./anchorNets.js";
+import { nearestRoute } from "./anchorMagnet.js";
 import { anchorBoxes, anchorsInBand } from "./anchorHitBox.js";
 
 const NODE_TYPES = { component: ComponentNode };
@@ -237,7 +238,22 @@ function CanvasInner() {
       // zero-length `WIRE x y x y`. An anchor simply sits where it was dropped,
       // on the pin included, exactly as in LTSpice.
       if (type === "netlabel" || type === "netconnector") {
-        const at = { x: snapToGrid(cx), y: snapToGrid(cy) };
+        // The same magnet the drag uses (see anchorMagnet): a label aimed at a
+        // wire lands *on* it rather than a few units beside it, where it would
+        // name nothing. Nothing within reach and it simply sits where it was
+        // dropped — a name on no wire is allowed, and putting one down in open
+        // space is how a sheet gets labelled before it is wired.
+        const aimed = { x: snapToGrid(cx), y: snapToGrid(cy) };
+        const { nodes: ns, edges: es } = useCircuitStore.getState();
+        const near = nearestRoute(
+          aimed, netRoutes(ns, es, { netOf: (id) => id }, useUIStore.getState().symbolNorm),
+        );
+        // Snapped again: the projection lands anywhere along the wire. The snap
+        // pitch is 4 (see GRID), so this can shift the point by at most 2 — well
+        // inside the tolerance that decides the net, and never off the wire.
+        const at = near
+          ? { x: snapToGrid(near.point.x), y: snapToGrid(near.point.y) }
+          : aimed;
         const isConnector = type === "netconnector";
         const name = getNextLabel(type, existingLabels());
         // A fresh connector defaults to a bi-directional port, the type that says

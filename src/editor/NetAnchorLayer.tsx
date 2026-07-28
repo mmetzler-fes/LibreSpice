@@ -8,6 +8,7 @@ import type { PortType } from "@core/components/special/Special.js";
 import { netLabelShape, tagTransform, tagBoxOrigin, type NetLabelShape } from "./netLabelShape.js";
 import { terminalDirection, terminalTagSide, sampleWire } from "./netTerminalOrientation.js";
 import { netRoutes, anchorsByPort } from "./anchorNets.js";
+import { isLooseAnchor, nearestRoute, SNAP_REACH } from "./anchorMagnet.js";
 import { NODE_SIZE } from "./pinGeometry.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 import type { FlowPoint } from "./WireTool.js";
@@ -39,6 +40,15 @@ import type { FlowPoint } from "./WireTool.js";
  * split, "move the label out of the way" and "point the label at something else"
  * were the same gesture, and the second one won — a name nudged clear of a
  * crowded corner silently stopped naming anything.
+ *
+ * With one exception, and it is the exception that makes the split usable: a
+ * name that is on no wire at all is dragged whole, tag and anchor together, and
+ * reaches for wires as it goes (see anchorMagnet). Such a name has nothing to
+ * protect — no net to lose — and the only thing anyone wants to do with it is
+ * put it on a wire. Without this, the two grips said "move me" and "connect me"
+ * while a freshly dropped label showed only the first: the label followed the
+ * pointer onto the wire and stayed unconnected, which read as net labels no
+ * longer connecting to anything at all.
  */
 export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: number, clientY: number) => void } = {}) {
   const vp = useViewport();
@@ -144,6 +154,9 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
     );
   };
 
+  /** Does this name lie on a wire? If not, it names nothing and may be re-aimed freely. */
+  const isLoose = (a: NetAnchor) => isLooseAnchor({ x: a.x, y: a.y }, routes);
+
   /**
    * Start dragging the readable tag.
    *
@@ -165,6 +178,10 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
     off: { dx: number; dy: number } | null, tagAnchor: NetLabelShape["tag"],
   ) => {
     if (canvasLocked || !isDragPointer(e)) return;
+    // A loose name is carried whole. `off` guards it: once the tag has been
+    // deliberately pulled aside it is its own thing and stays one, or the first
+    // drag after that would yank the anchor across the sheet to meet it.
+    if (!off && isLoose(a)) { startAnchorMove(e, a); return; }
     e.preventDefault();
     e.stopPropagation();
     if (e.shiftKey) toggleSelected(a.id); else setSelected(a.id);
@@ -254,6 +271,10 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
           : shape.tag;
         const reach = off ? Math.hypot(off.dx, off.dy) : 0;
         const showLeader = reach >= LEADER_MIN;
+        // A name on no wire shows its anchor unasked. It is the one state where
+        // the dot answers a question the user actually has — "why is this not
+        // naming anything?" — and it is also the grip that fixes it.
+        const loose = isLoose(a);
 
         return (
           <div
@@ -300,7 +321,7 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
                 away from it, "where is this name actually attached?" becomes a
                 question the drawing has to answer. Shown while it matters: when
                 the name is selected, or when its tag has been moved off. */}
-            {(isSelected || showLeader) && (
+            {(isSelected || showLeader || loose) && (
               <div
                 onPointerDown={(e) => startAnchorMove(e, a)}
                 title="Anschlusspunkt – ziehen, um den Namen auf eine andere Leitung zu setzen"
@@ -356,7 +377,13 @@ export function NetAnchorLayer({ onMenu }: { onMenu?: (a: NetAnchor, clientX: nu
                 onPointerDown={(e) => startTagMove(e, a, off, shape.tag)}
                 onDoubleClick={(e) => { e.stopPropagation(); if (!canvasLocked) setEditing(a.id); }}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSelected(a.id); onMenu?.(a, e.clientX, e.clientY); }}
-                title={isConnector ? `Net Connector (${portType}) – ziehen, Doppelklick zum Umbenennen` : "Netzname – ziehen, Doppelklick zum Umbenennen"}
+                title={
+                  loose
+                    ? "Liegt auf keiner Leitung – ziehen, um ihn auf eine Leitung zu setzen"
+                    : isConnector
+                      ? `Net Connector (${portType}) – ziehen verschiebt nur die Beschriftung, Doppelklick zum Umbenennen`
+                      : "Netzname – ziehen verschiebt nur die Beschriftung, Doppelklick zum Umbenennen"
+                }
                 style={{
                   ...DRAG_TOUCH_ACTION,
                   position: "absolute",
@@ -406,54 +433,6 @@ const ANCHOR_GRIP = 4;
  * is how it was reported.
  */
 const ANCHOR_HIT = 9;
-
-/**
- * How far the anchor reaches for a wire while it is being dragged.
- *
- * Wider than `ANCHOR_TOLERANCE` (anchorResolve.ts), which decides the net once
- * the anchor is *placed*: that one is deliberately under half a grid step so a name
- * can never reach the parallel wire one step away, and it is far too small to
- * aim at with a pointer. The magnet closes the gap — it reaches a grid step and
- * a half, shows which wire it found, and snaps the anchor exactly onto it, so
- * what lands is always well inside the placing tolerance rather than balanced on
- * its edge.
- */
-const SNAP_REACH = 24;
-
-/** The point on `verts` nearest `p`, with its distance. */
-function projectToRoute(p: FlowPoint, verts: FlowPoint[]): { point: FlowPoint; dist: number } {
-  let best: FlowPoint = verts[0] ?? p;
-  let dist = Infinity;
-  for (let i = 0; i < verts.length - 1; i++) {
-    const a = verts[i], b = verts[i + 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-    const q = { x: a.x + t * dx, y: a.y + t * dy };
-    const d = Math.hypot(q.x - p.x, q.y - p.y);
-    if (d < dist) { dist = d; best = q; }
-  }
-  return { point: best, dist };
-}
-
-/**
- * The nearest net within `reach`, as the point to snap to and the route to light
- * up — or null when the anchor is out in the open, which is allowed and has to
- * stay allowed (a name that reaches nothing is a name that names nothing, and
- * LTSpice writes those too).
- */
-function nearestRoute(
-  p: FlowPoint, routes: { netId: string; verts: FlowPoint[] }[], reach: number,
-): { point: FlowPoint; verts: FlowPoint[]; netId: string } | null {
-  let best: { point: FlowPoint; verts: FlowPoint[]; netId: string } | null = null;
-  let bestDist = reach;
-  for (const r of routes) {
-    if (r.verts.length < 2) continue;
-    const { point, dist } = projectToRoute(p, r.verts);
-    if (dist <= bestDist) { bestDist = dist; best = { point, verts: r.verts, netId: r.netId }; }
-  }
-  return best;
-}
 
 /**
  * The two ends of the wire segment nearest `p`, as far-end points.

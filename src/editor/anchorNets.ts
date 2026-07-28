@@ -1,6 +1,9 @@
 import type { Node, Edge } from "@xyflow/react";
 import { wireRoutes, type PinLookup, type RoutePoint } from "@core/geometry/wireRoutes.js";
-import { resolveAnchor, type RoutedNet } from "@core/circuit/anchorResolve.js";
+import {
+  ANCHOR_TOLERANCE, distToRoute, resolveAnchor,
+  type AnchorBinding, type RoutedNet,
+} from "@core/circuit/anchorResolve.js";
 import type { NetAnchor } from "@core/circuit/netAnchor.js";
 import { getNodePins, pinOutwardAxis, NODE_SIZE } from "./pinGeometry.js";
 import type { SymbolNorm } from "@sym/asyParser.js";
@@ -102,6 +105,13 @@ export interface AnchorSheet {
   edges: Edge[];
   netAnchors: NetAnchor[];
   circuit: { components: Map<string, { ports: { id: string; netId?: string | null }[] }> };
+  /**
+   * Where each name is fastened, when the sheet is the store's (see
+   * `circuitStore._anchorBind`). Optional because a caller may ask about a sheet
+   * that has none — a pasted fragment, a test's hand-built one — and the answer
+   * is then pure geometry, which is what it always was.
+   */
+  _anchorBind?: Record<string, AnchorBinding>;
 }
 
 /** Every net on the sheet as the polylines it occupies (see netRoutes). */
@@ -117,7 +127,7 @@ export function anchorRoutes(sheet: AnchorSheet, norm: SymbolNorm = "default"): 
 
 /** The net under each name, by anchor id — the one way to ask this question. */
 export function resolveAnchors(sheet: AnchorSheet, norm: SymbolNorm = "default"): Map<string, string> {
-  return anchorNets(sheet.netAnchors, anchorRoutes(sheet, norm));
+  return anchorNets(sheet.netAnchors, anchorRoutes(sheet, norm), sheet._anchorBind);
 }
 
 /**
@@ -155,11 +165,27 @@ export function anchorsByPort(
  * The net under each anchor, by anchor id. Anchors that reach nothing are left
  * out — a name floating on the sheet names nothing, which LTSpice allows and
  * `leitungstest.asc` contains two of (`x3`, `nc3`).
+ *
+ * `bind` decides the ties, and only the ties. A name that is still lying on the
+ * wire it was fastened to keeps *that* wire's net, whatever else has come to lie
+ * under it — drag a part until one of its pins sits exactly on a named point and
+ * the geometry has two answers at distance zero, so it picks by the order the
+ * routes happen to be listed in and the name changes net with nobody touching
+ * it. A name that has left its wire falls through to the geometry, which is the
+ * whole of the rule: what a name is attached to changes only when the name or
+ * the wire moves, never because a third thing arrived.
  */
-export function anchorNets(anchors: NetAnchor[], routes: RoutedNet[]): Map<string, string> {
+export function anchorNets(
+  anchors: NetAnchor[], routes: RoutedNet[], bind?: Record<string, AnchorBinding>,
+): Map<string, string> {
+  const byKey = new Map<string, RoutedNet>();
+  if (bind) for (const r of routes) if (r.key) byKey.set(r.key, r);
   const out = new Map<string, string>();
   for (const a of anchors) {
-    const netId = resolveAnchor({ x: a.x, y: a.y }, routes);
+    const at = { x: a.x, y: a.y };
+    const bound = bind?.[a.id] ? byKey.get(bind[a.id].key) : undefined;
+    if (bound && distToRoute(at, bound.verts) <= ANCHOR_TOLERANCE) { out.set(a.id, bound.netId); continue; }
+    const netId = resolveAnchor(at, routes);
     if (netId) out.set(a.id, netId);
   }
   return out;

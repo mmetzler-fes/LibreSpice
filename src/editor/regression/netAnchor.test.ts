@@ -2,7 +2,10 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { formatAnchor, isGroundAnchor, anchorsFromNodes, type NetAnchor } from "@core/circuit/netAnchor.js";
-import { resolveAnchors } from "@editor/anchorNets.js";
+import { resolveAnchors, anchorRoutes } from "@editor/anchorNets.js";
+import { isLooseAnchor, nearestRoute } from "@editor/anchorMagnet.js";
+import { resolveAnchor } from "@core/circuit/anchorResolve.js";
+import { snapToGrid } from "@editor/pinGeometry.js";
 import { anchorBoxes, anchorsInBand } from "@editor/anchorHitBox.js";
 import { withSymbols } from "./withSymbols.js";
 
@@ -565,6 +568,117 @@ export async function runNetAnchorTests(): Promise<{ total: number; passed: numb
       } catch (e) {
         fail(name, `threw: ${(e as Error).message}`);
       }
+    }
+
+    // ── 5. The magnet, and what it must not touch ──────────────────────────
+    // Two halves of one rule. A name that lies on no wire is reached for and put
+    // *on* one — the tolerance that decides the net is 8 units, which nobody can
+    // aim at, so without the magnet a label dropped beside a wire simply named
+    // nothing and looked connected. A name that already lies on a wire is not
+    // reached for at all: moving its label out of a crowded corner must never
+    // hand it to whatever it passes over.
+    total++;
+    try {
+      st().clearCircuit();
+      st().loadFromAsc(fs.readFileSync(path.join(dir, "04-2-1_RC_an_DC1.asc"), "latin1"));
+      await tick(); await tick();
+      st().rebuildConnections();
+      await tick();
+
+      const routes = anchorRoutes(st(), "default");
+      // A stretch of wire long enough to sit beside, and which way "beside" is.
+      let seg: { a: { x: number; y: number }; b: { x: number; y: number }; netId: string } | null = null;
+      for (const r of routes) {
+        for (let i = 0; i < r.verts.length - 1; i++) {
+          const a = r.verts[i], b = r.verts[i + 1];
+          if (Math.hypot(b.x - a.x, b.y - a.y) >= 48) { seg = { a, b, netId: r.netId }; break; }
+        }
+        if (seg) break;
+      }
+      if (!seg) throw new Error("no wire long enough in the sample sheet");
+      const mid = { x: (seg.a.x + seg.b.x) / 2, y: (seg.a.y + seg.b.y) / 2 };
+      // 12 units off it: further than the 8 that resolve, nearer than the 24 the
+      // magnet reaches. That gap is exactly what this is about.
+      const beside = seg.a.y === seg.b.y ? { x: mid.x, y: mid.y + 12 } : { x: mid.x + 12, y: mid.y };
+
+      if (!isLooseAnchor(beside, routes)) {
+        fail("a name beside a wire is loose and is drawn onto it", "a point 12 units off counted as attached");
+      }
+      if (resolveAnchor(beside, routes)) {
+        fail("a name beside a wire is loose and is drawn onto it", "12 units off resolved to a net on its own");
+      }
+      const near = nearestRoute(beside, routes);
+      if (!near) {
+        fail("a name beside a wire is loose and is drawn onto it", "the magnet did not reach the wire");
+      } else {
+        const at = { x: snapToGrid(near.point.x), y: snapToGrid(near.point.y) };
+        if (resolveAnchor(at, routes) !== seg.netId) {
+          fail("a name beside a wire is loose and is drawn onto it",
+            `snapped to ${at.x},${at.y}, which resolves to ${resolveAnchor(at, routes) ?? "nothing"} instead of ${seg.netId}`);
+        }
+      }
+    } catch (e) {
+      fail("a name beside a wire is loose and is drawn onto it", `threw: ${(e as Error).message}`);
+    }
+
+    // The other half: a name that has a net keeps it, however far its tag goes.
+    total++;
+    try {
+      const s = st();
+      const routes = anchorRoutes(s, "default");
+      const anchored = s.netAnchors.find((a) => !isLooseAnchor({ x: a.x, y: a.y }, routes));
+      if (!anchored) throw new Error("the sample sheet has no name on a wire");
+      const netBefore = resolveAnchors(st(), "default").get(anchored.id);
+      // Right across the sheet, over every other wire on the way.
+      st().moveNetAnchorTag(anchored.id, { dx: 240, dy: 160 });
+      await tick();
+      st().rebuildConnections();
+      await tick();
+      const now = st().netAnchors.find((a) => a.id === anchored.id)!;
+      if (now.x !== anchored.x || now.y !== anchored.y) {
+        fail("a name that has a net keeps it while its tag is dragged", `the anchor followed the tag to ${now.x},${now.y}`);
+      }
+      const netAfter = resolveAnchors(st(), "default").get(anchored.id);
+      if (netAfter !== netBefore) {
+        fail("a name that has a net keeps it while its tag is dragged", `net ${netBefore} became ${netAfter ?? "nothing"}`);
+      }
+    } catch (e) {
+      fail("a name that has a net keeps it while its tag is dragged", `threw: ${(e as Error).message}`);
+    }
+
+    // And a loose name dragged onto a wire *does* connect — the gesture the
+    // magnet exists to complete, checked through the store the canvas drives.
+    total++;
+    try {
+      st().clearCircuit();
+      st().loadFromAsc(fs.readFileSync(path.join(dir, "04-2-1_RC_an_DC1.asc"), "latin1"));
+      await tick(); await tick();
+      st().rebuildConnections();
+      await tick();
+
+      const routes = anchorRoutes(st(), "default");
+      const wire = routes.find((r) => r.verts.length > 1 && (r.verts[0].x !== r.verts[1].x || r.verts[0].y !== r.verts[1].y));
+      if (!wire) throw new Error("no wire in the sample sheet");
+      const target = { x: (wire.verts[0].x + wire.verts[1].x) / 2, y: (wire.verts[0].y + wire.verts[1].y) / 2 };
+
+      // Dropped out in the open: loose, naming nothing.
+      const id = st().addNetAnchor(snapToGrid(target.x) + 64, snapToGrid(target.y) + 96, "MAGNET");
+      await tick();
+      if (resolveAnchors(st(), "default").get(id)) {
+        fail("a loose name dragged onto a wire connects", "a name dropped in open space claimed a net");
+      }
+      // Dragged to within the magnet's reach, which snaps it onto the wire — the
+      // canvas moves the anchor to the snapped point, exactly as here.
+      const near = nearestRoute({ x: target.x + 12, y: target.y + 12 }, routes);
+      if (!near) throw new Error("the magnet did not reach the wire");
+      st().moveNetAnchor(id, near.point.x, near.point.y);
+      await tick();
+      const net = resolveAnchors(st(), "default").get(id);
+      if (net !== wire.netId) {
+        fail("a loose name dragged onto a wire connects", `landed on ${net ?? "nothing"} instead of ${wire.netId}`);
+      }
+    } catch (e) {
+      fail("a loose name dragged onto a wire connects", `threw: ${(e as Error).message}`);
     }
 
     // ── The shape of an anchor ─────────────────────────────────────────────
