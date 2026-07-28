@@ -514,6 +514,27 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
 
   regenerateNetlist: () => {
     const { circuit, simulationConfig, spiceDirectives, netAnchors } = get();
+    // Late-link any library part still without its `.subckt` text.
+    //
+    // `loadFromAsc` links them too, but only once, at the moment the file is
+    // read — and the library arrives over the network, so a sheet opened while
+    // that fetch was in flight got an empty one and nothing ever came back to
+    // it. The part then netlists as `UNKNOWN` (CustomSubcircuit.getNetlistLine
+    // reads the name out of the model text), and because the definitions below
+    // are emitted by *reference*, the `.subckt` it needed was left out as well:
+    // ngspice sees an instance of a subcircuit that appears nowhere. Measured on
+    // examples/Rahm/6_2_1_Asynchroner_Frequenzteiler_Lsg.asc, whose `seg7hex`
+    // display came out as `X1 N9 N8 N7 N6 UNKNOWN`.
+    //
+    // Here is the right place because it is the same moment the definitions are
+    // collected: whatever the library knows now, the netlist uses now.
+    for (const comp of circuit.components.values()) {
+      const sub = comp as unknown as { spiceModel?: string };
+      if (sub.spiceModel !== "") continue;
+      const name = String((get().nodes.find((n) => n.id === comp.id)?.data as { subName?: string })?.subName ?? "");
+      const entry = name ? useLibraryStore.getState().findByName(name)?.entry : undefined;
+      if (entry?.kind === "subckt") sub.spiceModel = entry.raw;
+    }
     // Anchors name their net, so nets sharing a name collapse to one node (which
     // is how distant parts connect). Where several name one net, the same winner
     // is chosen as everywhere else — this used to impose each name in turn,

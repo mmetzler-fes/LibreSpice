@@ -956,7 +956,20 @@ export class LTSpiceParser {
         ...((comp as any).gateType !== undefined && { gateType: (comp as any).gateType, inputs: (comp as any).inputs }),
         ...((comp as any).edge !== undefined && { edge: (comp as any).edge, asyncPolarity: (comp as any).asyncPolarity, kind: (comp as any).kind }),
         // Library part: its handles, its `.asy` symbol and the subcircuit name.
-        ...(cType === "subcircuit" && { pins: subPins ?? [], symbolName: symBase, subName: valueStr || symBase }),
+        //
+        // `SpiceModel` is checked after `Value` because LTSpice accepts either
+        // slot for the name of the `.subckt` an X-part instantiates, and our own
+        // symbols use `Value`. Missing it meant falling through to the *symbol*
+        // name: `LM317_InlineSpiceDirective.asc` draws its regulator with the
+        // `Ureg` symbol and names the model only in `SpiceModel`, so the part
+        // was looked up as "Ureg", found nothing, and netlisted as `UNKNOWN` —
+        // while the `.SUBCKT LM317/TI` it wanted sat in the sheet's own SPICE
+        // directive, three lines further down the same file.
+        ...(cType === "subcircuit" && {
+          pins: subPins ?? [],
+          symbolName: symBase,
+          subName: valueStr || sym.attrs["SpiceModel"] || symBase,
+        }),
         // Remember the symbol the file actually used (e.g. `Misc\EuropeanResistor`
         // for the IEC set), so saving writes it back instead of collapsing every
         // resistor to the US `res` symbol.

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ComponentDescriptor, LibraryEntry, LibraryScope } from "@core/library/types.js";
 import { ModelParser } from "@core/library/ModelParser.js";
+import { bundledEntries } from "@core/library/bundledLibrary.js";
 import { registerSymbol } from "@sym/asyParser.js";
 
 /** Library API endpoint, relative to the app's base path so it works under a
@@ -120,13 +121,36 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
 
   getDefinitionsText: () =>
     get()
-      .entries.map((e) => e.entry.raw)
+      .getDefinitionBlocks()
+      .map((b) => b.raw)
       .join("\n"),
 
-  getDefinitionBlocks: () =>
-    get().entries.map((e) => ({ name: e.entry.name, raw: e.entry.raw })),
+  // The imported entries plus every curated default no import shadows. The
+  // defaults come last in precedence and are filtered by name, so a `seg7hex`
+  // dropped into the served library replaces the bundled one rather than being
+  // emitted beside it — two `.subckt` blocks of the same name is a redefinition
+  // ngspice would take the last of.
+  getDefinitionBlocks: () => {
+    const claimed = new Set(get().entries.map((e) => e.entry.name.toLowerCase()));
+    return [
+      ...get().entries.map((e) => ({ name: e.entry.name, raw: e.entry.raw })),
+      ...bundledEntries()
+        .filter((e) => !claimed.has(e.name.toLowerCase()))
+        .map((e) => ({ name: e.name, raw: e.raw })),
+    ];
+  },
 
-  findByName: (name) => get().entries.find((e) => e.entry.name.toLowerCase() === name.toLowerCase()),
+  // Falls back to the curated defaults, under the `temp` scope: they are not
+  // the user's import and must never be written to localStorage, but every
+  // caller of this asks the same question — "is there a part by this name" —
+  // and for a shipped example the answer has to be yes with or without a
+  // backend (see bundledLibrary).
+  findByName: (name) => {
+    const own = get().entries.find((e) => e.entry.name.toLowerCase() === name.toLowerCase());
+    if (own) return own;
+    const bundled = bundledEntries().find((e) => e.name.toLowerCase() === name.toLowerCase());
+    return bundled ? { entry: bundled, scope: "temp" as LibraryScope } : undefined;
+  },
 
   fetchServerLibrary: async () => {
     let data: { models?: string[]; symbols?: { name: string; raw: string }[]; components?: ComponentDescriptor[] };

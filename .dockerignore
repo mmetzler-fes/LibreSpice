@@ -3,6 +3,10 @@ server/node_modules
 dist
 .git
 .vscode
-library
+# NOT library/: the curated default parts live there and both stages need them
+# — the SPA compiles them in (src/core/library/bundledLibrary.ts) and the
+# runtime seeds /data/lib with them. Excluding it built an image that had no
+# parts at all, in which every shipped example failed with "unknown subckt".
+# User drop-ins are kept out of git by library/.gitignore, not from here.
 *.odt
 library-archive

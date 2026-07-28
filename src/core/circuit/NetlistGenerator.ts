@@ -87,6 +87,16 @@ export class NetlistGenerator {
       if (b.name) defByName.set(b.name.toLowerCase(), b.raw);
       else alwaysOn += `\n${b.raw}`; // unnamed legacy block: always included
     }
+    // A definition the sheet carries itself wins over the library's. The two
+    // can name the same part: `LM317_InlineSpiceDirective.asc` pastes a whole
+    // `.SUBCKT LM317/TI` into a SPICE directive, and the shipped library has one
+    // under that name too — emitting both puts two identical `.subckt` blocks in
+    // the netlist, which ngspice reports as a redefinition. The sheet's copy is
+    // the one the user can see and edit, so the library's is dropped.
+    for (const m of directives.matchAll(/^\s*\.(?:model|subckt)\s+(\S+)/gim)) {
+      defByName.delete(m[1].toLowerCase());
+    }
+
     const usedDefs = new Map<string, string>();
     const queue: string[] = [];
     const scanForRefs = (text: string) => {

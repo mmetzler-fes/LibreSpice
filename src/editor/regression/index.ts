@@ -39,6 +39,7 @@ import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasu
 import { runDcSweepTests } from "../../simulation/regression/dcSweep.test.js";
 import { runModelTests } from "../../simulation/regression/models.test.js";
 import { runConvertedNetlistTests } from "../../simulation/regression/convertedNetlist.test.js";
+import { runLibraryLinkTests } from "../../simulation/regression/libraryLink.test.js";
 
 export interface Suite { name: string; total: number; passed: number; failures: { name: string; reason: string }[] }
 
@@ -82,6 +83,9 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Net anchors", ...(await runNetAnchorTests()) },
     { name: "Multisim 14 files", ...(await runMs14Tests()) },
     { name: "Converted netlists", ...(await runConvertedNetlistTests()) },
+    // A part named in a `.asc` and defined in the library: does it still find
+    // its definition when the library is late, or absent?
+    { name: "Library part linking", ...(await runLibraryLinkTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },

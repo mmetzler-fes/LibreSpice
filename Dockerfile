@@ -42,6 +42,18 @@ ENV APP_BASE=/
 # mount) is writable too. When bind-mounting a host folder, match its owner via
 # the compose `user:` override (see docker-compose.yml).
 RUN mkdir -p /data/lib && chown -R node:node /data/lib
+
+# Seed the library volume with the curated defaults, so the shipped examples
+# find the parts they reference by name (`seg7hex`, `pot`, `LM317`, …) even
+# without a bind mount: Docker initialises an empty volume from the image's
+# content at this path. A bind-mounted host folder shadows this, which is the
+# intent — the host copy then is the library. The SPA carries the same defaults
+# compiled in (bundledLibrary.ts), so this is the second of two floors, not the
+# only one.
+COPY --chown=node:node library/sub /data/lib/sub
+COPY --chown=node:node library/sym /data/lib/sym
+COPY --chown=node:node library/cmp /data/lib/cmp
+
 USER node
 
 EXPOSE 8080
