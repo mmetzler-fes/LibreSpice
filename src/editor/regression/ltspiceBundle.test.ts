@@ -113,8 +113,10 @@ const CASES: Case[] = [
         if (!c.symbols.some((s) => s.name.toLowerCase() === "spdt2")) {
           fail(`spdt2.asy is missing: ${c.symbols.map((s) => s.name).join(", ")}`);
         }
-        if (!c.models.some((m) => m.name.toLowerCase() === "spdt2")) {
-          fail(`the .subckt is missing: ${c.models.map((m) => m.name).join(", ")}`);
+        // Its symbol names the file, so the model rides there rather than in
+        // the sheet's include list (see the double-definition case below).
+        if (!c.symbolModels.some((m) => m.file.toLowerCase() === "spdt2.lib")) {
+          fail(`the .subckt is missing: ${[...c.symbolModels.map((m) => m.file), ...c.models.map((m) => m.name)].join(", ")}`);
         }
         if (c.missing.length) fail(`unresolved: ${c.missing.join(", ")}`);
       });
@@ -135,6 +137,43 @@ const CASES: Case[] = [
           if (!symbolSource(n)) fail(`${n} is not in the registry — the case proves nothing`);
         }
         if (c.missing.length) fail(`reported as missing rather than skipped: ${c.missing.join(", ")}`);
+      });
+    },
+  },
+  {
+    // LTSpice loads a symbol's `SYMATTR ModelFile` by itself. Putting that same
+    // `.subckt` into the sheet's `.include` as well gave it the definition
+    // twice, and LTSpice stops with "there is more than one definition of
+    // subcircuit SPDT2" — reliably so once the files are also copied into its
+    // own library folder, where the symbol finds its model on the second path.
+    name: "a model its symbol fetches is not included a second time",
+    run: async (fail) => {
+      await withSymbols(async () => {
+        const input = await bundleInputFor(OURS_ASC);
+        const c = collectBundle(input);
+        // spdt2.asy says `ModelFile spdt2.lib`, so the model rides under that
+        // name and leaves the sheet's include list.
+        if (!c.symbolModels.some((m) => m.file.toLowerCase() === "spdt2.lib")) {
+          fail(`not handed to its symbol: ${c.symbolModels.map((m) => m.file).join(", ")}`);
+        }
+        if (c.models.some((m) => m.name.toLowerCase() === "spdt2")) fail("also queued for the include");
+
+        const files = readZip(buildLTSpiceBundle("Testblatt", input));
+        if (!files.has("spdt2.lib")) fail(`no spdt2.lib: ${[...files.keys()].join(", ")}`);
+        if (files.has(BUNDLE_LIB)) fail("an include file was written for a model nothing needs to include");
+        if (files.get("Testblatt.asc")?.includes(".include")) fail("the sheet includes it anyway");
+
+        // The point of all of it: exactly one file defines each subcircuit.
+        const defs = new Map<string, string[]>();
+        for (const [name, text] of files) {
+          if (!/\.(lib|asc)$/i.test(name)) continue;
+          for (const m of text.matchAll(/^\s*\.subckt\s+(\S+)/gim)) {
+            defs.set(m[1].toLowerCase(), [...(defs.get(m[1].toLowerCase()) ?? []), name]);
+          }
+        }
+        for (const [sub, where] of defs) {
+          if (where.length > 1) fail(`${sub} is defined in ${where.join(" and ")}`);
+        }
       });
     },
   },
@@ -160,12 +199,11 @@ const CASES: Case[] = [
       await withSymbols(async () => {
         const input = await bundleInputFor(OURS_ASC);
         const files = readZip(buildLTSpiceBundle("Testblatt", input));
-        for (const want of ["Testblatt.asc", "spdt2.asy", BUNDLE_LIB, "LIESMICH.txt"]) {
+        for (const want of ["Testblatt.asc", "spdt2.asy", "spdt2.lib", "LIESMICH.txt"]) {
           if (!files.has(want)) fail(`${want} is not in the archive: ${[...files.keys()].join(", ")}`);
         }
         if (!files.get("spdt2.asy")?.includes("PINATTR PinName COM")) fail("the .asy is not its source text");
-        if (!/\.subckt\s+SPDT2/i.test(files.get(BUNDLE_LIB) ?? "")) fail("the model file has no subcircuit");
-        if (!files.get("Testblatt.asc")?.includes(`.include ${BUNDLE_LIB}`)) fail("the sheet does not load the models");
+        if (!/\.subckt\s+SPDT2/i.test(files.get("spdt2.lib") ?? "")) fail("the model file has no subcircuit");
       });
     },
   },

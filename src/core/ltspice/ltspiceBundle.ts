@@ -49,7 +49,19 @@ function isStockSymbol(name: string): boolean {
 export interface BundleContents {
   /** `.asy` sources of our own symbols the sheet draws with, keyed by name. */
   symbols: { name: string; raw: string }[];
-  /** `.model` / `.subckt` blocks the sheet references, in dependency order. */
+  /**
+   * Models a symbol fetches by itself, keyed by the file name its `SYMATTR
+   * ModelFile` asks for.
+   *
+   * LTSpice loads a symbol's `ModelFile` on its own, without any directive. So
+   * a model that belongs to a symbol must be written under exactly that name
+   * and must *not* also be included from the sheet — LTSpice would then read
+   * the same `.subckt` twice and stop with "there is more than one definition
+   * of subcircuit". That is not hypothetical: it is what happens as soon as the
+   * files are also copied into LTSpice's own library folder.
+   */
+  symbolModels: { file: string; raw: string }[];
+  /** `.model` / `.subckt` blocks with no symbol to fetch them, so the sheet must. */
   models: { name: string; raw: string }[];
   /**
    * Parts the sheet names that we could not resolve — a symbol with no `.asy`
@@ -111,7 +123,23 @@ export function collectBundle(input: BundleInput): BundleContents {
   const models = [...used].map(([name, raw]) => ({ name, raw }));
   if (always.trim()) models.unshift({ name: "", raw: always.trim() });
 
-  return { symbols, models, missing };
+  // Hand each model to the symbol that fetches it, where there is one. What is
+  // left over has nothing to load it, so the sheet includes it.
+  const symbolModels: { file: string; raw: string }[] = [];
+  for (const sym of symbols) {
+    const file = /^SYMATTR\s+ModelFile\s+(\S+)/im.exec(sym.raw)?.[1];
+    const model = /^SYMATTR\s+(?:SpiceModel|Value)\s+(\S+)/im.exec(sym.raw)?.[1];
+    if (!file || !model) continue;
+    const at = models.findIndex((m) => m.name.toLowerCase() === model.toLowerCase());
+    if (at < 0) continue;
+    const [taken] = models.splice(at, 1);
+    const existing = symbolModels.find((s) => s.file.toLowerCase() === file.toLowerCase());
+    // Two symbols may name the same file; its blocks then travel together.
+    if (existing) existing.raw += `\n${taken.raw.trim()}`;
+    else symbolModels.push({ file, raw: taken.raw.trim() });
+  }
+
+  return { symbols, symbolModels, models, missing };
 }
 
 /**
@@ -153,8 +181,15 @@ export function bundleReadme(sheetName: string, c: BundleContents, hasPlt = fals
   if (c.symbols.length) {
     lines.push(`Symbole (${c.symbols.length}): ${c.symbols.map((s) => s.name).join(", ")}`, "");
   }
+  if (c.symbolModels.length) {
+    lines.push(
+      `Modelle zu den Symbolen: ${c.symbolModels.map((s) => s.file).join(", ")}`,
+      "(die laedt LTSpice ueber das Symbol selbst, ohne Direktive im Blatt)",
+      "",
+    );
+  }
   if (c.models.length) {
-    lines.push(`Modelle in ${BUNDLE_LIB}: ${c.models.map((m) => m.name).filter(Boolean).join(", ")}`, "");
+    lines.push(`Weitere Modelle in ${BUNDLE_LIB}: ${c.models.map((m) => m.name).filter(Boolean).join(", ")}`, "");
   }
   if (c.missing.length) {
     lines.push(
@@ -196,6 +231,8 @@ export function buildLTSpiceBundle(sheetName: string, input: BundleInput): Uint8
   const entries: ZipEntry[] = [
     { path: `${sheetName}.asc`, data: asc, latin1: true },
     ...contents.symbols.map((s) => ({ path: `${s.name}.asy`, data: s.raw, latin1: true })),
+    // Under the name the symbol asks for, so LTSpice loads it by itself.
+    ...contents.symbolModels.map((s) => ({ path: s.file, data: `${s.raw}\n`, latin1: true })),
   ];
   if (contents.models.length) {
     entries.push({
