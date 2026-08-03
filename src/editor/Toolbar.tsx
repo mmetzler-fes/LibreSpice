@@ -706,7 +706,7 @@ export function Toolbar() {
           Placing {pendingPlaceType} — click canvas or Esc to cancel
         </span>
       )}
-      {editorMode === "place" && pendingTextBox && (
+      {pendingTextBox && (
         <span style={{ fontSize: 11, color: "#2563eb", fontStyle: "italic", marginLeft: 4, whiteSpace: "nowrap" }}>
           Textfeld — auf die Zeichenfläche klicken, Esc bricht ab
         </span>

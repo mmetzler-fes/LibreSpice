@@ -60,9 +60,46 @@ const CASES: Case[] = [
     run: (fail) => {
       reset();
       ui().startPlacingTextBox();
-      if (ui().editorMode !== "place") fail(`editorMode is ${ui().editorMode}, not "place"`);
       if (!ui().pendingTextBox) fail("the tool is not armed");
       if (st().textBoxes.length !== 0) fail(`${st().textBoxes.length} box(es) appeared before any click`);
+    },
+  },
+
+  {
+    // The tool used to arm itself as `editorMode: "place"`. That silently left
+    // the select mode: the area-select toggle switched off (it only applies in
+    // select mode), so React Flow's `panOnDrag` took the drag back and the
+    // canvas started panning instead of drawing a band. It looked — and behaved
+    // — like the button had changed the mode, and the note could only be placed
+    // with Shift held, which puts the drag back into a selection.
+    name: "arming the text tool leaves the mode alone",
+    run: (fail) => {
+      reset();
+      ui().setEditorMode("select");
+      const before = ui().editorMode;
+      ui().startPlacingTextBox();
+      if (ui().editorMode !== before) fail(`the mode jumped from ${before} to ${ui().editorMode}`);
+      if (ui().editorMode === "place") fail("the text tool still masquerades as a part placement");
+      // …and after the note is down, the mode is still the one the user chose.
+      placeTextBoxAt(64, 48);
+      if (ui().editorMode !== before) fail(`placing left the mode at ${ui().editorMode}`);
+    },
+  },
+
+  {
+    // The rubber band lives in select mode, so an armed text tool must not
+    // switch it off — that was the "Verschiebemodus" the button appeared to
+    // trigger.
+    name: "the area-select toggle survives the armed text tool",
+    run: (fail) => {
+      reset();
+      ui().setEditorMode("select");
+      if (!ui().areaSelect) ui().toggleAreaSelect();
+      ui().startPlacingTextBox();
+      // Both conditions the canvas reads for the band and for panOnDrag.
+      if (!ui().areaSelect) fail("the area-select toggle was cleared");
+      if (ui().editorMode !== "select") fail(`the band is off: editorMode is ${ui().editorMode}`);
+      ui().toggleAreaSelect();
     },
   },
 

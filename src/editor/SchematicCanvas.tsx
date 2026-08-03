@@ -706,8 +706,9 @@ function CanvasInner() {
       // The rubber band, in the two ways it can be started: the area-select
       // toggle (which is how it is reached on a tablet) and React Flow's own
       // Shift+drag. Watched for every pointer type, before the long-press guard
-      // below turns the mouse away.
-      if (editorMode === "select" && !canvasLocked && (areaSelect || e.shiftKey) && isDragPointer(e)) {
+      // below turns the mouse away. Not while the text tool is armed: that click
+      // is aiming a note, not gathering a selection.
+      if (editorMode === "select" && !canvasLocked && !pendingTextBox && (areaSelect || e.shiftKey) && isDragPointer(e)) {
         trackAnchorBand(e);
       }
       if (!isLongPressPointer(e)) return;
@@ -721,11 +722,13 @@ function CanvasInner() {
         });
         return;
       }
-      // Placing a part: the ghost tracks the finger/stylus, so dropping it where
-      // the pointer lifts is the natural gesture. ReactFlow never delivers a
-      // pane click for touch, so without this the ghost could not be committed.
-      // (No long-press here — it would swallow the release that places the part.)
-      if (editorMode === "place") {
+      // Placing a part or a note: the ghost tracks the finger/stylus, so dropping
+      // it where the pointer lifts is the natural gesture. ReactFlow never
+      // delivers a pane click for touch, so without this the ghost could not be
+      // committed. (No long-press here — it would swallow the release that
+      // places the part.) The text tool rides on the select mode, which is why
+      // it is asked about separately.
+      if (editorMode === "place" || pendingTextBox) {
         trackPointerDrag(e, () => {}, (ev) => {
           // Drop only on a real lift; a cancel (palm rejection, system takeover)
           // must not scatter a part where the gesture happened to abort.
@@ -837,8 +840,9 @@ function CanvasInner() {
       setSelectedAnchorId(null);
       setSelectedTextBoxId(null);
       // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
-      // mouse commits its placement here, on the pane click.
-      if (editorMode === "place" && lastPointerTypeRef.current === "mouse") {
+      // mouse commits its placement here, on the pane click. The text tool is
+      // armed *within* the select mode, so it is asked about beside the mode.
+      if ((editorMode === "place" || pendingTextBox) && lastPointerTypeRef.current === "mouse") {
         const pos = clientToFlow(event.clientX, event.clientY);
         if (pendingTextBox) {
           placeTextBox(pos.x, pos.y);
@@ -1047,8 +1051,10 @@ function CanvasInner() {
     [setEdges, rebuildConnections],
   );
 
+  // The armed text tool keeps the select mode but takes the aiming cursor — it
+  // is the only sign on the canvas that the next click puts a note down.
   const cursorStyle =
-    editorMode === "place" ? "crosshair" :
+    editorMode === "place" || pendingTextBox ? "crosshair" :
     editorMode === "wire"  ? "cell" : "default";
 
   /** Delete the part the menu was opened on (its wires go with it). */

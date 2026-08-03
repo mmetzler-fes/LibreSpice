@@ -40,10 +40,12 @@ interface UIState {
   pendingPlaceType: ComponentType | null;
   pendingLibraryPlacement: PendingLibraryPlacement | null;
   /**
-   * A text box is waiting for the point it goes down at. A note is not a part,
-   * so it has no `ComponentType` to hang off `pendingPlaceType` — but it is put
-   * down the same way, by aiming at the sheet, which is why it shares
-   * `editorMode: "place"` and everything that clears it.
+   * A text box is waiting for the point it goes down at.
+   *
+   * An add-on to the select mode rather than an `editorMode` of its own: a note
+   * is not a part, and switching modes for it took the rubber band away and
+   * turned a drag into a pan. The mode stays what it was; only the next click on
+   * the sheet means something else.
    */
   pendingTextBox: boolean;
   /** Rotation (deg) applied to the placement ghost and the next placed part. */
@@ -176,8 +178,12 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   startPlacing: (type) => set({ editorMode: "place", pendingPlaceType: type, pendingLibraryPlacement: null, pendingTextBox: false }),
   startPlacingLibrary: (placement) =>
     set({ editorMode: "place", pendingPlaceType: placement.componentType, pendingLibraryPlacement: placement, pendingTextBox: false }),
+  // Bleibt im Auswahlmodus: das Textwerkzeug ist ein Aufsatz, kein eigener
+  // Modus. Als "place" nahm es dem Auswahlmodus das Gummiband weg und machte
+  // aus dem Ziehen ein Schwenken — der Knopf sah aus, als hätte er den Modus
+  // gewechselt, und die Fläche verhielt sich auch so.
   startPlacingTextBox: () =>
-    set({ editorMode: "place", pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: true }),
+    set({ editorMode: "select", pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: true }),
   cancelPlacing: () => set({ editorMode: "select", pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: false }),
   rotatePlacement: () => set((s) => ({ placementRotation: (s.placementRotation + 270) % 360 })),
   togglePropertiesPanel: () => set((s) => ({ showPropertiesPanel: !s.showPropertiesPanel })),
