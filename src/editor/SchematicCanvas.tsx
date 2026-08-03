@@ -89,6 +89,15 @@ function CanvasInner() {
   // create a duplicate; it stays the placement path for the mouse only.
   const lastPointerTypeRef = useRef<string>("mouse");
   /**
+   * The armed-placement commit, reachable from the click handlers above it.
+   *
+   * `commitPlacement` is built from the geometry helpers further down the file
+   * (clientToFlow, dropPendingFragment), while the node and edge click handlers
+   * sit above them with the rest of the selection handling. A ref keeps both
+   * where they belong instead of shuffling half the file around one call.
+   */
+  const commitPlacementRef = useRef<(x: number, y: number) => boolean>(() => false);
+  /**
    * The names travelling with the node drag in progress (see onNodeDragStart),
    * and when the last one ended.
    *
@@ -482,12 +491,17 @@ function CanvasInner() {
   );
 
   const onNodeClick: NodeMouseHandler = useCallback(
-    (_, node) => {
+    (event, node) => {
       // A drag that ends on the node it started from still arrives here as a
       // click. Left unguarded, dragging a block by one of its parts would clear
       // the names that were selected with it — at the *end* of the gesture, so
       // they would visibly travel along and then let go again.
       if (Date.now() - draggedAt.current < CLICK_AFTER_DRAG_MS) return;
+      // A part is a legitimate aim too: LTSpice lets a name be dropped straight
+      // onto a terminal, and `placeComponent` is built for it (see its note on
+      // the anchor magnet). Without this the symbol swallowed the click and
+      // selected itself instead.
+      if (commitPlacementRef.current(event.clientX, event.clientY)) return;
       setSelectedComponentId(node.id);
       // A part, a name and a note are three selections in three layers; picking
       // one lets go of the others, so the properties panel never shows something
@@ -591,7 +605,11 @@ function CanvasInner() {
    * see — the stale case is removed. A rubber band is unaffected: it selects
    * wires and names together without firing any click.
    */
-  const onEdgeClick = useCallback(() => {
+  const onEdgeClick = useCallback((event: React.MouseEvent) => {
+    // A name aimed at a wire lands here, not on the pane — the wire's hit area
+    // is 14 px wide. Placing comes first, or the click is lost (see
+    // commitPlacement).
+    if (commitPlacementRef.current(event.clientX, event.clientY)) return;
     setSelectedComponentId(null);
     setSelectedAnchorId(null);
     setSelectedTextBoxId(null);
@@ -833,27 +851,48 @@ function CanvasInner() {
     setNodeMenu(null);
   };
 
+  /**
+   * Put down whatever is waiting to be put down, at this screen point. Answers
+   * whether it did, so a click handler knows to stop.
+   *
+   * Called from the pane, the wires *and* the parts, because a click while
+   * something is armed means "here" wherever it lands. It used to hang off the
+   * pane alone — and a wire has a 14 px hit area, so a name aimed at a wire was
+   * swallowed by React Flow's edge click, which only clears the selection.
+   * Elsewhere on a sheet that goes unnoticed: clicking a few pixels beside the
+   * wire hits the pane, and the magnet pulls the name onto it anyway. On a short
+   * segment hemmed in by parts (the switch's right-hand lead in the reactive-
+   * power sheet) there is no such spot, and the name could not be placed at all.
+   *
+   * Touch and pen do not come through here: they commit on pointerup, which is
+   * not tied to what lies under the finger (see onWrapperPointerDown).
+   */
+  const commitPlacement = useCallback(
+    (clientX: number, clientY: number): boolean => {
+      if (dropPendingFragment(clientX, clientY)) return true;
+      if (lastPointerTypeRef.current !== "mouse") return false;
+      if (editorMode !== "place" && !pendingTextBox) return false;
+      const pos = clientToFlow(clientX, clientY);
+      if (pendingTextBox) placeTextBox(pos.x, pos.y);
+      else if (pendingLibraryPlacement) placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
+      else if (pendingPlaceType) placeComponent(pendingPlaceType, pos.x, pos.y);
+      else return false;
+      return true;
+    },
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, pendingTextBox, placeComponent, placeLibraryComponent, placeTextBox, clientToFlow, dropPendingFragment],
+  );
+
+  // Kept current for the handlers that reach it through the ref above.
+  useEffect(() => { commitPlacementRef.current = commitPlacement; }, [commitPlacement]);
+
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
-      if (dropPendingFragment(event.clientX, event.clientY)) return;
+      if (commitPlacement(event.clientX, event.clientY)) return;
       setSelectedComponentId(null);
       setSelectedAnchorId(null);
       setSelectedTextBoxId(null);
-      // Touch/pen already placed on pointerup (onWrapperPointerDown); only the
-      // mouse commits its placement here, on the pane click. The text tool is
-      // armed *within* the select mode, so it is asked about beside the mode.
-      if ((editorMode === "place" || pendingTextBox) && lastPointerTypeRef.current === "mouse") {
-        const pos = clientToFlow(event.clientX, event.clientY);
-        if (pendingTextBox) {
-          placeTextBox(pos.x, pos.y);
-        } else if (pendingLibraryPlacement) {
-          placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
-        } else if (pendingPlaceType) {
-          placeComponent(pendingPlaceType, pos.x, pos.y);
-        }
-      }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, pendingTextBox, placeComponent, placeLibraryComponent, placeTextBox, setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId, clientToFlow, dropPendingFragment],
+    [commitPlacement, setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
