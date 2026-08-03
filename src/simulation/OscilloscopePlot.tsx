@@ -121,22 +121,38 @@ const SI_PREFIXES: { e: number; s: string }[] = [
 /**
  * Engineering-notation number: scales by a power-of-1000 SI prefix so the
  * mantissa stays in [1, 1000) (e.g. 0.01 → "10m", 10 → "10", 10000 → "10k"),
- * with up to 4 significant digits and trailing zeros trimmed. No prefix is used
- * when the value is already in a readable range.
+ * with trailing zeros trimmed. No prefix is used when the value is already in a
+ * readable range.
+ *
+ * `step` is the spacing between neighbouring labels, and it decides how many
+ * digits are shown. Four significant digits are plenty for an axis that spans a
+ * decade and hopeless for one that does not: a buck converter's output ripples
+ * by 15 µV around 4.92 V, and every tick of that axis printed as "4.921". Three
+ * identical numbers up the side make a 15 µV ripple look like a 5 V swing —
+ * which is exactly what it looked like. The same held for the time axis, where
+ * a 30 µs window read "99.98ms" five times over.
  */
-function siFormat(v: number): string {
+export function siFormat(v: number, step?: number): string {
   if (!isFinite(v)) return "—";
   if (v === 0) return "0";
   const a = Math.abs(v);
   if (a < 1e-15 || a >= 1e15) return v.toExponential(2);
   const group = Math.max(-15, Math.min(12, Math.floor(Math.log10(a) / 3) * 3));
-  const scaled = Number((v / 10 ** group).toPrecision(4));
+  const scaledV = v / 10 ** group;
+  // Enough digits to separate two neighbouring ticks, plus one so the last one
+  // is not the rounding. Capped: past ~12 digits a double has nothing left to
+  // say, and a label that long does not fit under a tick anyway.
+  const digits = step && isFinite(step) && step > 0
+    ? Math.max(4, Math.min(12, Math.floor(Math.log10(Math.abs(scaledV)))
+        - Math.floor(Math.log10(Math.abs(step / 10 ** group))) + 2))
+    : 4;
+  const scaled = Number(scaledV.toPrecision(digits));
   const prefix = SI_PREFIXES.find((p) => p.e === group)?.s ?? "";
   return `${scaled}${prefix}`;
 }
 
-function fmtTime(t: number): string {
-  const s = siFormat(t);
+function fmtTime(t: number, step?: number): string {
+  const s = siFormat(t, step);
   return s === "0" || s === "—" ? s : `${s}s`;
 }
 
@@ -157,9 +173,14 @@ function defaultAxisLabel(unit: string): string {
   return `${quantity[unit] ? `${quantity[unit]} ` : ""}[${unit}]`;
 }
 
-function fmtVal(v: number, unit = ""): string {
-  const s = siFormat(v);
+function fmtVal(v: number, unit = "", step?: number): string {
+  const s = siFormat(v, step);
   return s === "—" ? s : `${s}${unit}`;
+}
+
+/** The spacing of an evenly spaced tick list, for {@link siFormat}'s digits. */
+function tickStep(ticks: number[]): number | undefined {
+  return ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : undefined;
 }
 
 function niceTicks(min: number, max: number, count = 6): number[] {
@@ -181,18 +202,27 @@ function niceTicks(min: number, max: number, count = 6): number[] {
  * verbatim (aligned to a multiple of the step); otherwise a "nice" spacing is
  * chosen automatically to give roughly `autoCount` ticks.
  */
-function ticksFor(min: number, max: number, step: number | undefined, autoCount: number): number[] {
+export function ticksFor(min: number, max: number, step: number | undefined, autoCount: number): number[] {
   if (step && isFinite(step) && step > 0 && max > min) {
+    // A step far smaller than the window is a typo, not a wish: 100n across a
+    // 30 µs window asks for 300 labels, which draw as an unreadable smear of
+    // overlapping text where an axis used to be. Past what can be read, the
+    // automatic ticks are the more useful answer — the entered number stays in
+    // the field, so it can be corrected rather than guessed at.
+    if ((max - min) / step > MAX_TICKS) return niceTicks(min, max, autoCount);
     const ticks: number[] = [];
     const start = Math.ceil(min / step) * step;
     for (let v = start; v <= max + step * 1e-6; v += step) {
       ticks.push(v);
-      if (ticks.length > 500) break; // guard against a tiny step
+      if (ticks.length > MAX_TICKS) break;
     }
     return ticks;
   }
   return niceTicks(min, max, autoCount);
 }
+
+/** Most ticks an axis will draw before falling back to automatic spacing. */
+const MAX_TICKS = 40;
 
 /** Decade ticks (1·10ⁿ, 2·10ⁿ, 5·10ⁿ) inside a positive range, for log axes. */
 function logTicks(min: number, max: number): number[] {
@@ -255,6 +285,19 @@ function yScaleMaps(mode: YScale): { fwd: (v: number) => number; inv: (u: number
 
 interface ViewRange { xMin: number; xMax: number; yMin: number; yMax: number }
 
+/**
+ * Do these two bounds still describe a range worth drawing in?
+ *
+ * The axis fields sit next to each other and take any number, so a right bound
+ * below the left one is a slip of a moment — and it used to blank the panel:
+ * `(v - min)/(max - min)` puts every sample outside the pane (or at infinity),
+ * so nothing is drawn and nothing says why. A pair that fails here is ignored in
+ * favour of the fitted range; the typed number stays in the field.
+ */
+export function usableRange(lo: number, hi: number): boolean {
+  return isFinite(lo) && isFinite(hi) && hi > lo;
+}
+
 /** A set of traces sharing one unit, with its own fitted y-range. */
 interface UnitGroup { unit: string; traces: string[]; yMin: number; yMax: number }
 
@@ -286,10 +329,16 @@ function groupByUnit(traces: string[], seriesMap: Record<string, Float64Array | 
 interface AxisGroup extends UnitGroup { ticks?: number }
 
 /** Apply per-unit y-overrides (left/first axis also honours legacy yMin/yMax). */
-function applyYOverrides(groups: UnitGroup[], panel: PlotPanel): AxisGroup[] {
+export function applyYOverrides(groups: UnitGroup[], panel: PlotPanel): AxisGroup[] {
   return groups.map((g, gi) => {
     const o = panel.yAxes?.[g.unit] ?? (gi === 0 ? { min: panel.yMin, max: panel.yMax, ticks: panel.yTicks } : {});
-    return { ...g, yMin: o.min ?? g.yMin, yMax: o.max ?? g.yMax, ticks: o.ticks };
+    const lo = o.min ?? g.yMin, hi = o.max ?? g.yMax;
+    // A pair that no longer describes a range (top at or below bottom) is not
+    // applied: every sample would map outside the pane and the panel would go
+    // blank, with the fields still reading as if all were well. The typed
+    // numbers stay; only the drawing falls back to the fitted range.
+    const usable = usableRange(lo, hi);
+    return { ...g, yMin: usable ? lo : g.yMin, yMax: usable ? hi : g.yMax, ticks: o.ticks };
   });
 }
 
@@ -1075,7 +1124,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
   // The x-axis is time by default; for a swept-parameter/`.dc` run it is the
   // swept quantity, so format the ticks with its unit (e.g. "5V") instead of
   // seconds.
-  const fmtX = (t: number) => (xLabel ? fmtVal(t, xUnit ?? "") : fmtTime(t));
+  const fmtX = (t: number, step?: number) => (xLabel ? fmtVal(t, xUnit ?? "", step) : fmtTime(t, step));
   const canRemove = count > 1;
   const circuitName = useCircuitStore((s) => s.circuitName);
   const svgLight = usePlotStore((s) => s.svgLight);
@@ -1186,11 +1235,21 @@ function PlotPanelView(props: PlotPanelViewProps) {
   }, [xForTrace, traces, time]);
 
   // x defaults to the saved-data window (tstart..tstop).
+  //
+  // A hand-set bound is only taken when the two still describe a range. Typing a
+  // right bound below the left one — easily done, the fields sit next to each
+  // other and a `.tran` window can start at 99.97ms — left `(t - xMin)/(xMax -
+  // xMin)` negative or infinite for every sample, so every trace was placed off
+  // the pane and the plot went blank with nothing on screen saying why. The
+  // entered number stays in the field; only the drawing falls back to auto.
+  const xLowSet = panel.xMin ?? xExtent[0];
+  const xHighSet = panel.xMax ?? xExtent[1];
+  const xUsable = usableRange(xLowSet, xHighSet);
   const vr: ViewRange = {
     // Over every trace's x-series: on a parametric panel the runs need not share
     // a range, and taking only the first would clip the others.
-    xMin: panel.xMin ?? xExtent[0],
-    xMax: panel.xMax ?? xExtent[1],
+    xMin: xUsable ? xLowSet : xExtent[0],
+    xMax: xUsable ? xHighSet : xExtent[1],
     yMin: y0.yMin,
     yMax: y0.yMax,
   };
@@ -1241,7 +1300,11 @@ function PlotPanelView(props: PlotPanelViewProps) {
         return ticksFor(fLo, fHi, g.ticks, autoYCount).map((u) => ({ v: ymap.inv(u), label: fmtVal(ymap.inv(u)) }));
       return logTicks(ymap.inv(fLo), ymap.inv(fHi)).map((v) => ({ v, label: fmtVal(v) }));
     }
-    return ticksFor(g.yMin, g.yMax, g.ticks, autoYCount).map((v) => ({ v, label: fmtVal(v) }));
+    // A linear axis is the one that can zoom in far enough for four digits to
+    // stop separating its ticks, so its labels are the ones told the spacing.
+    const lin = ticksFor(g.yMin, g.yMax, g.ticks, autoYCount);
+    const step = tickStep(lin);
+    return lin.map((v) => ({ v, label: fmtVal(v, "", step) }));
   };
   const toSy = mkToSy(y0); // left axis
   const groupOf = (t: string) => yGroups.find((g) => g.traces.includes(t)) ?? y0;
@@ -1587,7 +1650,7 @@ function PlotPanelView(props: PlotPanelViewProps) {
             {xTicks.map((t) => (
               <g key={t}>
                 <line x1={toSx(t)} y1={0} x2={toSx(t)} y2={plotH} stroke={th.grid} strokeWidth={1} />
-                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill={th.axis}>{fmtX(t)}</text>
+                <text x={toSx(t)} y={plotH + 14} textAnchor="middle" fontSize={9} fill={th.axis}>{fmtX(t, tickStep(xTicks))}</text>
               </g>
             ))}
             {xLabel && (

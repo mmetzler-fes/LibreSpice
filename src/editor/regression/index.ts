@@ -37,6 +37,7 @@ import { runTextBoxTests, runSheetShapeTests } from "./textBox.test.js";
 import { runTextBoxToolTests } from "./textBoxTool.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
+import { runAxisLabelTests } from "../../simulation/regression/axisLabels.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
 import { runTerminalCurrentTests } from "../../simulation/regression/terminalCurrent.test.js";
 import { runCurrentMeasureTests } from "../../simulation/regression/currentMeasure.test.js";
@@ -60,6 +61,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Long press", ...(await runLongPressTests()) },
     { name: "Plot expressions", ...runExpressionTests() },
     { name: "Plot settings (.plt)", ...runPlotSettingsTests() },
+    { name: "Axis labels and ranges", ...runAxisLabelTests() },
     { name: "DC sweep + .step", ...runDcSweepTests() },
     // Runs every shipped .model through ngspice — a wrong-class parameter kills it.
     { name: "Shipped device models", ...(await runModelTests()) },
