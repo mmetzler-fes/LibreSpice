@@ -83,6 +83,8 @@ export const PORT_HANDLES: Partial<Record<ComponentType, string[]>> = {
   jfet_n: ["d", "g", "s"],
   jfet_p: ["d", "g", "s"],
   opamp: ["inp", "inn", "vcc", "vee", "out"],
+  // LTSpice's sw.asy order: the two contacts, then the control pair.
+  vswitch: ["a", "b", "ncp", "ncn"],
   ground: ["gnd"],
   junction: ["j"],
   netlabel: ["t"],

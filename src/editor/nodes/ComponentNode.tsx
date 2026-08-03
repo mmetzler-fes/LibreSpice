@@ -49,6 +49,7 @@ export type ComponentType =
   | "zener"
   | "schottky"
   | "opamp"
+  | "vswitch"
   | "logicgate"
   | "dff"
   | "bjt_npn"
@@ -206,6 +207,7 @@ function MovableLabel({
 const SYMBOL_MAP: Record<ComponentType, React.FC> = {
   resistor: ResistorSymbol,
   jumper: ResistorSymbol, // unused: the jumper always has its own .asy
+  vswitch: ResistorSymbol, // unused: the switch always has its own .asy (sw)
   capacitor: CapacitorSymbol,
   capacitor_polarized: CapacitorSymbol, // unused: always has the polcap .asy
   inductor: InductorSymbol,

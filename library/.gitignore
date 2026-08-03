@@ -33,6 +33,7 @@
 # with its thresholds fixed rather than on the instance. Kept beside our own
 # `vcspdt` because sheets outside this repo reference it by name.
 !/sub/spdt2.lib
+!/sym/spdt2.asy
 # The rest of the switch family: the simple contact, and the two the converter
 # needs so a voltage-controlled switch keeps its control input.
 !/sub/spst.lib

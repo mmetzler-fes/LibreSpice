@@ -226,6 +226,7 @@ const TYPE_TO_SYMBOL: Partial<Record<ComponentType, string>> = {
   // so they are intentionally NOT mapped to an .asy symbol here.
   isource: "current",
   opamp: "UniversalOpAmp2",
+  vswitch: "sw",
 };
 
 /** Resolves a base symbol name + norm to a parsed symbol, with graceful fallback. */

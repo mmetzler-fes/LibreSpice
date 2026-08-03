@@ -333,10 +333,18 @@ export class LTSpiceExporter {
       // we skip a zero parasitic, so the line would vanish from a file that had
       // it. `sameAttrValue` is what stops this from resurrecting a value the user
       // has since cleared — that compares unequal and the line stays dropped.
+      // …but only where we have something to say in that slot at all. A
+      // `SpiceLine` is ours to generate for exactly two kinds of part — a
+      // source's parasitics and a subcircuit's instance parameters. On anything
+      // else it is data we do not model, and comparing it against our empty
+      // string threw it away: an LTSpice capacitor carrying
+      // `V=50V Irms=1.5A Rser=0.038` lost its rating and its ESR on the first
+      // save. Those lines belong with `ModelFile` and `Description` below.
+      const ownsSpiceLine = (circuit.components.get(node.id) as any)?.sourceType !== undefined || isSub;
       for (const [name, gen] of [["Value", attrs.value], ["Value2", attrs.value2], ["SpiceLine", attrs.spiceLine]] as const) {
-        if (!gen && rawAttrs[name] !== undefined && sameAttrValue(rawAttrs[name], "")) {
-          symbolLines.push(`SYMATTR ${name} ${rawAttrs[name]}`);
-        }
+        if (gen || rawAttrs[name] === undefined) continue;
+        const keep = name === "SpiceLine" && !ownsSpiceLine ? true : sameAttrValue(rawAttrs[name], "");
+        if (keep) symbolLines.push(`SYMATTR ${name} ${rawAttrs[name]}`);
       }
       // Anything else the file carried (`SpiceLine2`, `ModelFile`, `Description`,
       // a manufacturer part number …). We have no model for these, which is

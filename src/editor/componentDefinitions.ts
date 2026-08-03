@@ -26,6 +26,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   { type: "vsource", label: "Voltage Source", category: "Sources", defaultLabel: "V1", description: "Voltage Source (DC / Sine / Pulse — selectable)" },
   { type: "isource", label: "I Source", category: "Sources", defaultLabel: "I1", description: "Current Source" },
   { type: "opamp", label: "Op-Amp", category: "Active", defaultLabel: "U1", description: "Universal Operational Amplifier (5-pin)" },
+  { type: "vswitch", label: "Switch (V-controlled)", category: "Active", defaultLabel: "S1", description: "Voltage-controlled switch (SPICE S): contacts A/B, control NC+/NC-, behaviour from a .model <name> SW(Ron Roff Vt Vh)" },
   { type: "logicgate", label: "Logic Gate", category: "Digital", defaultLabel: "U1", description: "AND / OR / NAND / NOR / XOR / NOT / Buffer — behavioural, 1–5 inputs" },
   { type: "dff", label: "Flip-Flop / Latch", category: "Digital", defaultLabel: "U1", description: "D or T flip-flop (edge-triggered) or transparent D latch, with asynchronous Set/Reset — behavioural" },
   { type: "ground", label: "Ground", category: "Special", defaultLabel: "GND", description: "Ground reference (node 0)" },

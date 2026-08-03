@@ -227,7 +227,14 @@ export class CustomSubcircuit extends SpiceComponent {
     const nodes = this.ports.map((p) => this.nodeOrGnd(p.netId)).join(" ");
     const subcktName = this.spiceModel.split("\n")[0]?.match(/\.subckt\s+(\S+)/i)?.[1] ?? "UNKNOWN";
     const params = this.params.trim();
-    return `${this.label} ${nodes} ${subcktName}${params ? ` ${params}` : ""}`;
+    // `X`, whatever the part is called on the sheet. LTSpice does the same: the
+    // symbol carries `SYMATTR Prefix X` and the netlist gets it in front of the
+    // InstName. Emitting the bare label was fine as long as every subcircuit
+    // came from the Multisim converter, which forces an `X` into the name — but
+    // a hand-drawn sheet calls its switch `U1`, and `U` is ngspice's URC line.
+    // The whole circuit then failed to parse, which is exactly the case
+    // `spiceRef` exists for.
+    return `${this.spiceRef("X")} ${nodes} ${subcktName}${params ? ` ${params}` : ""}`;
   }
 
   getProperties(): Property[] {

@@ -27,6 +27,7 @@ import { runDFlipFlopTests } from "./dFlipFlop.test.js";
 import { runDigitalGeometryTests } from "./digitalGeometry.test.js";
 import { runSymbolSourceTests } from "./symbolSources.test.js";
 import { runLibraryLabelTests } from "./libraryLabels.test.js";
+import { runSwitchTests } from "./switches.test.js";
 import { runImportedRouteTests } from "./importedRoutes.test.js";
 import { runWireDragTests } from "./wireDrag.test.js";
 import { runNetTerminalRoundTripTests } from "./netTerminalRoundTrip.test.js";
@@ -100,6 +101,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     { name: "Digital part geometry", ...runDigitalGeometryTests() },
     { name: "Symbol sources", ...(await runSymbolSourceTests()) },
     { name: "Library part names", ...(await runLibraryLabelTests()) },
+    { name: "Switches", ...(await runSwitchTests()) },
     { name: "Imported wire routes", ...runImportedRouteTests() },
     // Grabbing a point of a drawn wire and moving it (see wireDrag.ts).
     { name: "Wire correction by hand", ...runWireDragTests() },

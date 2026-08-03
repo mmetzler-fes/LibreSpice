@@ -4,6 +4,7 @@ import { Inductor } from "@core/components/passives/Inductor.js";
 import { Diode, LED, Zener, Schottky, BJT, MOSFET, JFET } from "@core/components/semiconductors/Semiconductors.js";
 import { VoltageSource, CurrentSource, SineSource, PulseSource } from "@core/components/sources/Sources.js";
 import { Ground, OpAmp, CustomSubcircuit, NetLabel, NetConnector, Junction } from "@core/components/special/Special.js";
+import { VSwitch } from "@core/components/special/VSwitch.js";
 import { LogicGate, GATE_LABELS } from "@core/components/digital/LogicGate.js";
 import { DFlipFlop, KIND_LABELS } from "@core/components/digital/DFlipFlop.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -31,6 +32,7 @@ export function createSpiceComponent(
     case "zener":       return new Zener(id, label, pos);
     case "schottky":    return new Schottky(id, label, pos);
     case "opamp":       return new OpAmp(id, label, pos);
+    case "vswitch":     return new VSwitch(id, label, pos);
     case "logicgate":   return new LogicGate(id, label, pos);
     case "dff":         return new DFlipFlop(id, label, pos);
     case "bjt_npn":     return new BJT(id, label, pos, "NPN");
@@ -75,6 +77,9 @@ const LABEL_PREFIX: Partial<Record<ComponentType, string>> = {
   bjt_npn: "Q", bjt_pnp: "Q", mosfet_n: "M", mosfet_p: "M", jfet_n: "J", jfet_p: "J",
   vsource: "V", isource: "I", sinesource: "V", pulsesource: "V", ground: "GND",
   netlabel: "NET", netconnector: "PORT", subcircuit: "X", junction: "J",
+  // SPICE's own letter for the S device, so a fresh switch is S1 and its
+  // netlist line needs no prefix grafted on.
+  vswitch: "S",
 };
 
 /**
@@ -152,6 +157,10 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
   // A parametric value (e.g. "{Cvar}") is shown verbatim.
   if (component.valueExpr) return component.valueExpr;
   switch (type) {
+    // The switch shows the `.model` it switches by — that name is the whole of
+    // its behaviour (Ron, the threshold, the hysteresis all live in the model),
+    // so it is what belongs beside the symbol.
+    case "vswitch": return (component as unknown as { model: string }).model;
     case "resistor":  {
       const r = component as unknown as { resistance: number };
       return fmtSI(r.resistance, "Ω");

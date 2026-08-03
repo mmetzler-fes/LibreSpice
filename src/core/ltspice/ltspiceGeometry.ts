@@ -30,6 +30,12 @@ export const SYMBOL_TO_TYPE: Record<string, ComponentType> = {
   nmos: "mosfet_n", pmos: "mosfet_p",
   njf: "jfet_n", pjf: "jfet_p",
   voltage: "vsource", current: "isource",
+  // LTSpice's voltage-controlled switch (the SPICE `S` device). Without this it
+  // fell through to the two-pin default and came back as a *resistor*: the two
+  // control pins vanished, their wires met nothing, and `SYMATTR Value SW1` --
+  // the name of the `.model` -- was read as a resistance of 0 ohm, i.e. a dead
+  // short where the switching should be.
+  sw: "vswitch",
   // `opamp2` and the UniversalOpAmp names are the *five*-terminal part, the one
   // with supply pins. LTSpice's plain `opamp` is the three-terminal ideal one and
   // is deliberately absent here: it has its own `.asy` and `.subckt` (see
@@ -81,6 +87,7 @@ export const TYPE_TO_SYMBOL: Record<string, string> = {
   vsource: "voltage", isource: "current",
   sinesource: "voltage", pulsesource: "voltage",
   opamp: "UniversalOpAmp2",
+  vswitch: "sw",
   // Overridden per gate by the exporter (Digital\\and, \\or, …); this is the fallback.
   logicgate: "Digital\\and",
   dff: "Digital\\dflop",
@@ -139,6 +146,16 @@ export const PIN_OFFSETS: Record<string, PinOffset[]> = {
     { handle: "vcc", dx: 0, dy: -32 },
     { handle: "vee", dx: 0, dy: 32 },
     { handle: "out", dx: 32, dy: 0 },
+  ],
+  // The voltage-controlled switch, from LTSpice's own sw.asy: the two contacts
+  // on a vertical line 80 apart, the control pair 48 to the left. NC+ is the
+  // *lower* of the two (SpiceOrder 3) -- the control is measured NC+ minus NC-,
+  // so having them the other way round leaves a switch that never closes.
+  vswitch: [
+    { handle: "a", dx: 0, dy: 16 },
+    { handle: "b", dx: 0, dy: 96 },
+    { handle: "ncp", dx: -48, dy: 80 },
+    { handle: "ncn", dx: -48, dy: 32 },
   ],
   // D flip-flop, mirroring DFlipFlop.createPorts: data in and clock on the left,
   // Q and ~Q on the right, the asynchronous pins above and below.

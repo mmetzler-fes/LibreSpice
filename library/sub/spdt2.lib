@@ -18,6 +18,7 @@
 * ist `vcspdt` das richtige Teil. Fuer ein symmetrisches Steuersignal
 * (+/-1 V und mehr) tut dieses hier genau das, was es soll.
 *
+* Symbol: spdt2
 * Label: Wechselschalter, spannungsgesteuert (fest)
 * Description: SPDT aus zwei S-Schaltern, Schwellen fest bei +/-0,5 V mit 0,25 V Hysterese, Ron=10 mOhm. Steuerpaar POS/NEG. Parametrierbar: siehe vcspdt.
 .subckt SPDT2 COM NO NC POS NEG

@@ -164,6 +164,12 @@ export class NetlistGenerator {
       lines.push(normalizeParamDirective(normalizeMeasDirective(normalizeTranDirective(normalizeDcDirective(dl)))));
     }
 
+    // `.ic I(L1)=0` — an initial *current*, which ngspice's `.ic` cannot state
+    // (it takes node voltages only, and answers ".ic syntax error", which aborts
+    // the whole circuit). The value belongs on the inductor instead, where
+    // ngspice does accept it.
+    moveInductorIc(lines);
+
     lines.push(".end");
 
     let netlist = lines.join("\n");
@@ -242,28 +248,77 @@ export function formatAnalysisDirective(config: SimulationConfig): string {
 export function normalizeTranDirective(line: string): string {
   const head = line.match(/^(\s*\.tran)\b\s*(.*)$/i);
   if (!head) return line;
-  const tokens = head[2].trim().split(/\s+/).filter(Boolean);
+  // LTSpice-only modifiers, dropped rather than passed on. `startup` asks
+  // LTSpice to ramp the supplies up over the first 20 µs; ngspice has no such
+  // keyword and answers "unknown parameter on .tran - ignored", which our
+  // simulation runner reports as a failed sheet. The remaining difference in
+  // the result is the ramp itself, and a sheet that also says `uic` — as the
+  // buck-converter example does — has already asked for a defined starting
+  // state anyway. `steady` and `nodiscard` are the same story.
+  const tokens = head[2].trim().split(/\s+/).filter(Boolean)
+    .filter((t) => !/^(startup|steady|nodiscard)$/i.test(t));
   const isNum = (t: string) => /^[-+]?[.\d]/.test(t);
   const nums = tokens.filter(isNum);
-  if (nums.length === 0) return line;
+  // Rebuilt from the surviving tokens, so a dropped modifier is gone even on the
+  // paths that change nothing else.
+  const kept = `${head[1]} ${tokens.join(" ")}`.trimEnd();
+  if (nums.length === 0) return kept;
 
   // Single value → it is Tstop (LTSpice shorthand).
   if (nums.length === 1) {
     const tstop = parseSpiceNumber(nums[0]) ?? 0;
-    if (tstop <= 0) return line;
+    if (tstop <= 0) return kept;
     return `.tran ${formatSpiceNumber(tstop / 1000)} ${tokens.join(" ")}`;
   }
 
   // Two+ values with a zero/invalid Tstep → replace the first numeric token.
   if ((parseSpiceNumber(nums[0]) ?? 0) <= 0) {
     const tstop = parseSpiceNumber(nums[1]) ?? 0;
-    if (tstop <= 0) return line;
+    if (tstop <= 0) return kept;
     const step = formatSpiceNumber(tstop / 1000);
     let replaced = false;
     const out = tokens.map((t) => (!replaced && isNum(t) ? ((replaced = true), step) : t));
     return `.tran ${out.join(" ")}`;
   }
-  return line;
+  return kept;
+}
+
+/**
+ * Move an initial inductor current from `.ic` onto the inductor itself.
+ *
+ * LTSpice writes the starting state of a switched-mode circuit as
+ * `.ic I(L1)=0`. ngspice's `.ic` takes node voltages only: it answers
+ * ".ic syntax error" and then "circuit not parsed", so a single such line costs
+ * the whole sheet — the buck-converter example was exactly that case. The same
+ * value is legal on the device (`L1 a b 785u ic=0`), where it takes effect for a
+ * `uic` run, so that is where it goes.
+ *
+ * Node-voltage terms on the same line stay put: `.ic V(out)=5 I(L1)=0` keeps its
+ * `V(out)` and loses only the part ngspice cannot read. A `.ic` left with nothing
+ * is dropped rather than emitted empty.
+ *
+ * @param lines the netlist so far, device lines included — edited in place.
+ */
+export function moveInductorIc(lines: string[]): void {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*\.ic\b/i.test(lines[i])) continue;
+    let changed = false;
+    const rest = lines[i].replace(/\bI\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*(\S+)/gi, (whole, dev: string, val: string) => {
+      // Only an inductor takes `ic=`; a current through anything else is not
+      // an initial condition ngspice knows, and dropping it silently would be
+      // worse than leaving it to fail loudly.
+      const at = lines.findIndex((l) => new RegExp(`^\\s*${dev}\\b`, "i").test(l) && /^\s*L/i.test(l));
+      if (at < 0) return whole;
+      if (!/\bic\s*=/i.test(lines[at])) lines[at] = `${lines[at].trimEnd()} ic=${val}`;
+      changed = true;
+      return "";
+    });
+    if (!changed) continue;
+    lines[i] = /\S/.test(rest.replace(/^\s*\.ic\b/i, "")) ? rest.replace(/\s+/g, " ").trim() : "";
+  }
+  // Blank entries would become empty netlist lines; ngspice is fine with them,
+  // but a netlist read by a human should not have holes in it.
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i] === "") lines.splice(i, 1);
 }
 
 /**
