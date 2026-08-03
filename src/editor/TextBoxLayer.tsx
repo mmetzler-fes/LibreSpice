@@ -4,7 +4,7 @@ import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { renderMarkdown } from "./markdown.js";
-import { TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
+import { TEXT_SIZE_DEFAULT, TEXTBOX_MIN_W, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 /**
@@ -19,8 +19,10 @@ import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDra
  * Nothing is ever cut off. The box used to be a fixed rectangle with its
  * overflow scrolled out of sight, which quietly hid the end of a long note — and
  * once a text could be set at seven times the base size, most of a short one too.
- * Its height now follows its content; the stored width is the width the text
- * wraps at, which is the part of the size a user chooses on purpose.
+ * It now follows its text in both directions: as wide as the longest line, as
+ * tall as the line count, breaking only where Return was typed. That is what
+ * LTSpice does, and all its file format can express — see `textBox`. A width the
+ * user sets by hand overrides it, and then the text wraps into that width.
  *
  * Drawn in flow coordinates like the data flags, so a box stays put on the sheet
  * while the view pans and zooms. It is an annotation, not a part: it has no pins
@@ -66,6 +68,11 @@ export function TextBoxLayer() {
         // drawn at, so a scale of 1 leaves every existing sheet untouched.
         const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
         const flow = textFlow(box.justify ?? "Left");
+        // A box that follows its text takes the width of its longest line and
+        // breaks nowhere else — LTSpice's behaviour, and the only one its file
+        // format can carry (see textBox). A hand-set width still wraps: there
+        // the width is the answer the user gave, and the text flows into it.
+        const auto = !!box.autoSized && !box.markdown;
         return (
           <div
             key={box.id}
@@ -78,8 +85,11 @@ export function TextBoxLayer() {
               left: vp.x + box.x * vp.zoom,
               top: vp.y + box.y * vp.zoom,
               // The width the text wraps at, in flow units; the scale below turns
-              // it into screen size. The height is whatever the text needs.
-              width: box.width,
+              // it into screen size. The height is whatever the text needs. An
+              // auto box asks the browser instead — `max-content` is the longest
+              // line measured for real, rather than our own estimate of it.
+              width: auto ? "max-content" : box.width,
+              minWidth: auto ? TEXTBOX_MIN_W : undefined,
               // One transform for the whole box: the text scales with the sheet
               // instead of staying at screen size, so a note keeps its place in
               // the drawing at every zoom level.
@@ -106,8 +116,15 @@ export function TextBoxLayer() {
                 onKeyDown={(e) => e.stopPropagation()}
                 placeholder="Text…"
                 rows={Math.max(2, box.text.split("\n").length)}
+                // No soft wrapping while typing an auto box: a line ends where
+                // Return says it does, and the field grows with it. Wrapping
+                // here would show a break the saved file cannot reproduce.
+                wrap={auto ? "off" : "soft"}
                 style={{
-                  display: "block", width: "100%", resize: "none",
+                  display: "block", resize: "none",
+                  // The measured width (kept current by the store on every
+                  // keystroke), with room for the caret past the last glyph.
+                  width: auto ? box.width + fontSize : "100%",
                   border: "none", outline: "none", background: theme.panelBg,
                   padding: 0, fontFamily: "monospace", fontSize, lineHeight: 1.45,
                   color: theme.textStrong,
@@ -123,10 +140,12 @@ export function TextBoxLayer() {
                   ...(flow.vertical
                     ? { writingMode: "vertical-rl" as const, transform: "rotate(180deg)" }
                     : {}),
-                  // Wrap long lines and break a word that is longer than the box,
-                  // so widening and narrowing reflows instead of clipping.
-                  whiteSpace: box.markdown ? "normal" : "pre-wrap",
-                  overflowWrap: "break-word",
+                  // An auto box breaks only where the text does (`pre`); a
+                  // hand-set width wraps long lines and breaks a word that is
+                  // longer than the box, so narrowing reflows instead of
+                  // clipping.
+                  whiteSpace: auto ? "pre" : box.markdown ? "normal" : "pre-wrap",
+                  overflowWrap: auto ? "normal" : "break-word",
                   userSelect: "none",
                 }}
               >

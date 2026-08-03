@@ -176,6 +176,21 @@ function DirectiveTextBox({ box }: { box: DirectiveBoxGeometry }) {
 }
 
 /**
+ * How many characters a line of this box holds before it wraps.
+ *
+ * A box that follows its text does not wrap at all: it is as wide as its longest
+ * line, and a break only ever comes from the text itself (see textBox). Wrapping
+ * it here would put breaks in the picture that neither the canvas nor the saved
+ * `.asc` has.
+ */
+function charsPerLine(box: TextBox, fontSize: number): number {
+  if (box.autoSized && !box.markdown) return Number.MAX_SAFE_INTEGER;
+  // Average glyph width of the sans-serif face at this size; good enough for a
+  // greedy wrap, and erring narrow keeps the text inside the width.
+  return Math.max(4, Math.floor(box.width / (fontSize * 0.53)));
+}
+
+/**
  * A text box, laid out line by line — SVG has no flow layout, so the wrapping
  * the canvas gets from CSS has to be computed here (see flattenForExport).
  */
@@ -184,10 +199,7 @@ function TextBoxShape({ box }: { box: TextBox }) {
   // 1.5, which is what everything here has always been drawn at.
   const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
   const flow = textFlow(box.justify ?? "Left");
-  // Average glyph width of the sans-serif face at this size; good enough for a
-  // greedy wrap, and erring narrow keeps the text inside the width.
-  const charsPerLine = Math.max(4, Math.floor(box.width / (fontSize * 0.53)));
-  const lines = flattenForExport(box.text, box.markdown, charsPerLine);
+  const lines = flattenForExport(box.text, box.markdown, charsPerLine(box, fontSize));
   const lineHeight = fontSize * 1.45;
   // No frame and no clipping, as on the canvas: a note is the text, and the
   // height it needs is however many lines it has. The old fixed rectangle cut
@@ -226,8 +238,7 @@ function TextBoxShape({ box }: { box: TextBox }) {
  */
 function textBoxHeight(box: TextBox): number {
   const fontSize = 11 * textScale(box.size ?? TEXT_SIZE_DEFAULT);
-  const charsPerLine = Math.max(4, Math.floor(box.width / (fontSize * 0.53)));
-  const lines = flattenForExport(box.text, box.markdown, charsPerLine);
+  const lines = flattenForExport(box.text, box.markdown, charsPerLine(box, fontSize));
   return Math.max(fontSize * 1.45, lines.length * fontSize * 1.45);
 }
 

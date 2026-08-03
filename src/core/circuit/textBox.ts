@@ -8,16 +8,27 @@ export interface TextBox {
   /** Top-left corner, in flow coordinates. */
   x: number;
   y: number;
+  /**
+   * The width the text is laid out in, in flow units.
+   *
+   * For an {@link TextBox.autoSized} box this is measured from the text and kept
+   * up to date as it is typed — it is a derived value, not a setting, and never
+   * reaches the file. Only a box the user has resized by hand carries a width of
+   * its own.
+   */
   width: number;
   height: number;
   text: string;
   /** Render the text as Markdown instead of showing it verbatim. */
   markdown: boolean;
   /**
-   * The box size was estimated from the text, not chosen by the user — true for a
-   * plain LTSpice comment, which carries no box size at all. Such a box writes no
-   * `[w= h=]` header, so opening and saving a foreign file doesn't graft our
-   * metadata onto every comment it has. Cleared as soon as the box is resized.
+   * The box follows its text rather than a size the user chose — the normal
+   * state, and the only one LTSpice knows: a comment there is as wide as its
+   * longest line and breaks only where the text says so.
+   *
+   * Such a box writes no `[w= h=]` header, so opening and saving a foreign file
+   * doesn't graft our metadata onto every comment it has. Cleared as soon as the
+   * box is resized by hand, and restored by the panel's "Auto".
    */
   autoSized?: boolean;
   /**
@@ -91,21 +102,35 @@ export const TEXTBOX_DEFAULT_H = 120;
  * sitting in every converted Multisim schematic become editable text boxes
  * instead of being dropped on import.
  *
- * LTSpice has nowhere to keep a box's size or its Markdown flag. Those ride in a
- * short header at the front of the comment, which LTSpice simply shows as part
- * of the text — visible, but harmless, and it round-trips.
+ * What LTSpice's own format holds, and all it holds:
+ *   - `x y` — the text's anchor point,
+ *   - the justification keyword and the size index,
+ *   - `;` for a comment (`!` marks a directive, which is not a text box),
+ *   - the text, on one physical line, with `\n` spelled out for a line break.
+ *
+ * There is no width and no height in it. A comment there is as wide as its
+ * longest line and breaks only where a `\n` says so, which is exactly what an
+ * {@link TextBox.autoSized} box does here — so the normal case now writes a line
+ * LTSpice would have written itself, with nothing of ours in the text.
+ *
+ * A box the user resized by hand, and the Markdown flag, have nowhere to go in
+ * that format. Those ride in a short header at the front of the comment, which
+ * LTSpice simply shows as part of the text — visible, but harmless, and it
+ * round-trips. Kept as short as the box needs: `[md]` alone when the size is the
+ * text's own.
  */
-const HEADER = /^\[w=(\d+)\s+h=(\d+)(\s+md)?\]\s?/;
+const HEADER = /^\[(?:w=(\d+)\s+h=(\d+))?(\s*md)?\]\s?/;
 
 /** The comment body for an `.asc` TEXT line, header included. */
 export function encodeTextBox(box: TextBox): string {
   // LTSpice keeps a comment on one physical line and spells a break "\n".
   const body = box.text.replace(/\r?\n/g, "\\n");
-  // A box whose size we only estimated has nothing worth recording: re-reading
-  // it re-estimates the same size. Omitting the header keeps a plain comment a
-  // plain comment.
-  if (box.autoSized && !box.markdown) return body;
-  const head = `[w=${Math.round(box.width)} h=${Math.round(box.height)}${box.markdown ? " md" : ""}]`;
+  // A box that follows its text has no size worth recording: re-reading it
+  // measures the same box again. Omitting the header keeps a plain comment a
+  // plain comment — and keeps ours plain for LTSpice.
+  const size = box.autoSized ? "" : `w=${Math.round(box.width)} h=${Math.round(box.height)}`;
+  if (!size && !box.markdown) return body;
+  const head = `[${size}${size && box.markdown ? " " : ""}${box.markdown ? "md" : ""}]`;
   return `${head} ${body}`;
 }
 
@@ -120,27 +145,39 @@ const PAD_X = 14;
 const PAD_Y = 26;
 
 /**
- * A box big enough to show `text` without scrolling.
- *
- * Needed for comments that arrive without a size — a converted Multisim sheet
- * or a file written by LTSpice. Those texts are long (a full exercise runs to
- * some 30 lines), and dropping them into the default 240x120 box would hide
- * almost all of it behind a scrollbar, which reads as if the import had
- * truncated them.
- *
- * The text arrives already broken into lines by whoever wrote it, so the line
- * count is taken as-is rather than re-wrapped; the width follows the longest
- * line. Both are capped so a stray long line cannot produce a box the size of
- * the sheet.
+ * The widest a measured box may get, in flow units. Only a guard against a
+ * pasted line with no breaks in it at all — a normal note stays far below.
  */
-export function estimateSize(text: string): { width: number; height: number } {
+export const AUTO_MAX_W = 1600;
+
+/**
+ * The box `text` needs: as wide as its longest line, as tall as its line count.
+ *
+ * This is LTSpice's own behaviour, and since it stores no width it is also the
+ * only behaviour that survives the round trip: a comment breaks where the text
+ * says so and nowhere else. Typing Return is therefore the one way to make a
+ * line, and the box widens with the line being typed instead of re-flowing what
+ * is already there.
+ *
+ * The size index scales the glyphs, so it scales the box with them — a heading
+ * at seven times the base size needs seven times the width for the same words.
+ *
+ * @param text the note, with real newlines
+ * @param size index into {@link TEXT_SIZES}
+ */
+export function estimateSize(text: string, size: number = TEXT_SIZE_DEFAULT): { width: number; height: number } {
+  const scale = textScale(size);
   const lines = text.split("\n");
   const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
-  const width = Math.min(460, Math.max(TEXTBOX_MIN_W, Math.round(longest * CHAR_W + PAD_X)));
-  // Lines that still exceed the capped width wrap, so count what they become.
-  const perLine = Math.max(1, Math.floor((width - PAD_X) / CHAR_W));
-  const rows = lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / perLine)), 0);
-  const height = Math.min(560, Math.max(TEXTBOX_MIN_H, Math.round(rows * LINE_HEIGHT + PAD_Y)));
+  const ideal = longest * CHAR_W * scale + PAD_X;
+  const width = Math.min(AUTO_MAX_W, Math.max(TEXTBOX_MIN_W, Math.round(ideal)));
+  // Every line fits by construction — unless the guard above cut the width, and
+  // then the lines beyond it wrap and have to be counted as what they become.
+  const perLine = Math.max(1, Math.floor((width - PAD_X) / (CHAR_W * scale)));
+  const rows = ideal <= AUTO_MAX_W
+    ? lines.length
+    : lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / perLine)), 0);
+  const height = Math.max(TEXTBOX_MIN_H, Math.round(rows * LINE_HEIGHT * scale + PAD_Y));
   return { width, height };
 }
 
@@ -157,12 +194,13 @@ export function decodeTextBox(
 ): TextBox {
   const m = HEADER.exec(body);
   const text = (m ? body.slice(m[0].length) : body).replace(/\\n/g, "\n");
-  const box = m
-    ? { width: Number(m[1]), height: Number(m[2]) }
-    : estimateSize(text);
+  // A header without `w=`/`h=` (`[md]`) says only how the text is read; the box
+  // still follows the text, exactly as a headerless comment does.
+  const sized = !!(m && m[1]);
+  const box = sized ? { width: Number(m![1]), height: Number(m![2]) } : estimateSize(text, size);
   return {
     id, x, y, width: box.width, height: box.height,
     markdown: m ? !!m[3] : false, text, justify, size,
-    ...(m ? {} : { autoSized: true }),
+    ...(sized ? {} : { autoSized: true }),
   };
 }

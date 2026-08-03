@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { LTSpiceExporter } from "@core/ltspice/LTSpiceExporter.js";
 import { buildSchematicSvg } from "@editor/svgExport.js";
-import { encodeTextBox, decodeTextBox, estimateSize, TEXT_SIZES, TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
+import { encodeTextBox, decodeTextBox, estimateSize, AUTO_MAX_W, TEXT_SIZES, TEXT_SIZE_DEFAULT, textScale, textFlow, type TextBox } from "@core/circuit/textBox.js";
 import { renderMarkdown, flattenForExport } from "../markdown.js";
 import { parseSheetShape, formatSheetShape, dashArray } from "@core/circuit/sheetShape.js";
 import type { TestReport } from "./svgExport.test.js";
@@ -189,12 +189,14 @@ const CASES: Case[] = [
       if (!(big.height > small.height * 3)) fail(`27 lines got ${big.height}px, 1 line ${small.height}px`);
       if (!(big.width > small.width)) fail(`wide text got ${big.width}px, short ${small.width}px`);
 
-      // Enough room for every line, and capped so one runaway line cannot
-      // produce a box the size of the sheet.
+      // Enough room for every line. The height is not capped — the box is the
+      // text, and a 27-line note that stopped growing would be cut off.
       const est = estimateSize(long);
       if (est.height < 27 * 15) fail(`27 lines only got ${est.height}px`);
+      // The width is, but only as a guard against a paste with no breaks in it.
       const runaway = estimateSize("x".repeat(5000));
-      if (runaway.width > 460 || runaway.height > 560) fail(`uncapped: ${JSON.stringify(runaway)}`);
+      if (runaway.width > AUTO_MAX_W) fail(`the width guard let ${runaway.width} through`);
+      if (runaway.height < 2 * 15) fail("the runaway line did not wrap inside the guard");
     },
   },
   {
@@ -205,6 +207,111 @@ const CASES: Case[] = [
       if (back.width !== 173 || back.height !== 44 || !back.markdown || back.text !== "x") {
         fail(JSON.stringify(back));
       }
+    },
+  },
+
+  // ── Width follows the text (LTSpice's own model) ──────────────────────────
+  {
+    // LTSpice stores no width: a comment is as wide as its longest line and
+    // breaks only where the text does. A box we write must therefore say
+    // nothing about its size — otherwise every note we save shows our `[w= h=]`
+    // as literal text once the file is opened over there.
+    name: "a box that follows its text writes a plain LTSpice comment",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const id = st().addTextBox(100, 200);
+      st().updateTextBox(id, { text: "Messreihe 1\nMessreihe 2" });
+      const body = encodeTextBox(st().textBoxes[0]);
+      if (body.includes("[")) fail(`a header was written anyway: ${body}`);
+      if (body !== "Messreihe 1\\nMessreihe 2") fail(`unexpected body: ${JSON.stringify(body)}`);
+
+      const asc = LTSpiceExporter.export(st().nodes, st().edges, "", st().circuit, [], st().textBoxes);
+      if (!asc.includes("TEXT 100 200 Left 2 ;Messreihe 1\\nMessreihe 2")) {
+        fail(`not the LTSpice line shape:\n${asc}`);
+      }
+    },
+  },
+  {
+    name: "the box widens with its longest line and Return only adds a line",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const id = st().addTextBox(0, 0);
+      const at = () => st().textBoxes[0];
+
+      st().updateTextBox(id, { text: "kurz" });
+      const short = { ...at() };
+      st().updateTextBox(id, { text: "eine deutlich laengere Zeile als vorher" });
+      const long = { ...at() };
+      if (!(long.width > short.width)) fail(`the box did not widen: ${short.width} → ${long.width}`);
+      if (long.height !== short.height) fail(`one line changed the height: ${short.height} → ${long.height}`);
+
+      // Return: a second line, same width — the break is the text's, not a wrap.
+      st().updateTextBox(id, { text: "eine deutlich laengere Zeile als vorher\nab" });
+      const two = { ...at() };
+      if (two.width !== long.width) fail(`a shorter second line changed the width: ${two.width}`);
+      if (!(two.height > long.height)) fail(`Return did not add a line: ${two.height}`);
+
+      // …and deleting the long line takes the width back.
+      st().updateTextBox(id, { text: "ab" });
+      if (at().width !== short.width) fail(`the box did not shrink back: ${at().width} vs ${short.width}`);
+      if (!at().autoSized) fail("typing took the box off its text");
+    },
+  },
+  {
+    name: "a hand-set width stops the box following the text",
+    run: async (fail) => {
+      st().clearCircuit();
+      await tick();
+      const id = st().addTextBox(0, 0);
+      st().updateTextBox(id, { text: "kurz", width: 300 });
+      if (st().textBoxes[0].autoSized) fail("setting a width left the box on auto");
+      st().updateTextBox(id, { text: "eine deutlich laengere Zeile als vorher" });
+      if (st().textBoxes[0].width !== 300) fail(`the width moved to ${st().textBoxes[0].width}`);
+      // …and that width is the one thing worth writing down.
+      const body = encodeTextBox(st().textBoxes[0]);
+      if (!body.startsWith("[w=300 h=")) fail(`no size header: ${body}`);
+
+      // Back to auto: the width is measured again and leaves the file.
+      st().updateTextBox(id, { autoSized: true });
+      if (st().textBoxes[0].width === 300) fail("the frozen width survived the switch back");
+      if (encodeTextBox(st().textBoxes[0]).includes("[")) fail("the header survived the switch back");
+    },
+  },
+  {
+    // Markdown has nowhere to live in LTSpice's format either, but a box that
+    // needs no size should not be made to carry one just to say "md".
+    name: "a Markdown box on auto writes the short [md] header",
+    run: (fail) => {
+      const b = box({ text: "# Titel", markdown: true, autoSized: true });
+      const body = encodeTextBox(b);
+      if (body !== "[md] # Titel") fail(`unexpected body: ${JSON.stringify(body)}`);
+      const back = decodeTextBox(body, "tb_1", 0, 0);
+      if (!back.markdown) fail("the Markdown flag was lost");
+      if (!back.autoSized) fail("[md] alone was read as a hand-set size");
+      if (back.text !== "# Titel") fail(`the text came back as ${JSON.stringify(back.text)}`);
+    },
+  },
+  {
+    // Files written before the box followed its text carry the long header.
+    // Those keep their width — it may well have been chosen by hand.
+    name: "the old [w= h= md] header still opens with its width",
+    run: (fail) => {
+      const back = decodeTextBox("[w=126 h=74 md] Spannungsquelle mit\\nInnenwiderstand Ri", "tb_1", -16, 336);
+      if (back.width !== 126 || back.height !== 74) fail(`size read as ${back.width}x${back.height}`);
+      if (!back.markdown) fail("the md flag was lost");
+      if (back.autoSized) fail("a stored size was taken as auto");
+      if (!back.text.includes("\n")) fail("the line break was lost");
+    },
+  },
+  {
+    name: "a bigger size index makes the measured box wider",
+    run: (fail) => {
+      const small = estimateSize("Ein Text", 0);
+      const big = estimateSize("Ein Text", 7);
+      if (!(big.width > small.width * 2)) fail(`size 0: ${small.width}, size 7: ${big.width}`);
+      if (!(big.height > small.height)) fail(`the height ignored the size: ${small.height} → ${big.height}`);
     },
   },
 

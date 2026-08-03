@@ -90,9 +90,26 @@ export function TextBoxPanel() {
           min={TEXTBOX_MIN_W}
           step={8}
           value={Math.round(box.width)}
+          // Setting a width by hand is what takes the box off its text: from
+          // here on the text wraps into this width instead of widening the box.
           onChange={(e) => update(box.id, { width: Math.max(TEXTBOX_MIN_W, Number(e.target.value) || TEXTBOX_MIN_W), autoSized: false })}
           style={fieldStyle}
+          disabled={!!box.autoSized}
+          title={box.autoSized ? "Die Breite folgt dem Text — dafür „Feste Breite“ einschalten" : undefined}
         />
+      </label>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
+        <input
+          type="checkbox"
+          checked={!box.autoSized}
+          // Off puts the box back on its text and drops the width from the file;
+          // on freezes the width it currently has, as the starting point.
+          onChange={(e) => update(box.id, e.target.checked
+            ? { width: Math.round(box.width), autoSized: false }
+            : { autoSized: true })}
+        />
+        <span style={{ fontSize: 12, color: theme.text }}>Feste Breite (umbrechen)</span>
       </label>
 
       <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
@@ -101,7 +118,9 @@ export function TextBoxPanel() {
       </label>
 
       <p style={{ margin: "0 0 8px", fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>
-        Die Höhe richtet sich nach dem Text — nichts wird abgeschnitten.
+        {box.autoSized
+          ? "Das Feld ist so breit wie die längste Zeile; umgebrochen wird nur mit der Return-Taste. So speichert es auch LTSpice."
+          : "Der Text bricht in der eingestellten Breite um. Diese Breite steht als [w= h=] im Kommentar — LTSpice zeigt sie als Text mit an."}
       </p>
 
       <button

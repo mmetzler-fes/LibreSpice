@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Node, Edge } from "@xyflow/react";
 import { Circuit } from "@core/circuit/Circuit.js";
 import { Net } from "@core/circuit/Net.js";
-import { TEXTBOX_DEFAULT_W, TEXTBOX_DEFAULT_H, TEXT_SIZE_DEFAULT, type TextBox } from "@core/circuit/textBox.js";
+import { estimateSize, TEXT_SIZE_DEFAULT, type TextBox } from "@core/circuit/textBox.js";
 import type { SheetShape } from "@core/circuit/sheetShape.js";
 import { NetlistGenerator, parseAnalysisDirective, syncAnalysisDirective, type SimulationConfig } from "@core/circuit/NetlistGenerator.js";
 import type { SpiceComponent } from "@core/components/base/SpiceComponent.js";
@@ -789,7 +789,10 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
     set((state) => ({
       textBoxes: [...state.textBoxes, {
         id, x, y,
-        width: TEXTBOX_DEFAULT_W, height: TEXTBOX_DEFAULT_H,
+        // Follows its text from the first keystroke, the way LTSpice's own
+        // comments do; the measurement below is just the empty box's footprint.
+        ...estimateSize("", TEXT_SIZE_DEFAULT),
+        autoSized: true,
         text: "", markdown: false,
         // A new box starts where LTSpice starts one: upright, at the default size.
         justify: "Left" as const, size: TEXT_SIZE_DEFAULT,
@@ -805,7 +808,12 @@ export const useCircuitStore = create<CircuitState & CircuitActions>((set, get) 
         // A box the user has actually resized is no longer auto-sized, so its
         // size must now be written to the file (see textBox.encodeTextBox).
         const resized = patch.width !== undefined || patch.height !== undefined;
-        return { ...t, ...patch, ...(resized ? { autoSized: false } : {}) };
+        const next = { ...t, ...patch, ...(resized ? { autoSized: false } : {}) };
+        // An auto box is re-measured on every edit — that is what makes it grow
+        // with the line being typed and shrink again when the line is deleted.
+        // Not for a hand-set size: there the width is the user's answer, and a
+        // longer line wraps inside it.
+        return next.autoSized ? { ...next, ...estimateSize(next.text, next.size) } : next;
       }),
     })),
 
