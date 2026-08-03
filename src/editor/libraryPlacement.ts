@@ -2,6 +2,7 @@ import type { ModelDeviceClass } from "@core/library/types.js";
 import type { ComponentDescriptor, LibraryEntry } from "@core/library/types.js";
 import type { ComponentType } from "./nodes/ComponentNode.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
+import { symbolByName } from "@sym/asyParser.js";
 
 /**
  * Maps a parsed model's device class onto an editor component type. Returns null
@@ -27,7 +28,23 @@ export function deviceClassToComponentType(cls: ModelDeviceClass): ComponentType
 /** Builds the click-to-place payload for a library entry, or null if unplaceable. */
 export function placementForEntry(entry: LibraryEntry): PendingLibraryPlacement | null {
   if (entry.kind === "subckt") {
-    return { componentType: "subcircuit", name: entry.name, pins: entry.pins, raw: entry.raw };
+    // A `.lib` may name the `.asy` it is drawn with (see EntryAnnotations); the
+    // generic numbered box is the fallback for a subcircuit that has none. Only
+    // a symbol we actually have counts — a name that resolves to nothing would
+    // leave the part with no graphics at all rather than with the box.
+    const sym = entry.symbol ? symbolByName(entry.symbol) : undefined;
+    // With a symbol the pins get their real names: a `.subckt` declares them as
+    // bare node numbers (`level2 1 2 3 4 5`), while the symbol says which is
+    // In+ and which is a rail. Only when both agree on the count — a symbol for
+    // a different part would silently re-label the wrong terminals — and by
+    // SpiceOrder, which is the order the `X` line writes them in.
+    const symPins = sym && sym.pins.length === entry.pins.length
+      ? [...sym.pins].sort((a, b) => a.order - b.order).map((p) => p.name)
+      : undefined;
+    return {
+      componentType: "subcircuit", name: entry.name, pins: symPins ?? entry.pins, raw: entry.raw,
+      ...(sym ? { symbolName: entry.symbol } : {}),
+    };
   }
   const type = deviceClassToComponentType(entry.deviceClass);
   if (!type) return null;

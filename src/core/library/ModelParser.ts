@@ -1,4 +1,5 @@
 import type {
+  EntryAnnotations,
   LibraryEntry,
   ModelDeviceClass,
   ParseResult,
@@ -58,6 +59,8 @@ export class ModelParser {
     const warnings: string[] = [];
     const entries: LibraryEntry[] = [];
     const logical = ModelParser.toLogicalLines(content);
+    // Read before the comments are stripped below (see collectAnnotations).
+    const annotations = ModelParser.collectAnnotations(content);
 
     for (let i = 0; i < logical.length; i++) {
       const line = logical[i];
@@ -87,7 +90,45 @@ export class ModelParser {
       // Any other directive (.lib, .include, comments, blank) is ignored here.
     }
 
+    for (const entry of entries) {
+      const note = annotations.get(entry.name.toLowerCase());
+      if (note?.label) entry.label = note.label;
+      if (note?.description) entry.description = note.description;
+      if (note?.symbol) entry.symbol = note.symbol;
+    }
+
     return { entries, warnings };
+  }
+
+  /**
+   * The `* Label:` / `* Description:` / `* Symbol:` comments a library file may
+   * put above a `.model` or `.subckt`, keyed by the name they belong to
+   * (lower-cased).
+   *
+   * Its own pass over the raw text, because {@link toLogicalLines} throws
+   * comments away — which is right for everything the simulator reads, and
+   * exactly wrong for these. An annotation applies to the next directive below
+   * it and to nothing else, so anything in between clears it: a file's opening
+   * paragraph cannot leak onto the first part by accident.
+   */
+  private static collectAnnotations(content: string): Map<string, EntryAnnotations> {
+    const out = new Map<string, EntryAnnotations>();
+    let pending: EntryAnnotations = {};
+    for (const raw of content.split(/\r?\n/)) {
+      const trimmed = raw.trim();
+      if (trimmed === "") continue;
+      if (trimmed.startsWith("*")) {
+        const m = /^\*\s*(label|description|symbol)\s*:\s*(.+)$/i.exec(trimmed);
+        if (m) pending[m[1].toLowerCase() as keyof EntryAnnotations] = m[2].trim();
+        // A plain comment is prose about the file, not about the next part, and
+        // must not break the run of annotations either — it simply passes.
+        continue;
+      }
+      const decl = /^\.(?:model|subckt)\s+(\S+)/i.exec(trimmed);
+      if (decl && (pending.label || pending.description)) out.set(decl[1].toLowerCase(), pending);
+      pending = {};
+    }
+    return out;
   }
 
   /**

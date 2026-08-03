@@ -59,7 +59,47 @@ export type ModelDeviceClass =
   | "inductor"
   | "unknown";
 
-export interface SpiceModelDef {
+/**
+ * What a library file says about an entry for the reader's benefit, as opposed
+ * to the simulator's: a readable name and a sentence about the part.
+ *
+ * Needed because a SPICE name is not always a part name. LTSpice's universal
+ * op-amp is the plainest case: its symbol asks for `.subckt level2` (the "level"
+ * is the model's complexity, not the device), so every schematic that uses it
+ * writes `level2` — the name cannot be changed without breaking every saved
+ * sheet — and the parts list read "level2", which names nothing at all.
+ *
+ * Written in the `.lib` as ordinary SPICE comments above the directive:
+ *
+ * ```
+ * * Label: UniversalOpAmp2
+ * * Description: Generic op-amp macromodel …
+ * * Symbol: UniversalOpAmp2
+ * .subckt level2 1 2 3 4 5
+ * ```
+ *
+ * Comments, so the file stays a plain library that LTSpice and ngspice read
+ * unchanged (see ModelParser.collectAnnotations).
+ */
+export interface EntryAnnotations {
+  /** Readable name for the parts list; the SPICE name stays authoritative. */
+  label?: string;
+  /** One sentence on what the part is, shown as the entry's tooltip. */
+  description?: string;
+  /**
+   * Base name of the `.asy` to draw the part with, e.g. `UniversalOpAmp2`.
+   *
+   * Without one a subcircuit is placed as the generic numbered box, which for a
+   * part that has a symbol in the bundle is a worse drawing of something we can
+   * already draw. The server library reaches the same conclusion from the other
+   * side — it derives a descriptor from any `.asy` that names its model (see
+   * libraryStore.fetchServerLibrary) — but that needs a backend, and the bundled
+   * parts have to look right without one.
+   */
+  symbol?: string;
+}
+
+export interface SpiceModelDef extends EntryAnnotations {
   kind: "model";
   /** Model name, e.g. `1N4148`. */
   name: string;
@@ -75,7 +115,7 @@ export interface SpiceModelDef {
   warnings: string[];
 }
 
-export interface SubcircuitDef {
+export interface SubcircuitDef extends EntryAnnotations {
   kind: "subckt";
   /** Subcircuit name, e.g. `LM741`. */
   name: string;

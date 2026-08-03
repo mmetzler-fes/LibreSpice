@@ -129,16 +129,26 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
             {entries
               .filter((e) =>
                 search === "" ||
-                e.entry.name.toLowerCase().includes(search.toLowerCase()),
+                `${e.entry.name} ${e.entry.label ?? ""} ${e.entry.description ?? ""}`
+                  .toLowerCase().includes(search.toLowerCase()),
               )
               .map(({ entry, scope }) => {
                 const placement = placementForEntry(entry);
                 const placeable = placement !== null;
                 const active = pendingLibraryPlacement?.name === entry.name;
+                // A SPICE name is not always a part name (`level2` is LTSpice's
+                // universal op-amp), so a `.lib` may give one — see
+                // EntryAnnotations. The SPICE name still rides along on the row,
+                // because that is what the netlist and the `.asc` will say.
+                const hint = [
+                  entry.label ? `${entry.label} (${entry.name})` : entry.name,
+                  entry.description,
+                  placeable ? "Anklicken, dann auf die Zeichenfläche klicken" : "Kein Symbol – nur im Netzlisten-Verweis",
+                ].filter(Boolean).join("\n");
                 return (
                   <div
                     key={entry.name}
-                    title={placeable ? "Click to place, then click the canvas" : "No symbol – referenced in netlist only"}
+                    title={hint}
                     onClick={() => placement && startPlacingLibrary(placement)}
                     style={{
                       padding: "6px 12px",
@@ -155,8 +165,15 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                     <span style={{ fontFamily: "monospace", fontSize: 9, color: pal.textMuted, width: 34, flexShrink: 0 }}>
                       {entry.kind === "subckt" ? "SUB" : entry.type}
                     </span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {entry.name}
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.label ?? entry.name}
+                      {entry.label && (
+                        // The name the netlist will use, kept in sight: a part
+                        // is looked up by it in an error message from ngspice.
+                        <span style={{ fontFamily: "monospace", fontSize: 9, color: pal.textMuted, marginLeft: 5 }}>
+                          {entry.name}
+                        </span>
+                      )}
                     </span>
                     <span
                       onClick={(ev) => { ev.stopPropagation(); setScope(entry.name, scope === "local" ? "temp" : "local"); }}

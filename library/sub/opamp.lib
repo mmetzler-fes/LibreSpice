@@ -20,6 +20,9 @@
 * Nichts, und ein ideales Bauteil soll nichts mitbringen, was man nicht bestellt.
 *
 * Eigenes Modell, keine Uebernahme aus einer fremden Bibliothek.
+* Label: Op-Amp (ideal, 3-polig)
+* Description: Idealer Operationsverstaerker ohne Versorgung, 3 Anschluesse: In+, In-, OUT. Ein Pol (Avol=1Meg, GBW=10Meg), keine Begrenzung — fuer die Rechnung am gegengekoppelten Verstaerker. Mit Rails: UniversalOpAmp2.
+* Symbol: opamp
 .subckt opamp 1 2 3 PARAMS: Avol=1Meg GBW=10Meg Rout=100
 .param Gm=1m
 .param Rgain={Avol/Gm}

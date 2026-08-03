@@ -41,18 +41,22 @@ export function InsertComponentModal() {
   // resolvable placement; entries fall back to placementForEntry.
   const libraryItems = useMemo(() => {
     const find = (name: string) => findByName(name)?.entry;
-    const items: { key: string; name: string; badge: string; source: string; placement: PendingLibraryPlacement | null }[] = [];
+    const items: { key: string; name: string; label?: string; description?: string; badge: string; source: string; placement: PendingLibraryPlacement | null }[] = [];
     for (const d of descriptors) {
       if (q !== "" && !d.name.toLowerCase().includes(q)) continue;
       items.push({ key: `cmp:${d.name}`, name: d.name, badge: d.prefix ?? "X", source: "server", placement: placementForDescriptor(d, find) });
     }
     const seen = new Set(descriptors.map((d) => `${d.model ?? d.name}`.toLowerCase()));
     for (const { entry, scope } of entries) {
-      if (q !== "" && !entry.name.toLowerCase().includes(q)) continue;
+      // Searched by what the library calls the part as well as by its SPICE
+      // name — "opamp" has to find `level2` (see EntryAnnotations).
+      if (q !== "" && !`${entry.name} ${entry.label ?? ""} ${entry.description ?? ""}`.toLowerCase().includes(q)) continue;
       if (seen.has(entry.name.toLowerCase())) continue; // already shown via its descriptor
       items.push({
         key: `entry:${entry.name}`,
         name: entry.name,
+        label: entry.label,
+        description: entry.description,
         badge: entry.kind === "subckt" ? "SUB" : entry.type,
         source: scope,
         placement: placementForEntry(entry),
@@ -120,9 +124,23 @@ export function InsertComponentModal() {
               {libraryItems.map((it) => {
                 const placeable = it.placement !== null;
                 return (
-                  <div key={it.key} onClick={() => place(it.placement)} title={placeable ? "Click, then click the canvas to place" : "No placeable symbol — referenced in netlist only"} style={rowStyle(placeable)}>
+                  <div
+                    key={it.key}
+                    onClick={() => place(it.placement)}
+                    title={[
+                      it.label ? `${it.label} (${it.name})` : it.name,
+                      it.description,
+                      placeable ? "Anklicken, dann auf die Zeichenfläche klicken" : "Kein Symbol — nur im Netzlisten-Verweis",
+                    ].filter(Boolean).join("\n")}
+                    style={rowStyle(placeable)}
+                  >
                     <span style={{ fontFamily: "monospace", fontSize: 9, color: "#64748b", width: 34, flexShrink: 0 }}>{it.badge}</span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {it.label ?? it.name}
+                      {it.label && (
+                        <span style={{ fontFamily: "monospace", fontSize: 9, color: "#64748b", marginLeft: 5 }}>{it.name}</span>
+                      )}
+                    </span>
                     <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, flexShrink: 0, background: it.source === "server" ? pal.serverBg : it.source === "local" ? pal.localBg : pal.tempBg, color: it.source === "server" ? pal.serverText : it.source === "local" ? pal.localText : pal.tempText }}>
                       {it.source.toUpperCase()}
                     </span>

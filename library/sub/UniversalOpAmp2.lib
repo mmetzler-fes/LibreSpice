@@ -15,6 +15,14 @@
 * open-loop pole traverses far too slowly to ever switch, so the output would
 * never leave a rail. With the clamp the node only spans the rail voltage and
 * the comparator switches within the expected time.
+* The name `level2` is not ours to choose: LTSpice's UniversalOpAmp2 symbol asks
+* for `SYMATTR SpiceModel level2` (the "level" is the model's complexity, not the
+* device), so every schematic that uses the part writes `level2` and the
+* subcircuit has to answer to it. What the parts list shows is a separate
+* question — hence the three lines below, which are plain SPICE comments.
+* Label: UniversalOpAmp2
+* Description: Operationsverstaerker mit Versorgung, 5 Anschluesse: In+, In-, V+, V-, OUT. Ein Pol (Avol=1Meg, GBW=10Meg), Ausgang und Verstaerkungsknoten an den Rails begrenzt — fuer Komparator und Uebersteuerung. Gleiches Bauteil wie "Op-Amp" unter Active.
+* Symbol: UniversalOpAmp2
 .subckt level2 1 2 3 4 5
 .param Avol=1Meg
 .param GBW=10Meg
