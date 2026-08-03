@@ -98,7 +98,7 @@ export function Toolbar() {
     circuitName, setCircuitName, dataFlags, netAnchors, busTaps, textBoxes, sheetShapes, directiveRaw, ascHeader,
     showDirectivesOnCanvas, directivesPos, setFragmentClipboard,
   } = useCircuitStore();
-  const { editorMode, pendingPlaceType, setEditorMode, startPlacing, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect, setPendingFragment } = useUIStore();
+  const { editorMode, pendingPlaceType, pendingTextBox, setEditorMode, startPlacing, startPlacingTextBox, cancelPlacing, toggleDirectiveModal, toggleInsertComponent, setDockTab, symbolNorm, setSymbolNorm, areaSelect, toggleAreaSelect, setPendingFragment } = useUIStore();
   const theme = useTheme();
   const { status, setStatus, setResult, setErrorMessage, progress } = useSimulationStore();
 
@@ -155,19 +155,18 @@ export function Toolbar() {
   const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
 
   /**
-   * Drop a text box just above the circuit's top-left corner — where a title or
-   * a task description belongs, and clear of the parts.
+   * The text tool: arm it here, and the next click on the sheet puts the note
+   * down there (see SchematicCanvas.placeTextBox).
    *
-   * Derived from the content rather than from the viewport on purpose: the
-   * toolbar is rendered outside the React Flow provider in the regression
-   * harness, so a `useReactFlow` here would break it, and content-relative
-   * placement is deterministic anyway.
+   * It used to drop a box straight away, above the circuit's top-left corner.
+   * That corner is wherever the drawing happens to be — on a panned or zoomed
+   * view, usually off screen — so pressing the button looked like nothing had
+   * happened. Aiming with the mouse is both what the button suggests and the
+   * only way to say where the note belongs.
    */
   const handleAddTextBox = () => {
-    const ns = useCircuitStore.getState().nodes;
-    const x = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.x))) : 0;
-    const y = ns.length ? Math.round(Math.min(...ns.map((n) => n.position.y))) - 160 : 0;
-    useCircuitStore.getState().addTextBox(x, y);
+    if (pendingTextBox) cancelPlacing();
+    else startPlacingTextBox();
   };
 
   /**
@@ -487,7 +486,11 @@ export function Toolbar() {
         </svg>
       </TBtn>
 
-      <TBtn title="Textfeld einfügen — Doppelklick bearbeitet, MD schaltet Markdown ein" onClick={handleAddTextBox}>
+      <TBtn
+        title="Textfeld einfügen — dann auf die Zeichenfläche klicken; Doppelklick bearbeitet, MD schaltet Markdown ein"
+        active={pendingTextBox}
+        onClick={handleAddTextBox}
+      >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M5 5h14 M12 5v14 M9 19h6" />
         </svg>
@@ -701,6 +704,11 @@ export function Toolbar() {
       {editorMode === "place" && pendingPlaceType && (
         <span style={{ fontSize: 11, color: "#2563eb", fontStyle: "italic", marginLeft: 4, whiteSpace: "nowrap" }}>
           Placing {pendingPlaceType} — click canvas or Esc to cancel
+        </span>
+      )}
+      {editorMode === "place" && pendingTextBox && (
+        <span style={{ fontSize: 11, color: "#2563eb", fontStyle: "italic", marginLeft: 4, whiteSpace: "nowrap" }}>
+          Textfeld — auf die Zeichenfläche klicken, Esc bricht ab
         </span>
       )}
       {editorMode === "wire" && (

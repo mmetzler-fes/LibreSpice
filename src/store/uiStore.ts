@@ -39,6 +39,13 @@ interface UIState {
   editorMode: EditorMode;
   pendingPlaceType: ComponentType | null;
   pendingLibraryPlacement: PendingLibraryPlacement | null;
+  /**
+   * A text box is waiting for the point it goes down at. A note is not a part,
+   * so it has no `ComponentType` to hang off `pendingPlaceType` — but it is put
+   * down the same way, by aiming at the sheet, which is why it shares
+   * `editorMode: "place"` and everything that clears it.
+   */
+  pendingTextBox: boolean;
   /** Rotation (deg) applied to the placement ghost and the next placed part. */
   placementRotation: number;
   showPropertiesPanel: boolean;
@@ -80,6 +87,14 @@ interface UIState {
   /** The text box whose settings the properties panel shows, or null. */
   selectedTextBoxId: string | null;
   /**
+   * The text box whose text is open for typing, or null.
+   *
+   * Here rather than inside the layer that draws the boxes, because a box that
+   * was just put down has to arrive with its editor open — and the placement
+   * happens on the canvas, a component away.
+   */
+  editingTextBoxId: string | null;
+  /**
    * Drag on empty canvas draws a selection rectangle instead of panning.
    *
    * Shift+drag already does this (React Flow's `selectionKeyCode` default), but
@@ -102,6 +117,8 @@ interface UIActions {
   setEditorMode: (mode: EditorMode) => void;
   startPlacing: (type: ComponentType) => void;
   startPlacingLibrary: (placement: PendingLibraryPlacement) => void;
+  /** Arm the text tool: the next click on the sheet puts a note down there. */
+  startPlacingTextBox: () => void;
   cancelPlacing: () => void;
   rotatePlacement: () => void;
   togglePropertiesPanel: () => void;
@@ -123,6 +140,8 @@ interface UIActions {
   /** Add or remove one name, for a shift-click on top of an existing selection. */
   toggleSelectedAnchorId: (id: string) => void;
   setSelectedTextBoxId: (id: string | null) => void;
+  /** Open (or close, with `null`) a text box for typing. */
+  setEditingTextBoxId: (id: string | null) => void;
   toggleAreaSelect: () => void;
   setPendingFragment: (text: string | null) => void;
 }
@@ -132,6 +151,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   editorMode: "select",
   pendingPlaceType: null,
   pendingLibraryPlacement: null,
+  pendingTextBox: false,
   placementRotation: 0,
   showPropertiesPanel: true,
   showComponentPalette: true,
@@ -147,15 +167,18 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   canvasLocked: false,
   selectedAnchorIds: [],
   selectedTextBoxId: null,
+  editingTextBoxId: null,
   areaSelect: false,
   pendingFragment: null,
 
   setActiveTab: (activeTab) => set({ activeTab }),
-  setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null, pendingLibraryPlacement: null }),
-  startPlacing: (type) => set({ editorMode: "place", pendingPlaceType: type, pendingLibraryPlacement: null }),
+  setEditorMode: (editorMode) => set({ editorMode, pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: false }),
+  startPlacing: (type) => set({ editorMode: "place", pendingPlaceType: type, pendingLibraryPlacement: null, pendingTextBox: false }),
   startPlacingLibrary: (placement) =>
-    set({ editorMode: "place", pendingPlaceType: placement.componentType, pendingLibraryPlacement: placement }),
-  cancelPlacing: () => set({ editorMode: "select", pendingPlaceType: null, pendingLibraryPlacement: null }),
+    set({ editorMode: "place", pendingPlaceType: placement.componentType, pendingLibraryPlacement: placement, pendingTextBox: false }),
+  startPlacingTextBox: () =>
+    set({ editorMode: "place", pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: true }),
+  cancelPlacing: () => set({ editorMode: "select", pendingPlaceType: null, pendingLibraryPlacement: null, pendingTextBox: false }),
   rotatePlacement: () => set((s) => ({ placementRotation: (s.placementRotation + 270) % 360 })),
   togglePropertiesPanel: () => set((s) => ({ showPropertiesPanel: !s.showPropertiesPanel })),
   toggleComponentPalette: () => set((s) => ({ showComponentPalette: !s.showComponentPalette })),
@@ -169,17 +192,26 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setSymbolNorm: (symbolNorm) => set({ symbolNorm }),
   toggleAutoProbeCurrent: () => set((s) => ({ autoProbeCurrent: !s.autoProbeCurrent })),
   toggleCanvasLocked: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
-  setSelectedAnchorId: (id) => set({ selectedAnchorIds: id ? [id] : [], selectedTextBoxId: null }),
+  setSelectedAnchorId: (id) => set({ selectedAnchorIds: id ? [id] : [], selectedTextBoxId: null, editingTextBoxId: null }),
   setSelectedAnchorIds: (selectedAnchorIds) =>
-    set({ selectedAnchorIds, ...(selectedAnchorIds.length ? { selectedTextBoxId: null } : {}) }),
+    set({ selectedAnchorIds, ...(selectedAnchorIds.length ? { selectedTextBoxId: null, editingTextBoxId: null } : {}) }),
   toggleSelectedAnchorId: (id) =>
     set((s) => ({
       selectedAnchorIds: s.selectedAnchorIds.includes(id)
         ? s.selectedAnchorIds.filter((x) => x !== id)
         : [...s.selectedAnchorIds, id],
       selectedTextBoxId: null,
+      editingTextBoxId: null,
     })),
-  setSelectedTextBoxId: (selectedTextBoxId) => set({ selectedTextBoxId, selectedAnchorIds: [] }),
+  // Selecting a different box (or nothing) closes whatever editor was open —
+  // otherwise a note left in edit mode would keep swallowing the keyboard.
+  setSelectedTextBoxId: (selectedTextBoxId) =>
+    set((s) => ({
+      selectedTextBoxId,
+      selectedAnchorIds: [],
+      editingTextBoxId: s.editingTextBoxId === selectedTextBoxId ? s.editingTextBoxId : null,
+    })),
+  setEditingTextBoxId: (editingTextBoxId) => set({ editingTextBoxId }),
   toggleAreaSelect: () => set((s) => ({ areaSelect: !s.areaSelect })),
   setPendingFragment: (pendingFragment) => set({ pendingFragment }),
 }));

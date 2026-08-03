@@ -31,6 +31,7 @@ import { runWireDragTests } from "./wireDrag.test.js";
 import { runNetTerminalRoundTripTests } from "./netTerminalRoundTrip.test.js";
 import { runDragCarryTests } from "./dragCarry.test.js";
 import { runTextBoxTests, runSheetShapeTests } from "./textBox.test.js";
+import { runTextBoxToolTests } from "./textBoxTool.test.js";
 import { runExpressionTests } from "../../simulation/regression/expression.test.js";
 import { runPlotSettingsTests } from "../../simulation/regression/plotSettings.test.js";
 import { runProbeSelectionTests } from "../../simulation/regression/probeSelection.test.js";
@@ -107,6 +108,7 @@ export async function runAllSuites(): Promise<Suite[]> {
     // umverdrahten -- ueber echte Blaetter, ganz und halb.
     { name: "Selection drag keeps the circuit", ...(await runSelectionDragTests()) },
     { name: "Text boxes", ...(await runTextBoxTests()) },
+    { name: "Text tool", ...runTextBoxToolTests() },
     { name: "Sheet shapes", ...(await runSheetShapeTests()) },
     // Share links/QR codes decompress asynchronously.
     { name: "Share links", ...(await runShareLinkTests()) },

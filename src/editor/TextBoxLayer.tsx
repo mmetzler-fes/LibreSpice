@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useViewport } from "@xyflow/react";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore } from "@store/uiStore.js";
@@ -34,7 +34,10 @@ export function TextBoxLayer() {
   const selected = useUIStore((s) => s.selectedTextBoxId);
   const setSelected = useUIStore((s) => s.setSelectedTextBoxId);
   const theme = useTheme();
-  const [editing, setEditing] = useState<string | null>(null);
+  // In the UI store, not local: a box that was just placed on the canvas arrives
+  // with its editor already open (see SchematicCanvas.placeTextBox).
+  const editing = useUIStore((s) => s.editingTextBoxId);
+  const setEditing = useUIStore((s) => s.setEditingTextBoxId);
 
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 

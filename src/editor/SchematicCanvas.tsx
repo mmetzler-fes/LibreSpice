@@ -23,6 +23,7 @@ import { autoConnectEdgesFor, type DockPin, type WireGeom } from "./autoConnect.
 import { DataFlagLayer } from "./DataFlagLayer.js";
 import { NetAnchorLayer } from "./NetAnchorLayer.js";
 import { TextBoxLayer } from "./TextBoxLayer.js";
+import { placeTextBoxAt } from "./textBoxPlacement.js";
 import { SheetShapeLayer } from "./SheetShapeLayer.js";
 import { DirectiveBox } from "./DirectiveBox.js";
 import { PlacementGhost } from "./PlacementGhost.js";
@@ -116,7 +117,7 @@ function CanvasInner() {
   }, [viewFitNonce, reactFlowInstance]);
 
   const {
-    editorMode, pendingPlaceType, pendingLibraryPlacement, placementRotation,
+    editorMode, pendingPlaceType, pendingLibraryPlacement, pendingTextBox, placementRotation,
     setEditorMode, startPlacing, cancelPlacing, rotatePlacement, toggleInsertComponent,
     showPropertiesPanel, showComponentPalette,
     setDockTab, autoProbeCurrent, areaSelect, pendingFragment, selectedAnchorIds, setSelectedAnchorId, setSelectedAnchorIds, selectedTextBoxId, setSelectedTextBoxId,
@@ -329,6 +330,9 @@ function CanvasInner() {
     },
     [addComponent, placementRotation, autoConnectNodePins],
   );
+
+  /** Drop a note at the aimed point and open it for typing (see textBoxPlacement). */
+  const placeTextBox = useCallback((cx: number, cy: number) => { placeTextBoxAt(cx, cy); }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -727,7 +731,8 @@ function CanvasInner() {
           // must not scatter a part where the gesture happened to abort.
           if (ev.type !== "pointerup") return;
           const pos = clientToFlow(ev.clientX, ev.clientY);
-          if (pendingLibraryPlacement) placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
+          if (pendingTextBox) placeTextBox(pos.x, pos.y);
+          else if (pendingLibraryPlacement) placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
           else if (pendingPlaceType) placeComponent(pendingPlaceType, pos.x, pos.y);
         });
         return;
@@ -738,7 +743,7 @@ function CanvasInner() {
         else if (edge) openEdgeMenu(edge, x, y);
       });
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, clientToFlow, hitTest, openNodeMenu, openEdgeMenu, dropPendingFragment, areaSelect, canvasLocked, trackAnchorBand],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, pendingTextBox, placeComponent, placeLibraryComponent, placeTextBox, clientToFlow, hitTest, openNodeMenu, openEdgeMenu, dropPendingFragment, areaSelect, canvasLocked, trackAnchorBand],
   );
 
   /** Add a component data-point (voltage across / current through). Placed just
@@ -835,14 +840,16 @@ function CanvasInner() {
       // mouse commits its placement here, on the pane click.
       if (editorMode === "place" && lastPointerTypeRef.current === "mouse") {
         const pos = clientToFlow(event.clientX, event.clientY);
-        if (pendingLibraryPlacement) {
+        if (pendingTextBox) {
+          placeTextBox(pos.x, pos.y);
+        } else if (pendingLibraryPlacement) {
           placeLibraryComponent(pendingLibraryPlacement, pos.x, pos.y);
         } else if (pendingPlaceType) {
           placeComponent(pendingPlaceType, pos.x, pos.y);
         }
       }
     },
-    [editorMode, pendingPlaceType, pendingLibraryPlacement, placeComponent, placeLibraryComponent, setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId, clientToFlow, dropPendingFragment],
+    [editorMode, pendingPlaceType, pendingLibraryPlacement, pendingTextBox, placeComponent, placeLibraryComponent, placeTextBox, setSelectedComponentId, setSelectedAnchorId, setSelectedTextBoxId, clientToFlow, dropPendingFragment],
   );
 
   const onDragStart = useCallback((def: ComponentDefinition, event: React.DragEvent) => {
