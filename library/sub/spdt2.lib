@@ -1,0 +1,28 @@
+* Spannungsgesteuerter Wechselschalter, zweite Bauform (SPDT2).
+*
+* Herkunft: der weit verbreitete LTspice-Forenschnipsel fuer einen SPDT aus zwei
+* S-Schaltern, hier unter dem Namen SPDT2, damit er nicht mit unserem eigenen
+* `spdt` kollidiert. Fuenf Zeilen SPICE-Grundelemente ohne Autor- oder
+* Lizenzangabe -- die kanonische Schreibweise, die in mehreren Foren steht.
+*
+* Pins:  COM NO NC = Kontakte,  POS NEG = Steuerpaar
+*
+*   Steuerspannung ueber +0,5 V : COM-NO geschlossen
+*   unter -0,5 V                : COM-NC geschlossen
+*
+* Unterschied zu `vcspdt` (unser eigenes Modell): dort sind Schwellen, Hysterese
+* und Widerstaende Parameter der Instanz, hier stehen sie fest. Und der
+* Ruhekontakt bekommt hier das Steuerpaar verkehrt herum statt vertauschter
+* Ron/Roff -- das traegt nur, solange die Schwellen symmetrisch um null liegen.
+* Bei einem Steuersignal zwischen 0 und 3 V bleibt COM-NC dauerhaft offen; dann
+* ist `vcspdt` das richtige Teil. Fuer ein symmetrisches Steuersignal
+* (+/-1 V und mehr) tut dieses hier genau das, was es soll.
+*
+* Label: Wechselschalter, spannungsgesteuert (fest)
+* Description: SPDT aus zwei S-Schaltern, Schwellen fest bei +/-0,5 V mit 0,25 V Hysterese, Ron=10 mOhm. Steuerpaar POS/NEG. Parametrierbar: siehe vcspdt.
+.subckt SPDT2 COM NO NC POS NEG
+S1 COM NO POS NEG MYSW1
+S2 COM NC NEG POS MYSW2
+.model MYSW1 SW(Ron=0.01 Roff=1G Vh=0.25 Vt=0.5)
+.model MYSW2 SW(Ron=0.01 Roff=1G Vh=0.25 Vt=-0.5)
+.ends SPDT2

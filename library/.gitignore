@@ -29,6 +29,10 @@
 # The changeover switch, the pot's counterpart for a contact rather than a track.
 !/sub/spdt.lib
 !/sym/spdt.asy
+# The second changeover switch: the LTspice forum's SPDT from two S-switches,
+# with its thresholds fixed rather than on the instance. Kept beside our own
+# `vcspdt` because sheets outside this repo reference it by name.
+!/sub/spdt2.lib
 # The rest of the switch family: the simple contact, and the two the converter
 # needs so a voltage-controlled switch keeps its control input.
 !/sub/spst.lib
