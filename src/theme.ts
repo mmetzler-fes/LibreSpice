@@ -115,7 +115,7 @@ export interface Theme {
   serverText: string;
 }
 
-type FullTheme = Theme & typeof commonColors;
+export type FullTheme = Theme & typeof commonColors;
 
 export const lightTheme: FullTheme = {
   ...commonColors,

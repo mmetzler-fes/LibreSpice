@@ -8,13 +8,16 @@
  */
 
 /**
- * Where an imported entry lives:
- *   - `local`  persists to localStorage in this browser.
- *   - `temp`   lives only for the current session.
- *   - `server` comes from the file-backed library served by the backend
- *              (re-fetched on load; never written to localStorage).
+ * Where an entry lives:
+ *   - `local`   persists to localStorage in this browser.
+ *   - `temp`    lives only for the current session.
+ *   - `server`  comes from the file-backed library served by the backend
+ *               (re-fetched on load; never written to localStorage).
+ *   - `bundled` is a curated default compiled into the app (bundledLibrary).
+ *               Always there, on every deployment, and nothing can remove it —
+ *               a backend copy of the same name simply shadows it.
  */
-export type LibraryScope = "local" | "temp" | "server";
+export type LibraryScope = "local" | "temp" | "server" | "bundled";
 
 /**
  * A placeable component descriptor (LTSpice `cmp/`): links a graphical symbol

@@ -5,6 +5,7 @@ import { useUIStore } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { placementForEntry } from "./libraryPlacement.js";
 import { SymbolPreview } from "./SymbolPreview.js";
+import { SCOPE_BADGE, SCOPE_HINT, scopeStyle } from "./libraryScope.js";
 
 interface ComponentPaletteProps {
   onDragStart: (def: ComponentDefinition, event: React.DragEvent) => void;
@@ -13,9 +14,16 @@ interface ComponentPaletteProps {
 export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
   const [search, setSearch] = useState("");
   const [openCategory, setOpenCategory] = useState<string | null>("Passives");
-  const { entries, removeEntry, setScope } = useLibraryStore();
+  const { removeEntry, setScope, listEntries } = useLibraryStore();
   const { toggleLibraryImport, startPlacing, startPlacingLibrary, pendingPlaceType, pendingLibraryPlacement } = useUIStore();
   const pal = useTheme();
+
+  // The imports and whatever a backend serves, plus the curated defaults behind
+  // them (see libraryStore.listEntries) — so the list is the same list whether
+  // or not this deployment has a library folder of its own. Recomputed on every
+  // render rather than memoised: the defaults are static and `entries` is short,
+  // so the merge costs less than tracking when it needs redoing.
+  const libraryList = listEntries();
 
   const filtered = COMPONENT_DEFINITIONS.filter(
     (d) =>
@@ -120,13 +128,13 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
           );
         })}
 
-        {/* Imported LTSpice library */}
-        {entries.length > 0 && (
+        {/* The library: curated defaults, what a backend serves, own imports */}
+        {libraryList.length > 0 && (
           <div>
             <div style={{ padding: "6px 12px", background: pal.categoryBg, borderBottom: `1px solid ${pal.border}`, fontWeight: 600, fontSize: 12 }}>
-              Imported Library
+              Library
             </div>
-            {entries
+            {libraryList
               .filter((e) =>
                 search === "" ||
                 `${e.entry.name} ${e.entry.label ?? ""} ${e.entry.description ?? ""}`
@@ -136,6 +144,9 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                 const placement = placementForEntry(entry);
                 const placeable = placement !== null;
                 const active = pendingLibraryPlacement?.name === entry.name;
+                // The user's own import, as opposed to something the app or the
+                // backend brought: only those can be moved or removed here.
+                const own = scope === "local" || scope === "temp";
                 // A SPICE name is not always a part name (`level2` is LTSpice's
                 // universal op-amp), so a `.lib` may give one — see
                 // EntryAnnotations. The SPICE name still rides along on the row,
@@ -176,21 +187,35 @@ export function ComponentPalette({ onDragStart }: ComponentPaletteProps) {
                       )}
                     </span>
                     <span
-                      onClick={(ev) => { ev.stopPropagation(); setScope(entry.name, scope === "local" ? "temp" : "local"); }}
-                      title={scope === "local" ? "Local (click → Temp)" : "Temp (click → Local)"}
+                      // Only the user's own two scopes can be flipped. A served
+                      // or bundled part is not this browser's to move — the
+                      // badge read TEMP for all three before, and clicking it
+                      // offered to copy a server part into localStorage.
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        if (own) setScope(entry.name, scope === "local" ? "temp" : "local");
+                      }}
+                      title={SCOPE_HINT[scope]}
                       style={{
-                        fontSize: 9, padding: "1px 4px", borderRadius: 3, cursor: "pointer", flexShrink: 0,
-                        background: scope === "local" ? pal.localBg : pal.tempBg,
-                        color: scope === "local" ? pal.localText : pal.tempText,
+                        fontSize: 9, padding: "1px 4px", borderRadius: 3, flexShrink: 0,
+                        cursor: own ? "pointer" : "default",
+                        ...scopeStyle(pal, scope),
                       }}
                     >
-                      {scope === "local" ? "LOCAL" : "TEMP"}
+                      {SCOPE_BADGE[scope]}
                     </span>
-                    <span
-                      onClick={(ev) => { ev.stopPropagation(); removeEntry(entry.name); }}
-                      title="Remove"
-                      style={{ color: pal.textMuted, cursor: "pointer", fontSize: 14, flexShrink: 0 }}
-                    >×</span>
+                    {/* Removable only where removing means something: a default
+                        comes back on the next load, and a served part lives in
+                        the backend's folder, not here. */}
+                    {own ? (
+                      <span
+                        onClick={(ev) => { ev.stopPropagation(); removeEntry(entry.name); }}
+                        title="Entfernen"
+                        style={{ color: pal.textMuted, cursor: "pointer", fontSize: 14, flexShrink: 0 }}
+                      >×</span>
+                    ) : (
+                      <span style={{ width: 8, flexShrink: 0 }} />
+                    )}
                   </div>
                 );
               })}

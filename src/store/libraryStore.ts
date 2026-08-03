@@ -59,6 +59,8 @@ interface LibraryActions {
    */
   getDefinitionBlocks: () => { name: string; raw: string }[];
   findByName: (name: string) => StoredEntry | undefined;
+  /** Every part the parts list should show: imported/served plus the defaults. */
+  listEntries: () => StoredEntry[];
   /** Fetches the file-backed library from the backend and merges it in. */
   fetchServerLibrary: () => Promise<void>;
   /** Persists an entry to the server library; returns true on success. */
@@ -145,6 +147,32 @@ export const useLibraryStore = create<LibraryState & LibraryActions>((set, get) 
   // caller of this asks the same question — "is there a part by this name" —
   // and for a shipped example the answer has to be yes with or without a
   // backend (see bundledLibrary).
+  /**
+   * The parts list, and the same list on every deployment.
+   *
+   * The curated defaults are compiled into the app but were not shown anywhere:
+   * the list held only what had been imported or what a backend served. Run with
+   * the repo's `library/` mounted and every default appeared (as a *served*
+   * part); run the image against a volume seeded before those parts existed, and
+   * the same app showed almost nothing — while quietly resolving every one of
+   * them by name, because `findByName` and `getDefinitionBlocks` always did
+   * consult them. So the schematics worked and the parts could not be placed,
+   * which reads as a broken installation rather than an invisible floor.
+   *
+   * Shadowing follows the same rule as the netlist (see getDefinitionBlocks): a
+   * `local`/`temp`/`server` entry of the same name wins, and the default behind
+   * it is not listed a second time.
+   */
+  listEntries: () => {
+    const claimed = new Set(get().entries.map((e) => e.entry.name.toLowerCase()));
+    return [
+      ...get().entries,
+      ...bundledEntries()
+        .filter((e) => !claimed.has(e.name.toLowerCase()))
+        .map((entry) => ({ entry, scope: "bundled" as LibraryScope })),
+    ];
+  },
+
   findByName: (name) => {
     const own = get().entries.find((e) => e.entry.name.toLowerCase() === name.toLowerCase());
     if (own) return own;

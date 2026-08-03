@@ -6,6 +6,8 @@ import { COMPONENT_DEFINITIONS } from "./componentDefinitions.js";
 import { placementForEntry, placementForDescriptor } from "./libraryPlacement.js";
 import { SymbolPreview } from "./SymbolPreview.js";
 import type { PendingLibraryPlacement } from "@store/uiStore.js";
+import type { LibraryScope } from "@core/library/types.js";
+import { SCOPE_BADGE, SCOPE_HINT, scopeStyle } from "./libraryScope.js";
 
 /**
  * Unified "Insert Component" picker (LTSpice-style): lists the built-in standard
@@ -14,7 +16,7 @@ import type { PendingLibraryPlacement } from "@store/uiStore.js";
  */
 export function InsertComponentModal() {
   const { showInsertComponent, toggleInsertComponent, startPlacing, startPlacingLibrary } = useUIStore();
-  const { entries, descriptors, findByName } = useLibraryStore();
+  const { descriptors, findByName, listEntries } = useLibraryStore();
   const [search, setSearch] = useState("");
   const pal = useTheme();
 
@@ -37,17 +39,23 @@ export function InsertComponentModal() {
     [q],
   );
 
-  // Server descriptors first, then imported entries. Descriptors already carry a
-  // resolvable placement; entries fall back to placementForEntry.
-  const libraryItems = useMemo(() => {
+  // Server descriptors first, then every listed entry — imports, what the
+  // backend serves, and the curated defaults behind them (see
+  // libraryStore.listEntries), so this dialog offers the same parts wherever the
+  // app runs. Descriptors already carry a resolvable placement; entries fall
+  // back to placementForEntry.
+  // Not memoised: `listEntries` merges the store's entries with the static
+  // defaults on the fly, so there is no stable value to key a memo on — and the
+  // list is short enough that rebuilding it costs less than tracking it.
+  const libraryItems = (() => {
     const find = (name: string) => findByName(name)?.entry;
-    const items: { key: string; name: string; label?: string; description?: string; badge: string; source: string; placement: PendingLibraryPlacement | null }[] = [];
+    const items: { key: string; name: string; label?: string; description?: string; badge: string; source: LibraryScope; placement: PendingLibraryPlacement | null }[] = [];
     for (const d of descriptors) {
       if (q !== "" && !d.name.toLowerCase().includes(q)) continue;
-      items.push({ key: `cmp:${d.name}`, name: d.name, badge: d.prefix ?? "X", source: "server", placement: placementForDescriptor(d, find) });
+      items.push({ key: `cmp:${d.name}`, name: d.name, badge: d.prefix ?? "X", source: "server" as LibraryScope, placement: placementForDescriptor(d, find) });
     }
     const seen = new Set(descriptors.map((d) => `${d.model ?? d.name}`.toLowerCase()));
-    for (const { entry, scope } of entries) {
+    for (const { entry, scope } of listEntries()) {
       // Searched by what the library calls the part as well as by its SPICE
       // name — "opamp" has to find `level2` (see EntryAnnotations).
       if (q !== "" && !`${entry.name} ${entry.label ?? ""} ${entry.description ?? ""}`.toLowerCase().includes(q)) continue;
@@ -63,7 +71,7 @@ export function InsertComponentModal() {
       });
     }
     return items;
-  }, [descriptors, entries, q, findByName]);
+  })();
 
   if (!showInsertComponent) return null;
 
@@ -117,7 +125,7 @@ export function InsertComponentModal() {
             </>
           )}
 
-          {/* Library (server + imported) */}
+          {/* Library: defaults, server, own imports */}
           {libraryItems.length > 0 && (
             <>
               <div style={{ padding: "5px 12px", background: pal.sectionBg, fontWeight: 600, fontSize: 11, color: pal.heading }}>Library</div>
@@ -141,8 +149,11 @@ export function InsertComponentModal() {
                         <span style={{ fontFamily: "monospace", fontSize: 9, color: "#64748b", marginLeft: 5 }}>{it.name}</span>
                       )}
                     </span>
-                    <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, flexShrink: 0, background: it.source === "server" ? pal.serverBg : it.source === "local" ? pal.localBg : pal.tempBg, color: it.source === "server" ? pal.serverText : it.source === "local" ? pal.localText : pal.tempText }}>
-                      {it.source.toUpperCase()}
+                    <span
+                      title={SCOPE_HINT[it.source]}
+                      style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, flexShrink: 0, ...scopeStyle(pal, it.source) }}
+                    >
+                      {SCOPE_BADGE[it.source]}
                     </span>
                   </div>
                 );

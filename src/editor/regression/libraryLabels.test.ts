@@ -1,5 +1,6 @@
 import { ModelParser } from "@core/library/ModelParser.js";
 import { bundledEntries } from "@core/library/bundledLibrary.js";
+import { useLibraryStore } from "@store/libraryStore.js";
 import { placementForEntry } from "../libraryPlacement.js";
 import { withSymbols } from "./withSymbols.js";
 import type { TestReport } from "./svgExport.test.js";
@@ -154,6 +155,62 @@ const CASES: Case[] = [
         if (p?.symbolName !== undefined) fail(`symbolName: ${p?.symbolName}`);
         if (p?.pins?.join(",") !== "1,2") fail(`pins: ${p?.pins?.join(",")}`);
       });
+    },
+  },
+
+  // ── What the parts list actually offers ───────────────────────────────────
+  {
+    // The complaint this comes from: run against the repo's own `library/` and
+    // every default showed up (as a *served* part); run the image against a
+    // volume seeded before those files existed, and the same app listed almost
+    // nothing — while still resolving every one of them by name. The list has
+    // to be the same list on both.
+    name: "the curated defaults are in the parts list, backend or not",
+    run: (fail) => {
+      // An installation with nothing of its own: no import, no backend. Earlier
+      // suites leave entries in this shared store, so the empty case is set up
+      // rather than assumed, and put back afterwards.
+      const before = useLibraryStore.getState().entries;
+      try {
+        useLibraryStore.setState({ entries: [] });
+        const listed = useLibraryStore.getState().listEntries();
+        if (listed.length !== bundledEntries().length) {
+          fail(`${listed.length} listed for ${bundledEntries().length} bundled parts`);
+        }
+        for (const name of ["level2", "opamp", "seg7hex", "LM317/TI"]) {
+          const hit = listed.find((e) => e.entry.name.toLowerCase() === name.toLowerCase());
+          if (!hit) { fail(`${name} is not in the list at all`); continue; }
+          if (hit.scope !== "bundled") fail(`${name} is listed as ${hit.scope}, not as a default`);
+        }
+      } finally {
+        useLibraryStore.setState({ entries: before });
+      }
+    },
+  },
+  {
+    // Same rule the netlist uses (getDefinitionBlocks): a served or imported
+    // part of the same name replaces the default rather than sitting beside it.
+    name: "an import of the same name shadows the default instead of doubling it",
+    run: (fail) => {
+      const before = useLibraryStore.getState().entries;
+      const mine = ModelParser.parse(".subckt opamp 1 2 3\nR1 1 2 1k\n.ends opamp").entries;
+      try {
+        useLibraryStore.setState({ entries: [] });
+        useLibraryStore.getState().addEntries(mine, "temp");
+        const hits = useLibraryStore.getState().listEntries()
+          .filter((e) => e.entry.name.toLowerCase() === "opamp");
+        if (hits.length !== 1) fail(`opamp appears ${hits.length} times`);
+        if (hits[0]?.scope !== "temp") fail(`the import did not win: ${hits[0]?.scope}`);
+        // …and the default is back once the import is gone.
+        useLibraryStore.getState().removeEntry("opamp");
+        const after = useLibraryStore.getState().listEntries()
+          .filter((e) => e.entry.name.toLowerCase() === "opamp");
+        if (after.length !== 1 || after[0].scope !== "bundled") {
+          fail(`after removing the import: ${JSON.stringify(after.map((e) => e.scope))}`);
+        }
+      } finally {
+        useLibraryStore.setState({ entries: before });
+      }
     },
   },
 ];
