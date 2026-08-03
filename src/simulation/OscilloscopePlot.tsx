@@ -11,13 +11,19 @@ import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
 import { setPltBuilder } from "./plotStore.js";
+import { latin1Blob } from "@core/latin1.js";
 import { stripStepTag, applyPltText, decodePltFile } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
 
-/** Trigger a browser download of a text payload. */
-function downloadText(content: string, filename: string, mime: string): void {
-  const blob = new Blob([content], { type: mime });
+/**
+ * Trigger a browser download of a text payload.
+ *
+ * `latin1` for the files LTSpice reads (`.plt`); the SVG export stays UTF-8,
+ * which is what its own XML declaration promises.
+ */
+function downloadText(content: string, filename: string, mime: string, latin1 = false): void {
+  const blob = latin1 ? latin1Blob(content, mime) : new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -636,7 +642,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
           types: [{ description: "LTSpice Plot Settings", accept: { "text/plain": [".plt"] } }],
         });
         const writable = await handle.createWritable();
-        await writable.write(content);
+        await writable.write(latin1Blob(content));
         await writable.close();
         return;
       } catch (err: any) {
@@ -644,7 +650,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         // fall through to a plain download
       }
     }
-    downloadText(content, suggestedName, "text/plain");
+    downloadText(content, suggestedName, "text/plain", true);
   };
 
   // Load an LTSpice `.plt` file, starting the picker in the current .asc's folder.

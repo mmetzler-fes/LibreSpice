@@ -17,6 +17,7 @@ import { ms14ToSchematic } from "@core/multisim/ms14Schematic.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildLTSpiceBundle } from "@core/ltspice/ltspiceBundle.js";
+import { toLatin1, latin1Blob } from "@core/latin1.js";
 import { symbolSource } from "@sym/asyParser.js";
 import { useLibraryStore } from "@store/libraryStore.js";
 import { buildCurrentPlt } from "@simulation/plotStore.js";
@@ -158,7 +159,9 @@ export function Toolbar() {
     URL.revokeObjectURL(url);
   };
 
-  const fallbackSave = (content: string) => downloadBlob(content, `${safeName}.asc`, "text/plain");
+  // latin1, wie LTSpice liest — nicht UTF-8, wie ein JS-String sonst herausgeht
+  // (siehe core/latin1).
+  const fallbackSave = (content: string) => downloadBlob(toLatin1(content), `${safeName}.asc`, "text/plain");
 
   /**
    * The text tool: arm it here, and the next click on the sheet puts the note
@@ -274,7 +277,7 @@ export function Toolbar() {
           setFileHandle(handle, handle.name);
         }
         const writable = await handle.createWritable();
-        await writable.write(content);
+        await writable.write(latin1Blob(content));
         await writable.close();
         return;
       } catch (err: any) {

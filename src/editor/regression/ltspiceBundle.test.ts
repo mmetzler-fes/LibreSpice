@@ -6,6 +6,7 @@ import {
   buildLTSpiceBundle, collectBundle, withIncludeDirective, BUNDLE_LIB, type BundleInput,
 } from "@core/ltspice/ltspiceBundle.js";
 import { buildZip } from "@core/zip.js";
+import { toLatin1 } from "@core/latin1.js";
 import { withSymbols } from "./withSymbols.js";
 import type { TestReport } from "./svgExport.test.js";
 
@@ -197,6 +198,24 @@ const CASES: Case[] = [
         if (!withPlt.get("Testblatt.plt")?.includes("Transient")) fail("the .plt is not its own text");
         if (!withPlt.get("LIESMICH.txt")?.includes("Testblatt.plt")) fail("the note does not mention it");
       });
+    },
+  },
+  {
+    // The bug this shares with the plain Save: a JavaScript string handed to a
+    // Blob or a file handle goes out as UTF-8 without asking. LTSpice reads
+    // latin1, so `10µF` arrived there as `10ÂµF`, and LTSpice took the number
+    // and dropped the rest — a 10 µF capacitor became a 10 F one, and a 31 mA
+    // branch current came out as 10 A.
+    name: "a saved sheet is latin1, so µ survives the trip to LTSpice",
+    run: (fail) => {
+      const text = "C1 10µF, R 1Ω, Größe";
+      const bytes = toLatin1(text);
+      if (bytes.length !== text.length) fail(`${bytes.length} bytes for ${text.length} characters — that is UTF-8`);
+      const at = (ch: string) => bytes[text.indexOf(ch)];
+      if (at("µ") !== 0xb5) fail(`µ is 0x${at("µ").toString(16)}, not 0xb5`);
+      if (at("ö") !== 0xf6) fail(`ö is 0x${at("ö").toString(16)}, not 0xf6`);
+      // Ω is U+03A9 — latin1 has no room for it, and neither has LTSpice.
+      if (at("Ω") !== 0x3f) fail(`Ω should degrade to "?", got 0x${at("Ω").toString(16)}`);
     },
   },
   {

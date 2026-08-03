@@ -1,3 +1,5 @@
+import { toLatin1 } from "./latin1.js";
+
 /**
  * A minimal ZIP writer — enough to hand out a folder as one file.
  *
@@ -45,16 +47,6 @@ function crc32(bytes: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** latin1: one byte per code unit, anything above 0xFF replaced by `?`. */
-function latin1Bytes(s: string): Uint8Array {
-  const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    out[i] = c < 256 ? c : 0x3f;
-  }
-  return out;
-}
-
 const utf8 = new TextEncoder();
 
 /**
@@ -75,7 +67,7 @@ export function buildZip(entries: ZipEntry[]): Uint8Array {
   for (const entry of entries) {
     const name = utf8.encode(entry.path);
     const body = typeof entry.data === "string"
-      ? (entry.latin1 ? latin1Bytes(entry.data) : utf8.encode(entry.data))
+      ? (entry.latin1 ? toLatin1(entry.data) : utf8.encode(entry.data))
       : entry.data;
     const crc = crc32(body);
 
