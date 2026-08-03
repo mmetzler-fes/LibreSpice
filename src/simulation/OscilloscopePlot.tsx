@@ -10,6 +10,7 @@ import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression,
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
 import { buildPltDoc } from "./pltBuild.js";
+import { setPltBuilder } from "./plotStore.js";
 import { stripStepTag, applyPltText, decodePltFile } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
 import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
@@ -546,7 +547,16 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
 
   // Save the plot configuration as an LTSpice-compatible `.plt` file, defaulting
   // to the current .asc's folder and base name.
-  const handleSavePlt = async () => {
+  /**
+   * The current plot configuration as `.plt` text.
+   *
+   * Shared by the Save button and by the LTSpice bundle export, which drops it
+   * beside the `.asc` — LTSpice opens a schematic's `.plt` by itself, so the
+   * waveform window comes up with the same panes, traces and colours instead of
+   * empty. Only callable once a simulation has produced data; `setPltBuilder`
+   * below is what tells the rest of the app whether that is the case.
+   */
+  const buildPltText = () => {
     const time = result!.time!;
     const doc = buildPltDoc({
       analysis: ANALYSIS_LABEL[analysisType] ?? "Transient Analysis",
@@ -563,7 +573,11 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
         return { low: panel.xMin ?? xs[0], high: panel.xMax ?? xs[xs.length - 1], ticks: panel.xTicks };
       },
     });
-    const content = serializePlt(doc);
+    return serializePlt(doc);
+  };
+
+  const handleSavePlt = async () => {
+    const content = buildPltText();
     const suggestedName = `${circuitName.trim() || "plot"}.plt`;
     if ("showSaveFilePicker" in window) {
       try {
@@ -610,6 +624,15 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     };
     input.click();
   };
+
+  // Hand the `.plt` builder to the rest of the app, or take it back when there
+  // is nothing plotted. No dependency list on purpose: the builder closes over
+  // this render's panels, colours and traces, and a stale one would export the
+  // plot as it looked two edits ago. Assigning a function reference is cheap.
+  useEffect(() => {
+    setPltBuilder(result?.time?.length ? buildPltText : null);
+    return () => setPltBuilder(null);
+  });
 
   const noData = (
     <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "#64748b", background: pt.panelBg }}>

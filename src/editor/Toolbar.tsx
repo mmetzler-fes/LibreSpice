@@ -16,6 +16,10 @@ import { readMs14 } from "@core/multisim/ms14.js";
 import { ms14ToSchematic } from "@core/multisim/ms14Schematic.js";
 import { buildShareUrl } from "@store/persistence.js";
 import { buildSchematicSvg } from "./svgExport.js";
+import { buildLTSpiceBundle } from "@core/ltspice/ltspiceBundle.js";
+import { symbolSource } from "@sym/asyParser.js";
+import { useLibraryStore } from "@store/libraryStore.js";
+import { buildCurrentPlt } from "@simulation/plotStore.js";
 import { buildShareQrSvg } from "./qrExport.js";
 import { buildFragment, isFragment } from "@core/ltspice/ascFragment.js";
 import { SymbolPreview } from "./SymbolPreview.js";
@@ -142,8 +146,10 @@ export function Toolbar() {
   // Filesystem-safe base name derived from the diagram name.
   const safeName = (circuitName.trim() || "circuit").replace(/[^\w.\- ]+/g, "_");
 
-  const downloadBlob = (content: string, filename: string, mime: string) => {
-    const blob = new Blob([content], { type: mime });
+  const downloadBlob = (content: string | Uint8Array, filename: string, mime: string) => {
+    // `BlobPart` wants a view over a plain ArrayBuffer; a Uint8Array built here
+    // already is one, but TypeScript cannot see that through the union.
+    const blob = new Blob([content as BlobPart], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -231,6 +237,28 @@ export function Toolbar() {
     // `circuit` resolves the wires' net names — a wire stores only *whether* to
     // show a label, never the text (see NetNameLookup).
     downloadBlob(buildSchematicSvg(nodes, edges, symbolNorm, overlay, circuit, textBoxes, sheetShapes, netAnchors, busTaps), `${safeName}_Schaltung.svg`, "image/svg+xml");
+  };
+
+  /**
+   * The sheet as a folder LTSpice can open: the `.asc` plus our own symbols and
+   * models (see ltspiceBundle). A file we write is already an LTSpice file —
+   * what is missing over there are the parts LTSpice has never had.
+   */
+  const handleExportLTSpice = () => {
+    const asc = LTSpiceExporter.export(nodes, edges, spiceDirectives, circuit, dataFlags, textBoxes, sheetShapes,
+      { directiveRaw, header: ascHeader, anchors: netAnchors, busTaps });
+    const instanceLines = [...circuit.components.values()]
+      .map((c: any) => c.getNetlistLine?.() ?? "").filter(Boolean).join("\n");
+    const zip = buildLTSpiceBundle(safeName, {
+      asc,
+      instanceLines,
+      directives: spiceDirectives,
+      library: useLibraryStore.getState().getDefinitionBlocks(),
+      symbolSource,
+      // Only there once something has been plotted; see buildCurrentPlt.
+      plt: buildCurrentPlt(),
+    });
+    downloadBlob(zip, `${safeName}_LTSpice.zip`, "application/zip");
   };
 
   const handleSave = async (saveAs: boolean = false) => {
@@ -483,6 +511,13 @@ export function Toolbar() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 3v12 M8 11l4 4 4-4 M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
           <text x="12" y="9" textAnchor="middle" fontSize="7" fill="currentColor" stroke="none">SVG</text>
+        </svg>
+      </TBtn>
+
+      <TBtn title="Für LTSpice exportieren — ZIP mit dem Blatt, unseren Symbolen und Modellen" onClick={handleExportLTSpice}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12 M8 11l4 4 4-4 M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+          <text x="12" y="9" textAnchor="middle" fontSize="7" fill="currentColor" stroke="none">LT</text>
         </svg>
       </TBtn>
 

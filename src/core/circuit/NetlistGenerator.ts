@@ -77,40 +77,7 @@ export class NetlistGenerator {
           : []
         : libraryDefs;
 
-    // Emit only the definitions the circuit actually references (plus their
-    // transitive dependencies): a curated library can hold far more parts than
-    // any single schematic uses, and dumping all of them bloats the netlist and
-    // risks aborting ngspice on an unrelated (possibly incompatible) model.
-    const defByName = new Map<string, string>();
-    let alwaysOn = "";
-    for (const b of blocks) {
-      if (b.name) defByName.set(b.name.toLowerCase(), b.raw);
-      else alwaysOn += `\n${b.raw}`; // unnamed legacy block: always included
-    }
-    // A definition the sheet carries itself wins over the library's. The two
-    // can name the same part: `LM317_InlineSpiceDirective.asc` pastes a whole
-    // `.SUBCKT LM317/TI` into a SPICE directive, and the shipped library has one
-    // under that name too — emitting both puts two identical `.subckt` blocks in
-    // the netlist, which ngspice reports as a redefinition. The sheet's copy is
-    // the one the user can see and edit, so the library's is dropped.
-    for (const m of directives.matchAll(/^\s*\.(?:model|subckt)\s+(\S+)/gim)) {
-      defByName.delete(m[1].toLowerCase());
-    }
-
-    const usedDefs = new Map<string, string>();
-    const queue: string[] = [];
-    const scanForRefs = (text: string) => {
-      for (const tok of text.split(/[\s(),=]+/)) {
-        const key = tok.toLowerCase();
-        if (defByName.has(key) && !usedDefs.has(key)) {
-          usedDefs.set(key, defByName.get(key)!);
-          queue.push(key);
-        }
-      }
-    };
-    scanForRefs(instanceLines);
-    scanForRefs(directives);
-    while (queue.length) scanForRefs(usedDefs.get(queue.shift()!)!);
+    const { always: alwaysOn, used: usedDefs } = usedDefinitions(blocks, instanceLines, directives);
 
     const emitBlock = (raw: string) => {
       for (const l of raw.split("\n")) {
@@ -281,6 +248,62 @@ export function normalizeTranDirective(line: string): string {
     return `.tran ${out.join(" ")}`;
   }
   return kept;
+}
+
+/**
+ * Which library definitions a circuit actually references, transitively.
+ *
+ * A curated library holds far more parts than any one schematic uses. Emitting
+ * all of them bloats the netlist and risks aborting ngspice on an unrelated
+ * (possibly incompatible) model — so a definition earns its place only by being
+ * named, either by an instance line or by another definition already included.
+ *
+ * Extracted from the netlist generator because the LTSpice bundle export asks
+ * the very same question ("what does this sheet need?") and has to get the very
+ * same answer — a bundle that resolved it differently would hand out a `.asc`
+ * with a part missing (see ltspiceBundle).
+ *
+ * @param blocks library definitions as named blocks; an unnamed block is legacy
+ *   and always included
+ * @param instanceLines the circuit's device lines
+ * @param directives the sheet's own SPICE directives
+ */
+export function usedDefinitions(
+  blocks: { name: string; raw: string }[],
+  instanceLines: string,
+  directives: string,
+): { always: string; used: Map<string, string> } {
+  const defByName = new Map<string, string>();
+  let always = "";
+  for (const b of blocks) {
+    if (b.name) defByName.set(b.name.toLowerCase(), b.raw);
+    else always += `\n${b.raw}`; // unnamed legacy block: always included
+  }
+  // A definition the sheet carries itself wins over the library's. The two can
+  // name the same part: `LM317_InlineSpiceDirective.asc` pastes a whole
+  // `.SUBCKT LM317/TI` into a SPICE directive, and the shipped library has one
+  // under that name too — emitting both puts two identical `.subckt` blocks in
+  // the netlist, which ngspice reports as a redefinition. The sheet's copy is
+  // the one the user can see and edit, so the library's is dropped.
+  for (const m of directives.matchAll(/^\s*\.(?:model|subckt)\s+(\S+)/gim)) {
+    defByName.delete(m[1].toLowerCase());
+  }
+
+  const used = new Map<string, string>();
+  const queue: string[] = [];
+  const scanForRefs = (text: string) => {
+    for (const tok of text.split(/[\s(),=]+/)) {
+      const key = tok.toLowerCase();
+      if (defByName.has(key) && !used.has(key)) {
+        used.set(key, defByName.get(key)!);
+        queue.push(key);
+      }
+    }
+  };
+  scanForRefs(instanceLines);
+  scanForRefs(directives);
+  while (queue.length) scanForRefs(used.get(queue.shift()!)!);
+  return { always, used };
 }
 
 /**

@@ -194,11 +194,21 @@ const rawModules = import.meta.glob("./**/*.asy", {
 export const SYMBOL_LIBRARY: Record<string, AsySymbol> = {};
 /** Case-insensitive lookup index (filename variants use inconsistent casing). */
 const LIB_INDEX: Record<string, AsySymbol> = {};
+/**
+ * The `.asy` text each symbol was parsed from, keyed like {@link LIB_INDEX}.
+ *
+ * Kept because a parsed symbol cannot be turned back into a file: the parser
+ * reads the geometry it draws and drops the rest. The LTSpice bundle export
+ * hands these sources out verbatim, which is the only form LTSpice will read
+ * (see ltspiceBundle).
+ */
+const LIB_SOURCE: Record<string, string> = {};
 for (const [path, raw] of Object.entries(rawModules)) {
   const name = path.split("/").pop()!.replace(/\.asy$/i, "");
   const sym = parseAsy(raw);
   SYMBOL_LIBRARY[name] = sym;
   LIB_INDEX[name.toLowerCase()] = sym;
+  LIB_SOURCE[name.toLowerCase()] = raw;
 }
 
 export type SymbolNorm = "default" | "ansi" | "en";
@@ -257,12 +267,23 @@ export function symbolByName(name: string, norm: SymbolNorm = "default"): AsySym
 }
 
 /**
+ * The `.asy` source a symbol was read from, for handing it back out as a file.
+ * The bare name only: a path-qualified LTSpice name (`Misc\\EuropeanResistor`)
+ * belongs to LTSpice's own library and is never ours to export.
+ */
+export function symbolSource(name: string): string | undefined {
+  const base = (name.split(/[\\/]/).pop() ?? name).toLowerCase();
+  return LIB_SOURCE[base];
+}
+
+/**
  * Registers an `.asy` symbol at runtime (e.g. fetched from the server library),
  * so it becomes resolvable via {@link symbolByName} exactly like a bundled one.
  * Re-registering the same name replaces the previous definition.
  */
 export function registerSymbol(name: string, rawAsy: string): AsySymbol {
   const sym = parseAsy(rawAsy);
+  LIB_SOURCE[name.toLowerCase()] = rawAsy;
   SYMBOL_LIBRARY[name] = sym;
   LIB_INDEX[name.toLowerCase()] = sym;
   return sym;
@@ -280,6 +301,7 @@ export function registerSymbol(name: string, rawAsy: string): AsySymbol {
  * after it, several of which assert the *fallback* geometry on purpose.
  */
 export function unregisterSymbol(name: string): void {
+  delete LIB_SOURCE[name.toLowerCase()];
   delete SYMBOL_LIBRARY[name];
   delete LIB_INDEX[name.toLowerCase()];
 }

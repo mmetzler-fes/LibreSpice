@@ -318,6 +318,36 @@ export const usePlotStore = create<PlotState & PlotActions>((set, get) => ({
 }));
 
 /**
+ * Builds the current `.plt` text, or null when there is nothing plotted.
+ *
+ * A function reference rather than a stored string: the `.plt` needs the axis
+ * ranges, and those are only known where the traces are — inside the plot
+ * component (see OscilloscopePlot). Recomputing it on every render to keep a
+ * string current would cost that work continuously for something asked for
+ * once, so the component parks its builder here and callers pull.
+ *
+ * Set to null when no simulation has run, which is exactly the question the
+ * LTSpice bundle asks before adding a `.plt` beside the sheet.
+ */
+let pltBuilder: (() => string) | null = null;
+
+/** Called by the plot component as its state settles; null while nothing is plotted. */
+export function setPltBuilder(fn: (() => string) | null): void {
+  pltBuilder = fn;
+}
+
+/** The current plot configuration as `.plt` text, or null if nothing is plotted. */
+export function buildCurrentPlt(): string | null {
+  try {
+    return pltBuilder?.() ?? null;
+  } catch {
+    // A half-built plot state must not take the export down with it: the sheet
+    // and its parts are the point, the waveform window is a convenience.
+    return null;
+  }
+}
+
+/**
  * Snapshot the current diagram configuration as serialisable {@link PlotSettings}
  * — the same shape written to a `.plt` file, reused to embed the plot config in
  * a share link / autosave. The inverse of {@link PlotActions.importSettings}.
