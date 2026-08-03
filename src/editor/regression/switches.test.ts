@@ -181,11 +181,17 @@ const CASES: Case[] = [
 
   // ── The `spdt2` subcircuit ────────────────────────────────────────────────
   {
-    // A `.subckt` states its nodes in order; the symbol states the same nodes by
-    // SpiceOrder. Disagree, and the wires land on the wrong terminals — silently,
-    // because both sides are individually valid. `spdt2` had NC and NO the wrong
-    // way round, so the contact drawn as the resting one switched the other way.
-    name: "a bundled symbol's pin order matches its subcircuit's",
+    // A `.subckt` states its nodes in order, the symbol states them by
+    // SpiceOrder, and the two have to describe the same terminals — LTSpice
+    // reads the X line's nodes straight off the symbol's SpiceOrder.
+    //
+    // Only the *count* is asserted, deliberately. The names need not line up:
+    // `spdt2`'s symbol calls its throws NC and NO where the subcircuit's node
+    // list has them the other way round, and its control pins are `+`/`-`
+    // against `POS`/`NEG`. That is the author's file and LTSpice honours it as
+    // written; a check that insisted on matching names was our own invention,
+    // and acting on it inverted the switch.
+    name: "a bundled symbol has as many pins as its subcircuit has nodes",
     run: async (fail) => {
       await withSymbols(async () => {
         for (const entry of bundledEntries()) {
@@ -194,18 +200,13 @@ const CASES: Case[] = [
           if (!sym) { fail(`${entry.name}: no symbol "${entry.symbol}"`); continue; }
           if (sym.pins.length !== entry.pins.length) {
             fail(`${entry.name}: ${sym.pins.length} symbol pins for ${entry.pins.length} subckt nodes`);
-            continue;
           }
-          // Where a symbol names its pin as the subcircuit names the node, the
-          // two must be in the same position. (A symbol may label a pin "+"
-          // where the subcircuit says "POS"; only shared names are checked.)
-          const symNames = [...sym.pins].sort((a, b) => a.order - b.order).map((p) => p.name.toUpperCase());
-          const subNames = entry.pins.map((p) => p.toUpperCase());
-          for (let i = 0; i < symNames.length; i++) {
-            const elsewhere = subNames.indexOf(symNames[i]);
-            if (elsewhere >= 0 && elsewhere !== i) {
-              fail(`${entry.name}: pin ${i + 1} is "${symNames[i]}" on the symbol but node ${elsewhere + 1} in the subcircuit`);
-            }
+          // Every SpiceOrder from 1..n exactly once, or the mapping onto the
+          // node list is ambiguous and the part is wired by accident.
+          const orders = [...sym.pins].map((p) => p.order).sort((a, b) => a - b);
+          const want = orders.map((_, i) => i + 1);
+          if (orders.join(",") !== want.join(",")) {
+            fail(`${entry.name}: SpiceOrder is ${orders.join(",")}, not 1..${sym.pins.length}`);
           }
         }
       });
@@ -236,8 +237,10 @@ const CASES: Case[] = [
         const line = st().netlist.split("\n").find((l) => /spdt2/i.test(l) && !/^\.subckt/i.test(l.trim()));
         if (!line) { fail(`no instance line in:\n${st().netlist}`); return; }
         if (!/^XU1\b/.test(line.trim())) fail(`instance line is "${line.trim()}", not XU1`);
-        // COM, NO, NC, POS, NEG — in the subcircuit's order.
-        if (!/^XU1\s+A\s+B\s+C\s+P\s+N\s+/i.test(line.trim())) fail(`nodes out of order: ${line.trim()}`);
+        // The nodes follow the *symbol's* SpiceOrder, which is what LTSpice
+        // reads them off — here COM, then the two throws in the order the
+        // symbol numbers them (C before B), then the control pair.
+        if (!/^XU1\s+A\s+C\s+B\s+P\s+N\s+/i.test(line.trim())) fail(`nodes out of order: ${line.trim()}`);
       });
     },
   },

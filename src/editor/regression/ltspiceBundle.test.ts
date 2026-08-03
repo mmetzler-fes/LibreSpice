@@ -219,6 +219,52 @@ const CASES: Case[] = [
     },
   },
   {
+    // The whole loop, byte for byte: a value with a µ in it, saved and read
+    // back the way LTSpice would. Encoding was only half the fault — the other
+    // half is that a corrupt value is *sticky*. `10ÂµF` parses to 10, the model
+    // holds 10, and `sameAttrValue` then reports the file's spelling as still
+    // current and writes it back unchanged. Nothing short of retyping the value
+    // repairs a sheet that has been through a UTF-8 save.
+    name: "a µF value survives save and reload as bytes on disk",
+    run: async (fail) => {
+      await withSymbols(async () => {
+        st().clearCircuit();
+        st().loadFromAsc([
+          "Version 4",
+          "SHEET 1 880 680",
+          "SYMBOL cap 0 0 R0",
+          "SYMATTR InstName C1",
+          "SYMATTR Value 10µF",
+          "TEXT 0 300 Left 2 !.tran 1m",
+          "",
+        ].join("\n"));
+        await tick(); await tick();
+        const before = (st().circuit.components.get(st().nodes[0].id) as any)?.capacitance;
+        if (before !== 1e-5) { fail(`the sheet did not even load: ${before}`); return; }
+
+        const asc = LTSpiceExporter.export(
+          st().nodes, st().edges, st().spiceDirectives, st().circuit, st().dataFlags,
+          st().textBoxes, st().sheetShapes,
+          { directiveRaw: st().directiveRaw, header: st().ascHeader, anchors: st().netAnchors, busTaps: st().busTaps },
+        );
+        // What actually reaches the disk, and what LTSpice — and our own open —
+        // make of those bytes.
+        const bytes = toLatin1(asc);
+        if (bytes.includes(0x3f) && !asc.includes("?")) fail("something was replaced by a question mark on the way out");
+        const reread = new TextDecoder("windows-1252").decode(bytes);
+        if (!/Value 10µF/.test(reread)) {
+          fail(`the value came back as ${/SYMATTR Value (\S+)/.exec(reread)?.[1]}`);
+        }
+
+        st().clearCircuit();
+        st().loadFromAsc(reread);
+        await tick(); await tick();
+        const after = (st().circuit.components.get(st().nodes[0].id) as any)?.capacitance;
+        if (after !== before) fail(`10 µF became ${after} F after one save and open`);
+      });
+    },
+  },
+  {
     // The promise the export makes: a bundle is complete or says what is
     // missing. Checked across the whole shipped corpus, because the failure it
     // guards against is exactly the one we hit with `spdt2` — a symbol nobody

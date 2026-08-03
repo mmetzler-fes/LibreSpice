@@ -3,7 +3,7 @@
 V1 U 0 SINE(0 10 50)
 R1 U N003 10
 L1 N003 0 1H
-C1 N002 0 10ÂµF
+C1 N002 0 10µF
 V2 UTrigger 0 PULSE(-5V 5V 0ms 1us 1us 900ms 1000ms)
 X§U1 U U N001 0 UTrigger spdt2 ;§pnba COM)NC)NO)+)-
 R2 N001 N002 1
