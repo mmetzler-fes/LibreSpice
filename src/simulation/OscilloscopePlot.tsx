@@ -1177,6 +1177,8 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const [cursorManualTop, setCursorManualTop] = useState<number | null>(null);
   /** Probe context menu (cursor toggle), at viewport coords. */
   const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
+  /** Pointer type of the last press on a trace chip — tells a tap from a mouse click. */
+  const chipPointerType = useRef("mouse");
   /** Pane context menu (add/move/delete/sync), at viewport coords. */
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -1547,8 +1549,17 @@ function PlotPanelView(props: PlotPanelViewProps) {
               draggable
               onDragStart={(e) => e.dataTransfer.setData(DND_MIME, t)}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ trace: t, x: e.clientX, y: e.clientY }); }}
-              title="Right-click for cursor"
+              // iPadOS fires no `contextmenu`: a finger or pen reaches the same
+              // menu with a plain tap (a mouse click keeps doing nothing).
+              onPointerDown={(e) => { chipPointerType.current = e.pointerType; }}
+              onClick={(e) => {
+                if (chipPointerType.current === "mouse") return;
+                if ((e.target as Element).closest("button")) return;
+                setMenu({ trace: t, x: e.clientX, y: e.clientY });
+              }}
+              title="Right-click (or tap) for cursor"
               style={{
+                WebkitTouchCallout: "none", userSelect: "none",
                 display: "inline-flex", alignItems: "center", gap: 4,
                 padding: "1px 6px", borderRadius: 10,
                 background: cursor?.trace === t
@@ -1864,9 +1875,18 @@ function PlotPanelView(props: PlotPanelViewProps) {
             <button style={menuItemStyle} onClick={() => { onToggleSyncX(); setPaneMenu(null); }}>
               {syncX ? "☑" : "☐"} Sync. Horiz. Axes
             </button>
+            {traces.length > 0 && <div style={menuDivider} />}
+            {/* Cursor per trace — also reachable without a right mouse button (iPad) */}
+            {traces.map((t) => (
+              <button key={t} style={menuItemStyle} onClick={() => {
+                setCursor((c) => c?.trace === t ? null : { trace: t, t: (vr.xMin + vr.xMax) / 2 });
+                setPaneMenu(null);
+              }}>
+                {cursor?.trace === t ? "☑" : "☐"} Cursor <span style={{ color: colorFor(t), fontFamily: "monospace" }}>{displayVar(t)}</span>
+              </button>
+            ))}
             {cursor && (
               <>
-                <div style={menuDivider} />
                 <button style={menuItemStyle} onClick={() => { stampCursor(cursor.trace); setPaneMenu(null); }}>Position abdrucken</button>
               </>
             )}
