@@ -6,6 +6,7 @@ import { canonicalProbe, dedupeProbes, matchResultVariable } from "@core/circuit
 import { usePlotStore, type PlotPanel, type YScale } from "./plotStore.js";
 import { usePlotTheme, plotThemeFor } from "./plotTheme.js";
 import { ClampedMenu } from "../ClampedMenu.js";
+import { PlotScrollbar } from "./PlotScrollbar.js";
 import { evalExpression, resolveSeries, stepView, exprCheckResult, isExpression, parametricXSeries } from "./expression.js";
 import { inferUnit } from "./units.js";
 import { serializePlt } from "./pltFormat.js";
@@ -116,14 +117,11 @@ const DND_MIME = "application/x-librespice-trace";
 const MIN_PANE_H = 120;
 const MIN_PANE_H_COMPACT = 100;
 
-/** Visible height of the resize edge, in px. */
-const RESIZE_HANDLE_H = 18;
 /**
- * Extra grab area above the resize edge, reaching into the plot's x-axis labels,
- * so a finger that lands a little too high still resizes instead of touching
- * the plot.
+ * Height of the resize bar, in px. What you see is the whole grab area — no
+ * invisible zones — so the user never has to guess where to put the pen.
  */
-const RESIZE_GRAB_EXTRA = 12;
+const RESIZE_HANDLE_H = 22;
 
 const SI_PREFIXES: { e: number; s: string }[] = [
   { e: 12, s: "T" }, { e: 9, s: "G" }, { e: 6, s: "M" }, { e: 3, s: "k" }, { e: 0, s: "" },
@@ -569,6 +567,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
   // Each panel registers a builder that produces its export SVG (with readout
   // boxes baked in); "export all" stacks them into one file.
   const exportersRef = useRef<Map<string, () => SVGSVGElement | null>>(new Map());
+  /** The stacked panes' scroll box, driven by {@link PlotScrollbar}. */
+  const panesScrollRef = useRef<HTMLDivElement>(null);
   const registerExport = useCallback((id: string, build: (() => SVGSVGElement | null) | null) => {
     if (build) exportersRef.current.set(id, build);
     else exportersRef.current.delete(id);
@@ -913,7 +913,12 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       </div>
 
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto", overscrollBehavior: "none" }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+      <div
+        ref={panesScrollRef}
+        className="plot-panes-scroll"
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "auto", overscrollBehavior: "none" }}
+      >
         {panels.map((panel, i) => {
           // A parametric panel puts one quantity on the x-axis, so it is not drawn
           // as a curve; its series replaces the sweep/time base.
@@ -951,6 +956,8 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
             />
           );
         })}
+      </div>
+      <PlotScrollbar target={panesScrollRef} theme={pt} />
       </div>
     </div>
     </div>
@@ -1187,6 +1194,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
   const [menu, setMenu] = useState<{ trace: string; x: number; y: number } | null>(null);
   /** Pointer type of the last press on a trace chip — tells a tap from a mouse click. */
   const chipPointerType = useRef("mouse");
+  /** The resize bar is being dragged (or hovered) — highlight it. */
+  const [resizing, setResizing] = useState(false);
+  const [resizeHover, setResizeHover] = useState(false);
   /** Pane context menu (add/move/delete/sync), at viewport coords. */
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -1525,7 +1535,26 @@ function PlotPanelView(props: PlotPanelViewProps) {
     e.stopPropagation();
     const startY = e.clientY;
     const startH = panelRef.current?.getBoundingClientRect().height ?? dims.h;
-    trackPointerDrag(e, (ev) => onUpdate({ height: Math.max(minPaneH, startH + (ev.clientY - startY)) }));
+    // Keep the pen's events on the bar even when it slips off it (implicit
+    // capture is not guaranteed for pen on iPadOS).
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    // An Apple Pencil reports up to 240 moves/s; re-rendering the plot for each
+    // made the bar lag behind the pen. Apply at most one height per frame.
+    let pendingY: number | null = null;
+    let frame = 0;
+    const flush = () => {
+      frame = 0;
+      if (pendingY !== null) onUpdate({ height: Math.max(minPaneH, startH + (pendingY - startY)) });
+    };
+    setResizing(true);
+    trackPointerDrag(e, (ev) => {
+      pendingY = ev.clientY;
+      if (!frame) frame = requestAnimationFrame(flush);
+    }, () => {
+      if (frame) cancelAnimationFrame(frame);
+      flush();
+      setResizing(false);
+    });
   };
 
   return (
@@ -1920,25 +1949,28 @@ function PlotPanelView(props: PlotPanelViewProps) {
         </ClampedMenu>
       )}
 
-      {/* Resize handle: drag the bottom edge to set this plot's height. The grip
-          lines are decoration — the whole strip is the grab area. */}
+      {/* Resize bar: drag to set this plot's height. The whole visible bar is
+          the grab area, marked with a grip and a label so nobody has to hunt. */}
       <div
         onPointerDown={startResize}
+        onPointerEnter={() => setResizeHover(true)}
+        onPointerLeave={() => setResizeHover(false)}
         title="Drag to resize this plot"
         style={{
           ...NO_NATIVE_DRAG, height: RESIZE_HANDLE_H, flexShrink: 0, cursor: "ns-resize",
-          background: pt.toolbarBg, borderTop: `1px solid ${pt.border}`,
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
-          position: "relative",
+          background: resizing || resizeHover ? pt.accent : pt.activeBg,
+          color: resizing || resizeHover ? pt.accentText : pt.heading,
+          borderTop: `1px solid ${pt.borderStrong}`,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          fontSize: 10,
         }}
       >
-        <div
-          aria-hidden
-          style={{ position: "absolute", left: 0, right: 0, top: -RESIZE_GRAB_EXTRA, bottom: 0, zIndex: 5 }}
-        />
-        {[0, 1, 2].map((i) => (
-          <span key={i} style={{ width: 14, height: 2, borderRadius: 1, background: pt.border }} />
-        ))}
+        <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>⇕</span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 2 }} aria-hidden>
+          <span style={{ width: 28, height: 2, borderRadius: 1, background: "currentColor" }} />
+          <span style={{ width: 28, height: 2, borderRadius: 1, background: "currentColor" }} />
+        </span>
+        <span>Höhe ziehen</span>
       </div>
     </div>
   );

@@ -88,3 +88,12 @@ textarea {
 .sym-preview-fallback * {
   vector-effect: non-scaling-stroke;
 }
+
+/* Plot panes scroll through their own always-visible PlotScrollbar (iPadOS has
+   no draggable native one); hide the native bar so there are not two. */
+.plot-panes-scroll {
+  scrollbar-width: none;
+}
+.plot-panes-scroll::-webkit-scrollbar {
+  display: none;
+}
