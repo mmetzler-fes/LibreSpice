@@ -1,11 +1,11 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 import { LiveNetlistPanel } from "./LiveNetlistPanel.js";
 import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopePlot } from "@simulation/OscilloscopePlot.js";
 import { LogPanel } from "@simulation/LogPanel.js";
 import { useUIStore, type DockTab } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
-import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
+import { NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: "netlist", label: "Netlist" },
@@ -18,19 +18,37 @@ export function DockPanel() {
   const { dockOpen, dockHeight, dockTab, setDockHeight, setDockTab, toggleDock } = useUIStore();
   const theme = useTheme();
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  /** The resize bar is dragged or hovered — highlight it, like the plot's bar. */
+  const [resizing, setResizing] = useState(false);
+  const [resizeHover, setResizeHover] = useState(false);
 
   const onResizeStart = useCallback(
     (e: React.PointerEvent) => {
       if (!isDragPointer(e)) return;
       e.preventDefault();
       dragRef.current = { startY: e.clientY, startH: dockHeight };
+      // Hold on to the pen even when it slips off the bar.
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+      // At most one height per frame — a pen reports far more moves than that.
+      let pendingY: number | null = null;
+      let frame = 0;
+      const flush = () => {
+        frame = 0;
+        if (dragRef.current && pendingY !== null) setDockHeight(dragRef.current.startH + (dragRef.current.startY - pendingY));
+      };
+      setResizing(true);
       trackPointerDrag(
         e,
         (ev) => {
-          if (!dragRef.current) return;
-          setDockHeight(dragRef.current.startH + (dragRef.current.startY - ev.clientY));
+          pendingY = ev.clientY;
+          if (!frame) frame = requestAnimationFrame(flush);
         },
-        () => { dragRef.current = null; },
+        () => {
+          if (frame) cancelAnimationFrame(frame);
+          flush();
+          dragRef.current = null;
+          setResizing(false);
+        },
       );
     },
     [dockHeight, setDockHeight],
@@ -80,17 +98,32 @@ export function DockPanel() {
 
   return (
     <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", height: dockHeight, minHeight: 120 }}>
-      {/* Resize handle */}
+      {/* Resize bar between schematic and dock — the whole bar is the grab area,
+          and it turns blue on hover/drag like the plot panes' resize bar. */}
       <div
         onPointerDown={onResizeStart}
+        onPointerEnter={() => setResizeHover(true)}
+        onPointerLeave={() => setResizeHover(false)}
+        title="Drag to resize the panel"
         style={{
-          ...DRAG_TOUCH_ACTION,
-          height: 5,
+          ...NO_NATIVE_DRAG,
+          height: 16,
           cursor: "ns-resize",
-          background: theme.border,
+          background: resizing || resizeHover ? theme.accent : theme.border,
+          color: resizing || resizeHover ? theme.accentText : theme.textMuted,
           flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
         }}
-      />
+      >
+        <span aria-hidden style={{ fontSize: 12, lineHeight: 1 }}>⇕</span>
+        <span aria-hidden style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ width: 28, height: 2, borderRadius: 1, background: "currentColor" }} />
+          <span style={{ width: 28, height: 2, borderRadius: 1, background: "currentColor" }} />
+        </span>
+      </div>
       {/* Tab bar */}
       <div
         style={{
