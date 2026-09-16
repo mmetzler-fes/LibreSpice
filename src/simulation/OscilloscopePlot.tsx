@@ -14,7 +14,7 @@ import { setPltBuilder } from "./plotStore.js";
 import { latin1Blob } from "@core/latin1.js";
 import { stripStepTag, applyPltText, decodePltFile } from "./pltApply.js";
 import { parseSpiceNumber } from "@core/circuit/NetlistGenerator.js";
-import { DRAG_TOUCH_ACTION, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
+import { DRAG_TOUCH_ACTION, NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "@editor/pointerDrag.js";
 
 /**
  * Trigger a browser download of a text payload.
@@ -116,8 +116,14 @@ const DND_MIME = "application/x-librespice-trace";
 const MIN_PANE_H = 120;
 const MIN_PANE_H_COMPACT = 100;
 
-/** Grab area of the resize edge, in px. Comfortably hittable with a mouse or a pen. */
-const RESIZE_HANDLE_H = 14;
+/** Visible height of the resize edge, in px. */
+const RESIZE_HANDLE_H = 18;
+/**
+ * Extra grab area above the resize edge, reaching into the plot's x-axis labels,
+ * so a finger that lands a little too high still resizes instead of touching
+ * the plot.
+ */
+const RESIZE_GRAB_EXTRA = 12;
 
 const SI_PREFIXES: { e: number; s: string }[] = [
   { e: 12, s: "T" }, { e: 9, s: "G" }, { e: 6, s: "M" }, { e: 3, s: "k" }, { e: 0, s: "" },
@@ -739,7 +745,9 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
     // Scroll wrapper: under heavy browser zoom (Ctrl+wheel) the fixed-size
     // sidebar and min-height panels can grow past the viewport — scroll to reach
     // the rest instead of clipping it.
-    <div style={{ height: "100%", overflow: "auto", background: pt.panelBg }}>
+    // `overscrollBehavior: none`: on iPadOS a touch at a scroll boundary would
+    // otherwise rubber-band the whole plot view up and down.
+    <div style={{ height: "100%", overflow: "auto", overscrollBehavior: "none", background: pt.panelBg }}>
     <div style={{ height: "100%", minWidth: compact ? 320 : 480, minHeight: compact ? 180 : 300, display: "flex" }}>
       {/* ── Sidebar: probes, colours, expressions ── */}
       <div style={{
@@ -905,7 +913,7 @@ export function OscilloscopePlot({ compact = false }: OscilloscopePlotProps) {
       </div>
 
       {/* ── Panels (stacked; add/move/delete via right-click menu, drag targets) ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto", overscrollBehavior: "none" }}>
         {panels.map((panel, i) => {
           // A parametric panel puts one quantity on the x-axis, so it is not drawn
           // as a curve; its series replaces the sweep/time base.
@@ -1645,7 +1653,9 @@ function PlotPanelView(props: PlotPanelViewProps) {
       {/* Plot (axis range is set only via the settings menu — no zoom/pan) */}
       <div
         ref={containerRef}
-        style={{ flex: 1, overflow: "hidden", position: "relative" }}
+        // touch-action none: touching the plot is never a pan — the pane stays put
+        // instead of scrolling (and bouncing back) under the finger.
+        style={{ ...DRAG_TOUCH_ACTION, flex: 1, overflow: "hidden", position: "relative" }}
         onContextMenu={(e) => { e.preventDefault(); setPaneMenu({ x: e.clientX, y: e.clientY }); }}
       >
         <svg id={`osc-svg-${panel.id}`} width={dims.w} height={dims.h} style={{ display: "block" }}>
@@ -1916,11 +1926,16 @@ function PlotPanelView(props: PlotPanelViewProps) {
         onPointerDown={startResize}
         title="Drag to resize this plot"
         style={{
-          ...DRAG_TOUCH_ACTION, height: RESIZE_HANDLE_H, flexShrink: 0, cursor: "ns-resize",
+          ...NO_NATIVE_DRAG, height: RESIZE_HANDLE_H, flexShrink: 0, cursor: "ns-resize",
           background: pt.toolbarBg, borderTop: `1px solid ${pt.border}`,
           display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+          position: "relative",
         }}
       >
+        <div
+          aria-hidden
+          style={{ position: "absolute", left: 0, right: 0, top: -RESIZE_GRAB_EXTRA, bottom: 0, zIndex: 5 }}
+        />
         {[0, 1, 2].map((i) => (
           <span key={i} style={{ width: 14, height: 2, borderRadius: 1, background: pt.border }} />
         ))}
