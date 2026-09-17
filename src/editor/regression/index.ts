@@ -21,6 +21,7 @@ import { runClipboardTests } from "./clipboard.test.js";
 import { runNetAnchorTests } from "./netAnchor.test.js";
 import { runMs14Tests } from "./ms14.test.js";
 import { runPwlSourceTests } from "./pwlSource.test.js";
+import { runSignalFileTests } from "@simulation/regression/signalFile.test.js";
 import { runPulseSourceTests } from "./pulseSource.test.js";
 import { runLogicGateTests } from "./logicGate.test.js";
 import { runDFlipFlopTests } from "./dFlipFlop.test.js";
@@ -99,6 +100,8 @@ export async function runAllSuites(): Promise<Suite[]> {
     // Teilschaltungen, und liegt jeder Netzname auf seiner Leitung?
     { name: "Sheets open correctly", ...(await runSheetLoadTests()) },
     { name: "PWL source", ...runPwlSourceTests() },
+    // Includes a windowed ngspice run of LTSpice's song example (~2 s).
+    { name: "File sources and .wave", ...(await runSignalFileTests()) },
     { name: "Pulse source", ...(await runPulseSourceTests()) },
     { name: "Logic gates", ...runLogicGateTests() },
     { name: "D flip-flop", ...runDFlipFlopTests() },

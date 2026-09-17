@@ -4,6 +4,8 @@ import { useLibraryStore } from "@store/libraryStore.js";
 import { ModelParser } from "@core/library/ModelParser.js";
 import { withSymbols } from "@editor/regression/withSymbols.js";
 import { surveySheet } from "@editor/regression/sheetSurvey.js";
+import { useSourceFileStore } from "@store/sourceFileStore.js";
+import { scanFileSources } from "@core/audio/signalFile.js";
 
 /**
  * Does a sheet that carries an analysis directive actually run?
@@ -60,6 +62,16 @@ async function loadServedLibrary(): Promise<void> {
   useLibraryStore.setState({ entries, serverAvailable: true } as never);
 }
 
+/** Load the files a netlist's sources read from the sheet's own folder. */
+async function loadSiblingFiles(netlist: string, ascPath: string): Promise<void> {
+  const load = (m: string) => import(/* @vite-ignore */ m);
+  const [fs, path] = await Promise.all([load("node:fs"), load("node:path")]);
+  for (const src of scanFileSources(netlist.split(/\r?\n/))) {
+    const file = path.join(path.dirname(ascPath), src.file);
+    if (fs.existsSync(file)) useSourceFileStore.getState().addInput(src.file, new Uint8Array(fs.readFileSync(file)));
+  }
+}
+
 /**
  * Load one `.asc`, netlist it, run it.
  *
@@ -67,13 +79,16 @@ async function loadServedLibrary(): Promise<void> {
  * result to report, not an accident. A genuine exception (a sheet that will not
  * load at all) is left to the caller, whose process is about to end anyway.
  */
-export async function simulateSheet(ascText: string): Promise<SimOutcome> {
+export async function simulateSheet(ascText: string, ascPath?: string): Promise<SimOutcome> {
   return await withSymbols(async () => {
     await loadServedLibrary();
     const survey = await surveySheet(ascText);
     // No analysis line means the sheet is a drawing, not a simulation — the
     // exercise sheets are full of them and they are not failures.
     if (survey.analyses.length === 0) return { kind: "skip" };
+
+    // A source reading a file (`wavefile=`) finds it next to the sheet, as in LTSpice.
+    if (ascPath) await loadSiblingFiles(survey.netlist, ascPath);
 
     useSimulationStore.getState().setStatus("running");
     useSimulationStore.getState().setLog("");

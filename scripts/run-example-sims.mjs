@@ -44,7 +44,7 @@ if (process.argv[2] === "--one") {
   const { simulateSheet } = await import(pathToFileURL(bundle).href);
   let outcome;
   try {
-    outcome = await simulateSheet(readFileSync(file, "latin1"));
+    outcome = await simulateSheet(readFileSync(file, "latin1"), file);
   } catch (err) {
     outcome = { kind: "error", detail: `load throws — ${String(err?.message ?? err)}`, analyses: [] };
   }
