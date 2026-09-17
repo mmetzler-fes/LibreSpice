@@ -270,6 +270,7 @@ const SOURCE_SYMBOLS: Record<string, React.FC> = {
   Sine: SineSourceSymbol,
   Pulse: PulseSourceSymbol,
   PWL: PWLSourceSymbol,
+  File: PWLSourceSymbol,
 };
 
 /**

@@ -19,7 +19,19 @@ export abstract class Source extends SpiceComponent {
   }
 }
 
-export type VSourceType = "DC" | "Sine" | "Pulse" | "PWL" | "Behavioral";
+export type VSourceType = "DC" | "Sine" | "Pulse" | "PWL" | "File" | "Behavioral";
+
+/**
+ * The LTSpice spec of a file-driven source: `wavefile=` for a WAV file,
+ * `PWL file=` for `time value` text. Only the name is written — the samples are
+ * kept apart from the circuit and expanded at simulation time (see
+ * core/audio/signalFile).
+ */
+export function fileSourceSpec(path: string): string {
+  const p = path.trim();
+  const q = /\s/.test(p) || p === "" ? `"${p}"` : p;
+  return p === "" || /\.wav$/i.test(p) ? `wavefile=${q}` : `PWL file=${q}`;
+}
 
 /**
  * The default expression of a behavioural source: a plain copy of another node,
@@ -69,6 +81,8 @@ export class VoltageSource extends Source {
    * measurement file cannot silently drop it.
    */
   pwlRepeat = false;
+  /** File name of a `File` source: a PCM mono `.wav` or a `.txt` of `time value` pairs. */
+  filePath = "";
   /**
    * Behavioural expression: what this source's value *is*, as a function of the
    * circuit around it (`(4*V(1,2))-V(2,3)`, `2*I(V7)`). ngspice evaluates it
@@ -128,6 +142,8 @@ export class VoltageSource extends Source {
         return `${ac}PULSE(${this.pV1} ${this.pV2} ${this.pTd} ${this.pTr} ${this.pTf} ${this.pPw} ${this.pPer}${this.pNp > 0 ? ` ${this.pNp}` : ""})`;
       case "PWL":
         return `${ac}PWL(${normalizeMicro(this.pwlPoints.trim())}${this.pwlRepeat ? " r=0" : ""})`;
+      case "File":
+        return fileSourceSpec(this.filePath);
       case "Behavioral":
         // A behavioural source *is* its expression; there is no separate
         // small-signal amplitude to give it.
@@ -156,7 +172,7 @@ export class VoltageSource extends Source {
   getProperties(): Property[] {
     const props: Property[] = [
       { key: "label", label: "Reference", value: this.label, type: "string" },
-      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse", "PWL", "Behavioral"] },
+      { key: "sourceType", label: "Source Type", value: this.sourceType, type: "select", options: ["DC", "Sine", "Pulse", "PWL", "File", "Behavioral"] },
     ];
     if (this.sourceType === "Sine") {
       props.push(
@@ -186,6 +202,8 @@ export class VoltageSource extends Source {
         { key: "pwlPoints", label: "Points (t v t v …)", value: this.pwlPoints, type: "string" },
         { key: "pwlRepeat", label: "Repeat", value: this.pwlRepeat ? "yes" : "no", type: "select", options: ["no", "yes"] },
       );
+    } else if (this.sourceType === "File") {
+      props.push({ key: "filePath", label: "Datei (.wav / .txt)", value: this.filePath, type: "string" });
     } else {
       props.push(
         { key: "dcValue", label: "DC Value", value: this.dcValue, unit: "V", type: "number" },
@@ -234,6 +252,7 @@ export class VoltageSource extends Source {
       case "sNcycles": this.sNcycles = num; break;
       case "pwlPoints": this.pwlPoints = String(value); break;
       case "pwlRepeat": this.pwlRepeat = String(value) === "yes"; break;
+      case "filePath": this.filePath = String(value); break;
       case "seriesR": this.seriesR = num; break;
       case "parallelC": this.parallelC = num; break;
       case "showParasitics": this.showParasitics = value === "yes" ? "yes" : "no"; break;
@@ -247,7 +266,7 @@ export class VoltageSource extends Source {
       dcValue: this.dcValue, acAmplitude: this.acAmplitude,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
-      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat ? "yes" : "no",
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat ? "yes" : "no", filePath: this.filePath,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
@@ -260,7 +279,7 @@ export class VoltageSource extends Source {
       sourceType: this.sourceType, acAmplitude: this.acAmplitude, bExpr: this.bExpr,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
-      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat, filePath: this.filePath,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });

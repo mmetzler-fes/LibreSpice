@@ -810,6 +810,16 @@ export class LTSpiceParser {
         c.bExpr = beh[1].trim();
       }
 
+      // A file-driven source, LTSpice's `wavefile=` or `PWL file=`. Only the file
+      // name is kept; the data is loaded separately (see core/audio/signalFile).
+      // Without this the line fell through to the DC branch below and a song
+      // became a 1 mV source on the next save.
+      const file = valueStr.match(/^\s*(?:wavefile\s*=\s*("[^"]*"|\S+)|pwl\s+file\s*=\s*("[^"]*"|\S+))/i);
+      if (file) {
+        c.sourceType = "File";
+        c.filePath = String(file[1] ?? file[2]).replace(/^"(.*)"$/, "$1");
+      }
+
       const pwl = valueStr.match(/^\s*pwl\s*\(([^)]*)\)/i);
       if (pwl) {
         c.sourceType = "PWL";
@@ -847,7 +857,7 @@ export class LTSpiceParser {
         if (f[5] !== undefined) c.pPw = f[5];
         if (f[6] !== undefined) c.pPer = f[6];
         if (f[7] !== undefined) c.pNp = f[7];
-      } else if (!beh && !/\(/.test(valueStr)) {
+      } else if (!beh && !file && !/\(/.test(valueStr)) {
         // Plain DC level ("5", "DC 5", "DC 5 AC 1"), possibly with only an AC spec.
         // Not for a behavioural source: an expression without a bracket in it
         // ("V = 2*a") looks exactly like one and would be read as a number.

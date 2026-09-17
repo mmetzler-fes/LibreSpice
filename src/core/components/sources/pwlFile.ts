@@ -98,3 +98,20 @@ export function parsePwlFile(input: string): PwlFileResult {
 
   return { points: tokens.join(" "), count: tokens.length / 2 };
 }
+
+/**
+ * The same file as numbers: breakpoint times and values, for a source that
+ * keeps its data outside the netlist (see core/audio/signalFile). Validation is
+ * {@link parsePwlFile}'s, so both readings accept and reject the same files.
+ */
+export function parsePwlNumbers(input: string): { times: Float64Array; values: Float64Array } {
+  const tokens = parsePwlFile(input).points.split(" ");
+  const n = tokens.length / 2;
+  const times = new Float64Array(n);
+  const values = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    times[i] = valueOf(tokens[2 * i]);
+    values[i] = valueOf(tokens[2 * i + 1]);
+  }
+  return { times, values };
+}

@@ -182,6 +182,8 @@ export function getValueLabel(component: SpiceComponent, type: ComponentType): s
       if (v.sourceType === "Pulse") return `${fmtSI(v.pV2, "V")} ${fmtSI(v.pPer, "s")}`;
       // A breakpoint list is too long for the caption, so name the waveform.
       if (v.sourceType === "PWL") return "PWL";
+      // The file name is what identifies the waveform, as in LTSpice.
+      if (v.sourceType === "File") return (v as { filePath?: string }).filePath?.split(/[\\/]/).pop() || "Datei";
       return `${fmtSI(v.dcValue, "V")} DC`;
     }
     case "isource":   {

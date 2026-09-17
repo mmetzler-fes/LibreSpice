@@ -12,6 +12,7 @@ import { formatSheetShape, type SheetShape } from "@core/circuit/sheetShape.js";
 import { sameAttrValue, shiftWindowLine, formatEng, type AscRaw, type AscPreserved } from "./ascPreserve.js";
 import { formatAnchor, formatBusTap } from "@core/circuit/netAnchor.js";
 import { splitPortId } from "../components/base/Port.js";
+import { fileSourceSpec } from "../components/sources/Sources.js";
 
 // Default caption anchors (node-local px) — must match ComponentNode and the
 // LTSpiceParser so that a zero offset maps to our default layout and the
@@ -51,6 +52,7 @@ function sourceSpec(c: any, isCurrent = false): string {
   if (c.sourceType === "PWL") {
     return `PWL(${String(c.pwlPoints ?? "").trim()})`;
   }
+  if (c.sourceType === "File") return fileSourceSpec(String(c.filePath ?? ""));
   return `DC ${c.dcValue ?? 0}`;
 }
 
