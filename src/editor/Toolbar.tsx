@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useSourceFileStore } from "@store/sourceFileStore.js";
+import { signalFileName } from "@core/audio/signalFile.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { useUIStore, type EditorMode } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
@@ -402,6 +404,19 @@ export function Toolbar() {
       applyPltText(await (await pltHandle.getFile()).text());
     } catch {
       /* no sibling .plt — nothing to apply */
+    }
+    // The files the sheet's sources read (`wavefile=`, `PWL file=`), as LTSpice
+    // finds them: next to the schematic.
+    const files = useSourceFileStore.getState();
+    for (const comp of useCircuitStore.getState().circuit.components.values()) {
+      const c = comp as { sourceType?: string; filePath?: string };
+      if (c.sourceType !== "File" || !c.filePath || files.signalFor(c.filePath)) continue;
+      try {
+        const fh = await dir.getFileHandle(signalFileName(c.filePath));
+        files.addInput(fh.name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
+      } catch {
+        /* not in this folder — the source's properties say so */
+      }
     }
     setFolderPick(null);
   };

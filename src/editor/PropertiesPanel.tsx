@@ -7,6 +7,10 @@ import { getProbeCandidates, netLabel } from "@core/circuit/probeUtils.js";
 import { isParametricValue, parseValueInput, valueFieldText } from "@core/components/base/componentValue.js";
 import { parsePwlFile } from "@core/components/sources/pwlFile.js";
 import { anchorsByPort } from "./anchorNets.js";
+import { Play, Square } from "lucide-react";
+import { useSourceFileStore } from "@store/sourceFileStore.js";
+import { describeSignal, isWavName, signalFileKey } from "@core/audio/signalFile.js";
+import { togglePlayback, usePlayback } from "@simulation/audioPlayback.js";
 
 /**
  * Text input for a component value: an SI-prefixed number (`4.7k`) or a
@@ -116,6 +120,69 @@ function PwlFileButton({ onLoad }: { onLoad: (points: string) => void }) {
           {status.text}
         </span>
       )}
+    </>
+  );
+}
+
+/**
+ * The file of a `File` source: load it, see what it holds, listen to it.
+ *
+ * The file is kept by name in the browser (see sourceFileStore), not in the
+ * circuit — so the status line also says when a circuit names a file that has
+ * not been loaded here yet, which is the normal state right after opening a
+ * `.asc` from LTSpice.
+ */
+function SourceFileControls({ path, onLoad }: { path: string; onLoad: (name: string) => void }) {
+  const theme = useTheme();
+  const file = useSourceFileStore((s) => (path ? s.inputs[signalFileKey(path)] : undefined));
+  const addInput = useSourceFileStore((s) => s.addInput);
+  const playing = usePlayback((s) => s.playing);
+  const [error, setError] = useState<string | null>(null);
+  const playId = `input:${signalFileKey(path)}`;
+
+  const pick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".wav,.txt,.csv,.dat,.tsv,audio/wav,text/plain";
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      const loaded = addInput(f.name, new Uint8Array(await f.arrayBuffer()));
+      setError(loaded.error);
+      if (!loaded.error) onLoad(loaded.name);
+    };
+    input.click();
+  };
+
+  const signal = file?.signal ?? null;
+  const status = (error ?? file?.error)
+    ? { ok: false, text: error ?? file?.error ?? "" }
+    : signal
+      ? { ok: true, text: describeSignal(signal) }
+      : { ok: false, text: path ? "Datei nicht geladen" : "keine Datei gewählt" };
+  const btn: React.CSSProperties = {
+    padding: "4px 6px", border: `1px solid ${theme.border}`, borderRadius: 4,
+    background: theme.inputBg, color: theme.text, cursor: "pointer", fontSize: 11,
+    display: "inline-flex", alignItems: "center", gap: 4,
+  };
+
+  return (
+    <>
+      <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <button type="button" onClick={pick} style={btn}>Datei laden…</button>
+        {signal?.sampleRate && isWavName(path) && (
+          <button
+            type="button"
+            title={playing === playId ? "Wiedergabe stoppen" : "Datei anhören"}
+            onClick={(e) => { e.preventDefault(); void togglePlayback(playId, signal.values, signal.sampleRate!); }}
+            style={btn}
+          >
+            {playing === playId ? <Square size={12} /> : <Play size={12} />}
+            {playing === playId ? "Stopp" : "Anhören"}
+          </button>
+        )}
+      </span>
+      <span style={{ fontSize: 10, color: status.ok ? theme.textMuted : "#dc2626" }}>{status.text}</span>
     </>
   );
 }
@@ -344,6 +411,12 @@ export function PropertiesPanel() {
                 value={String(prop.value)}
                 onChange={(e) => updateComponentProperty(component.id, prop.key, e.target.value)}
                 style={dynFieldStyle}
+              />
+            )}
+            {prop.key === "filePath" && (
+              <SourceFileControls
+                path={String(prop.value)}
+                onLoad={(name) => updateComponentProperty(component.id, "filePath", name)}
               />
             )}
             {prop.key === "pwlPoints" && (

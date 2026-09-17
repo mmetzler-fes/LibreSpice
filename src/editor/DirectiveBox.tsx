@@ -8,6 +8,8 @@ import {
   DIRECTIVE_BORDER, DIRECTIVE_FONT_FAMILY, DIRECTIVE_FONT_SIZE, DIRECTIVE_LINE_HEIGHT,
   DIRECTIVE_PADDING_X, DIRECTIVE_PADDING_Y, DIRECTIVE_RADIUS, directiveLines, isDirectiveComment,
 } from "./directiveBoxLayout.js";
+import { isWaveLine } from "@core/audio/signalFile.js";
+import { WaveLineActions } from "./WaveOutputBar.js";
 
 /**
  * LTSpice-style on-schematic SPICE directive text box. Shown when "Display in
@@ -70,7 +72,10 @@ export function DirectiveBox() {
         }}
       >
         {lines.map((l, i) => (
-          <div key={i} style={{ color: isDirectiveComment(l) ? "#64748b" : undefined }}>{l || " "}</div>
+          <div key={i} style={{ color: isDirectiveComment(l) ? "#64748b" : undefined }}>
+            {l || " "}
+            {isWaveLine(l) && <WaveLineActions line={l} />}
+          </div>
         ))}
       </div>
     </div>

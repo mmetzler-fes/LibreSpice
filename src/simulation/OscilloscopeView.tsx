@@ -1,4 +1,5 @@
 import { OscilloscopePlot } from "./OscilloscopePlot.js";
+import { WaveOutputBar } from "@editor/WaveOutputBar.js";
 import { useSimulationStore } from "@store/simulationStore.js";
 
 export function OscilloscopeView() {
@@ -16,6 +17,7 @@ export function OscilloscopeView() {
           <path d="M6 12 L9 8 L11 13 L13 9 L16 12" />
         </svg>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Oscilloscope</span>
+        <WaveOutputBar color="#cbd5e1" />
         {result && (
           <span style={{ fontSize: 11, color: "#64748b", marginLeft: "auto" }}>
             {result.variables.length} variable{result.variables.length !== 1 ? "s" : ""} · scroll to zoom · drag to pan

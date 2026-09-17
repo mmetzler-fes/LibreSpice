@@ -3,6 +3,7 @@ import { LiveNetlistPanel } from "./LiveNetlistPanel.js";
 import { SimulationPanel } from "@simulation/SimulationPanel.js";
 import { OscilloscopePlot } from "@simulation/OscilloscopePlot.js";
 import { LogPanel } from "@simulation/LogPanel.js";
+import { WaveOutputBar } from "./WaveOutputBar.js";
 import { useUIStore, type DockTab } from "@store/uiStore.js";
 import { useTheme } from "../theme.js";
 import { NO_NATIVE_DRAG, isDragPointer, trackPointerDrag } from "./pointerDrag.js";
@@ -155,6 +156,7 @@ export function DockPanel() {
             {tab.label}
           </button>
         ))}
+        <span style={{ marginLeft: "auto", paddingLeft: 12 }}><WaveOutputBar /></span>
         <button
           onClick={toggleDock}
           title="Collapse panel"
