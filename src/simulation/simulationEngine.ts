@@ -7,6 +7,11 @@ import {
   parseDcSweep, withDcSource, isTempSweep, withTemp, type DcSweep, type StepSpec,
 } from "./paramSweep.js";
 import { splitMeasDirectives, evaluateMeasurements } from "./measure.js";
+import { useSourceFileStore } from "@store/sourceFileStore.js";
+import {
+  chunkBlocker, inlineFileSources, needsChunks, parseTran, resolveFileSources, runChunked,
+} from "./fileSources.js";
+import { renderWaveOutputs, splitWaveDirectives } from "./waveOutput.js";
 
 let sim: Simulation | null = null;
 
@@ -74,6 +79,12 @@ const RUN_TIMEOUT_MS = 30_000;
 
 /** Run a single netlist and return its result plus the raw engine log. */
 async function runOnce(netlist: string): Promise<{ result: SimulationResult; log: string }> {
+  const { result, log } = await runOnceRaw(netlist);
+  return { result, log };
+}
+
+/** As {@link runOnce}, also returning every vector ngspice produced. */
+async function runOnceRaw(netlist: string): Promise<{ result: SimulationResult; raw: ResultType["data"]; log: string }> {
   const engine = await getSimulation();
   engine.setNetList(netlist);
   let timer: ReturnType<typeof setTimeout>;
@@ -85,7 +96,7 @@ async function runOnce(netlist: string): Promise<{ result: SimulationResult; log
   });
   try {
     const result = (await Promise.race([engine.runSim(), timeout])) as ResultType;
-    return { result: convertResult(result), log: engineLog(engine) };
+    return { result: convertResult(result), raw: result.data, log: engineLog(engine) };
   } finally {
     clearTimeout(timer!);
   }
@@ -96,7 +107,57 @@ function measBlock(title: string, rows: string[]): string {
   return rows.length ? `===== Measurements (${title}) =====\n${rows.join("\n")}\n\n` : "";
 }
 
+/**
+ * Run a netlist: resolve file sources, simulate, then write the `.wave` outputs.
+ * See fileSources.ts and waveOutput.ts for the two LTSpice features involved.
+ */
 export async function runSimulation(netlistIn: string): Promise<SimulationResult> {
+  const files = useSourceFileStore.getState();
+  files.clearOutputs();
+  const { netlist: withoutWave, waves } = splitWaveDirectives(netlistIn);
+
+  let result: SimulationResult;
+  const lines = withoutWave.split(/\r?\n/);
+  const sources = resolveFileSources(lines, files.signalFor);
+  const tran = sources.length ? parseTran(lines) : null;
+  if (sources.length && needsChunks(sources, tran)) {
+    const blocker = chunkBlocker(lines, sources);
+    if (blocker) throw new Error(`Simulation failed: ${blocker}`);
+    const setProgress = useSimulationStore.getState().setProgress;
+    try {
+      const run = await runChunked(lines, sources, tran!, {
+        // A transient run is always real-valued.
+        runOnce: async (nl) => {
+          const r = await runOnceRaw(nl);
+          return { ...r, raw: r.raw as { name: string; values: number[] }[] };
+        },
+        progress: async (done, total) => {
+          setProgress(done < total ? { done, total } : null);
+          return done >= total || yieldAndContinue();
+        },
+      });
+      result = run.result;
+      useSimulationStore.getState().setLog(run.log);
+    } catch (e) {
+      setProgress(null);
+      sim = null;
+      throw new Error(`Simulation failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else {
+    const netlist = sources.length ? inlineFileSources(lines, sources, tran).join("\n") : withoutWave;
+    result = await runNetlist(netlist);
+  }
+
+  if (waves.length) {
+    const { outputs, log } = renderWaveOutputs(result, waves);
+    files.setOutputs(outputs);
+    const store = useSimulationStore.getState();
+    store.setLog(log + store.log);
+  }
+  return result;
+}
+
+async function runNetlist(netlistIn: string): Promise<SimulationResult> {
   const setLog = useSimulationStore.getState().setLog;
   // Pull out the `.meas` directives ngspice cannot run (see measure.ts) — left in
   // the netlist they abort the run, and `runSim()` then never settles.
