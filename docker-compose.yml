@@ -12,6 +12,12 @@ services:
       # Component library on the host: drop .lib/.asy/.json files into
       # ./library/{sub,sym,cmp} and they are picked up automatically.
       - ./library:/data/lib
+      # Die Dateien, die Schaltungen einlesen (`wavefile=`, `PWL file=`). Sie
+      # liegen auf dem Host, nicht im Image: ein geteilter Link holt sich so
+      # seine Audiodatei selbst, ohne dass fremde Aufnahmen ins Repository oder
+      # ins Image wandern (siehe samples/README.md).
+      - ./samples:/data/samples:ro
     environment:
       LIBRESPICE_LIB_DIR: /data/lib
+      LIBRESPICE_SAMPLE_DIR: /data/samples
     restart: unless-stopped

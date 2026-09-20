@@ -19,6 +19,17 @@ import { ensureLibraryDirs, readLibrary, writeEntry, LIB_DIR } from "./library.m
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, "..", "dist");
 const SITE_DIR = path.resolve(__dirname, "..", "site");
+/**
+ * The files circuits read (`wavefile=`, `PWL file=`), served under
+ * <base>/samples/ so a shared link finds its own audio — see
+ * src/store/bundledSourceFiles.ts.
+ *
+ * Like the library it is a volume, not part of the image: the recordings the
+ * examples use come from third parties and are kept out of the repository. An
+ * empty or missing directory is the normal case for a clean checkout; a circuit
+ * then simply reports its file as not loaded.
+ */
+const SAMPLE_DIR = path.resolve(process.env.LIBRESPICE_SAMPLE_DIR || path.join(__dirname, "..", "samples"));
 const PORT = Number(process.env.PORT) || 8080;
 
 /** Normalise a base path to have a leading and trailing slash ("/" stays "/"). */
@@ -67,6 +78,11 @@ if (APP_BASE !== "/") {
   app.use((req, res, next) => (req.path === bare ? res.redirect(301, APP_BASE) : next()));
   app.use(SITE_ROOT, express.static(SITE_DIR));
 }
+
+// ── Source files for `wavefile=` / `PWL file=` sources ───────────────────────
+// Before the bundle and the fallback below, which would answer every unknown
+// path with index.html.
+app.use(`${APP_BASE}samples`, express.static(SAMPLE_DIR));
 
 // ── App bundle + client-side routing fallback (under the app base) ────────────
 app.use(APP_BASE, express.static(DIST_DIR));

@@ -98,8 +98,20 @@ export const useSourceFileStore = create<SourceFileState>((set, get) => ({
   clearOutputs: () => set({ outputs: {} }),
 }));
 
-/** Load the files kept from earlier sessions. Called once at start-up. */
-export async function hydrateSourceFiles(): Promise<void> {
+let hydration: Promise<void> | null = null;
+
+/**
+ * Load the files kept from earlier sessions. Called once at start-up, and
+ * awaited by anything that would otherwise load a file the user already has:
+ * the promise is kept, so a second caller waits on the same read instead of
+ * starting another one.
+ */
+export function hydrateSourceFiles(): Promise<void> {
+  hydration ??= readStoredFiles();
+  return hydration;
+}
+
+async function readStoredFiles(): Promise<void> {
   try {
     const db = await openDb();
     if (!db) return;

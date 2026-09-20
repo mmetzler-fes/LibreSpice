@@ -24,3 +24,11 @@ examples/*
 examples/Multisim14_converted/.git), das nie gepusht wird. `npm run
 # convert:multisim` erzeugt sie jederzeit aus den Quellen neu.
 examples/Multisim_converted/
+
+# Die Dateien, die Schaltungen einlesen (`wavefile=`, `PWL file=`). Sie werden
+# unter <app>/samples/ ausgeliefert, damit ein geteilter Link seine Audiodatei
+# selbst findet — aber die Aufnahmen stammen von Dritten und gehören so wenig
+# ins Repository wie die Beispielschaltungen darüber. Im Betrieb liegen sie auf
+# dem Host und werden als Volume eingehängt (siehe samples/README.md).
+samples/*
+!samples/README.md

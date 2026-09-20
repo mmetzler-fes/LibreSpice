@@ -7,6 +7,7 @@ import { useUIStore, type ActiveTab } from "@store/uiStore.js";
 import { useTheme } from "./theme.js";
 import { useCircuitStore } from "@store/circuitStore.js";
 import { getSnapshotFromUrl, loadFromLocalStorage } from "@store/persistence.js";
+import { loadBundledSourceFiles } from "@store/bundledSourceFiles.js";
 import { useAutosave } from "@store/useAutosave.js";
 import { useKeyboardViewport } from "./useKeyboardViewport.js";
 
@@ -35,11 +36,15 @@ export function App() {
       const fromUrl = await getSnapshotFromUrl();
       if (fromUrl) {
         loadFromSnapshot(fromUrl);
+        // A share link carries no WAV: what the circuit names is fetched from
+        // the samples shipped beside the app.
+        void loadBundledSourceFiles();
         return;
       }
       const saved = loadFromLocalStorage();
       if (saved && saved.nodes.length > 0) {
         loadFromSnapshot(saved);
+        void loadBundledSourceFiles();
       }
     })();
   }, [loadFromSnapshot]);

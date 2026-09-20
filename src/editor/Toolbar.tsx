@@ -17,6 +17,7 @@ import { readMsjs, msjsToSchematic } from "@core/multisim/msjs.js";
 import { readMs14 } from "@core/multisim/ms14.js";
 import { ms14ToSchematic } from "@core/multisim/ms14Schematic.js";
 import { buildShareUrl } from "@store/persistence.js";
+import { loadBundledSourceFiles } from "@store/bundledSourceFiles.js";
 import { buildSchematicSvg } from "./svgExport.js";
 import { buildLTSpiceBundle } from "@core/ltspice/ltspiceBundle.js";
 import { toLatin1, latin1Blob } from "@core/latin1.js";
@@ -355,6 +356,9 @@ export function Toolbar() {
       loadFromAsc(new TextDecoder("windows-1252").decode(bytes));
       setFileHandle(handle, file.name);
       setCircuitName(baseName);
+      // A single opened file has no folder to look in for the source files it
+      // reads; the samples shipped with the app are the one place left.
+      void loadBundledSourceFiles();
       return;
     }
 
@@ -415,9 +419,10 @@ export function Toolbar() {
         const fh = await dir.getFileHandle(signalFileName(c.filePath));
         files.addInput(fh.name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
       } catch {
-        /* not in this folder — the source's properties say so */
+        /* not in this folder — try the samples shipped with the app */
       }
     }
+    await loadBundledSourceFiles();
     setFolderPick(null);
   };
 
