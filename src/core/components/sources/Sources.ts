@@ -84,6 +84,14 @@ export class VoltageSource extends Source {
   /** File name of a `File` source: a PCM mono `.wav` or a `.txt` of `time value` pairs. */
   filePath = "";
   /**
+   * Where the file comes from when no one has it on disk: a Nextcloud share
+   * link (`https://cloud…/s/<token>`). Not part of the LTSpice spec — LTSpice
+   * reads `filePath` next to the `.asc` — so it travels in the snapshot and the
+   * share link only, and the file is fetched through the app's own server (see
+   * store/bundledSourceFiles, server/remoteFile.mjs).
+   */
+  fileUrl = "";
+  /**
    * Behavioural expression: what this source's value *is*, as a function of the
    * circuit around it (`(4*V(1,2))-V(2,3)`, `2*I(V7)`). ngspice evaluates it
    * every step, which is what makes it a dependent source without a fixed gain
@@ -203,7 +211,10 @@ export class VoltageSource extends Source {
         { key: "pwlRepeat", label: "Repeat", value: this.pwlRepeat ? "yes" : "no", type: "select", options: ["no", "yes"] },
       );
     } else if (this.sourceType === "File") {
-      props.push({ key: "filePath", label: "Datei (.wav / .txt)", value: this.filePath, type: "string" });
+      props.push(
+        { key: "filePath", label: "Datei (.wav / .txt)", value: this.filePath, type: "string" },
+        { key: "fileUrl", label: "Link (Nextcloud-Freigabe)", value: this.fileUrl, type: "string" },
+      );
     } else {
       props.push(
         { key: "dcValue", label: "DC Value", value: this.dcValue, unit: "V", type: "number" },
@@ -226,7 +237,7 @@ export class VoltageSource extends Source {
     const num = Number(value);
     // Editing a waveform field abandons any verbatim imported spec so the UI
     // values take effect (parasitics don't affect the spec, so they're exempt).
-    if (key !== "label" && key !== "seriesR" && key !== "parallelC" && key !== "showParasitics") {
+    if (key !== "label" && key !== "seriesR" && key !== "parallelC" && key !== "showParasitics" && key !== "fileUrl") {
       this.rawSpec = "";
     }
     switch (key) {
@@ -253,6 +264,7 @@ export class VoltageSource extends Source {
       case "pwlPoints": this.pwlPoints = String(value); break;
       case "pwlRepeat": this.pwlRepeat = String(value) === "yes"; break;
       case "filePath": this.filePath = String(value); break;
+      case "fileUrl": this.fileUrl = String(value).trim(); break;
       case "seriesR": this.seriesR = num; break;
       case "parallelC": this.parallelC = num; break;
       case "showParasitics": this.showParasitics = value === "yes" ? "yes" : "no"; break;
@@ -267,6 +279,7 @@ export class VoltageSource extends Source {
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
       pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat ? "yes" : "no", filePath: this.filePath,
+      ...(this.fileUrl ? { fileUrl: this.fileUrl } : {}),
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       ...(this.rawSpec ? { rawSpec: this.rawSpec } : {}),
       ...(this.valueExpr ? { valueExpr: this.valueExpr } : {}),
@@ -279,7 +292,7 @@ export class VoltageSource extends Source {
       sourceType: this.sourceType, acAmplitude: this.acAmplitude, bExpr: this.bExpr,
       pV1: this.pV1, pV2: this.pV2, pTd: this.pTd, pTr: this.pTr, pTf: this.pTf, pPw: this.pPw, pPer: this.pPer, pNp: this.pNp,
       sOffset: this.sOffset, sAmpl: this.sAmpl, sFreq: this.sFreq, sTd: this.sTd, sTheta: this.sTheta, sPhi: this.sPhi, sNcycles: this.sNcycles,
-      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat, filePath: this.filePath,
+      pwlPoints: this.pwlPoints, pwlRepeat: this.pwlRepeat, filePath: this.filePath, fileUrl: this.fileUrl,
       seriesR: this.seriesR, parallelC: this.parallelC, showParasitics: this.showParasitics,
       rawSpec: this.rawSpec, rotation: this.rotation,
     });

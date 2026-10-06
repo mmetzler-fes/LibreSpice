@@ -15,9 +15,11 @@ Quelle, dass die Datei fehlt, und man lädt sie wie bisher von Hand.
 
 ## Was hier liegen muss
 
-Die Dateien, die von veröffentlichten Beispielen gebraucht werden — derzeit:
-
-    samples/Hanuman_Sample.wav      (Karte „Audio-Filterung - Tiefpaß")
+Die Dateien, die von veröffentlichten Beispielen gebraucht werden und nicht
+per Nextcloud-Link (siehe unten) kommen — derzeit keine. Die Karte
+„Audio-Filterung - Tiefpaß" lädt ihre Datei `Demo.wav` aus der Cloud; liegt
+`samples/Demo.wav` trotzdem hier, dient sie als Rückfall, wenn die Cloud nicht
+erreichbar ist.
 
 Der Name muss exakt dem entsprechen, was die `.asc` nennt (Groß-/Kleinschreibung
 egal, Pfade werden abgeschnitten). Kopiervorlage ist die Datei neben der
@@ -36,3 +38,22 @@ Schaltung, also `examples/Hanuman_Sample.wav`:
   dem Host also vorhanden und befüllt sein, bevor der Container startet. Für
   eine weitere Datei braucht es weder ein neues Image noch einen Neustart:
   `express.static` liest bei jeder Anfrage von der Platte.
+
+## Alternative: Nextcloud-Freigabe statt Datei auf dem Server
+
+Eine Dateiquelle kann im Feld **„Link (Nextcloud-Freigabe)"** einen
+öffentlichen Freigabelink tragen, z. B. `https://cloud.fes-es.de/s/jXt2kt8XXA9stDG`.
+Die App lädt die Datei dann beim Öffnen der Schaltung von dort — hier muss
+nichts liegen. „Datei" bleibt der Name, unter dem die Datei gespeichert und in
+die `.asc` geschrieben wird (LTSpice kennt keine Links); ist er leer, wird der
+Name aus der Freigabe übernommen. Der Link reist im Share-Link und im
+Autosave mit, nicht in der `.asc`.
+
+Nextcloud sendet keine CORS-Header, deshalb läuft der Abruf über den eigenen
+Server (`<base>/api/remote-file`, `server/remoteFile.mjs`; im Dev-Server
+genauso). Damit daraus kein offener Proxy wird:
+
+* nur `https`, nur Hosts aus `LIBRESPICE_REMOTE_HOSTS` (Komma-Liste,
+  Standard `cloud.fes-es.de`), Weiterleitungen nur auf diese Hosts;
+* höchstens `LIBRESPICE_REMOTE_MAX_MB` (Standard 50) MB pro Datei;
+* Freigaben mit Passwort und Ordnerfreigaben ohne `files=` gehen nicht.

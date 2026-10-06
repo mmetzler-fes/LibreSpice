@@ -20,4 +20,7 @@ services:
     environment:
       LIBRESPICE_LIB_DIR: /data/lib
       LIBRESPICE_SAMPLE_DIR: /data/samples
+      # Hosts, von denen Dateiquellen per Nextcloud-Freigabelink geladen werden
+      # dürfen (Komma-Liste; siehe samples/README.md).
+      LIBRESPICE_REMOTE_HOSTS: cloud.fes-es.de
     restart: unless-stopped

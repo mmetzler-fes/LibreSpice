@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { resolve, extname } from "path";
 import { createReadStream, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { handleRemoteFile } from "./server/remoteFile.mjs";
 
 /**
  * A unique id for this build, stamped into autosaved snapshots so the app can
@@ -51,13 +52,30 @@ function serveSamples() {
   };
 }
 
+/**
+ * <base>/api/remote-file in the dev server, so a source's Nextcloud link loads
+ * without the express server running beside it (see server/remoteFile.mjs).
+ * Added directly in configureServer, so it runs before the `/api` proxy below.
+ */
+function serveRemoteFiles() {
+  return {
+    name: "librespice-remote-files",
+    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, res, next) => {
+        if (/\/api\/remote-file\?/.test(req.url ?? "")) void handleRemoteFile(req, res);
+        else next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   define: { __BUILD_ID__: JSON.stringify(buildId()) },
   // Public base path the app is served under. Default "/" for local dev and
   // root deployments; set e.g. BASE_PATH=/librespice/app/ to host it under a
   // subpath. All asset URLs, the share link and API calls derive from this.
   base: process.env.BASE_PATH || "/",
-  plugins: [react(), serveSamples()],
+  plugins: [react(), serveSamples(), serveRemoteFiles()],
   resolve: {
     alias: {
       "@core": resolve(__dirname, "src/core"),

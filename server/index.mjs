@@ -15,6 +15,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureLibraryDirs, readLibrary, writeEntry, LIB_DIR } from "./library.mjs";
+import { handleRemoteFile } from "./remoteFile.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, "..", "dist");
@@ -67,6 +68,8 @@ api.post("/library", async (req, res) => {
     res.status(400).json({ error: String(err.message || err) });
   }
 });
+// A source's file from a Nextcloud share, which the browser may not read itself.
+api.get("/remote-file", handleRemoteFile);
 app.use(`${APP_BASE}api`, api);
 
 // ── Landing page (only when the app is hosted under a subpath) ────────────────

@@ -9,6 +9,7 @@ import { parsePwlFile } from "@core/components/sources/pwlFile.js";
 import { anchorsByPort } from "./anchorNets.js";
 import { Play, Square } from "lucide-react";
 import { useSourceFileStore } from "@store/sourceFileStore.js";
+import { loadRemoteSourceFile } from "@store/bundledSourceFiles.js";
 import { describeSignal, isWavName, signalFileKey } from "@core/audio/signalFile.js";
 import { togglePlayback, usePlayback } from "@simulation/audioPlayback.js";
 
@@ -183,6 +184,44 @@ function SourceFileControls({ path, onLoad }: { path: string; onLoad: (name: str
         )}
       </span>
       <span style={{ fontSize: 10, color: status.ok ? theme.textMuted : "#dc2626" }}>{status.text}</span>
+    </>
+  );
+}
+
+/**
+ * Fetch a `File` source's file from its share link now — the same fetch that
+ * happens on opening the sheet, but with its failure said out loud.
+ */
+function RemoteFileControls({ url, path, onLoad }: { url: string; path: string; onLoad: (name: string) => void }) {
+  const theme = useTheme();
+  const [state, setState] = useState<{ busy: boolean; ok: boolean; text: string }>({ busy: false, ok: true, text: "" });
+  if (!url) return null;
+  const load = async () => {
+    setState({ busy: true, ok: true, text: "lädt …" });
+    try {
+      const name = await loadRemoteSourceFile(url, path);
+      if (name !== path) onLoad(name);
+      setState({ busy: false, ok: true, text: `geladen als ${name}` });
+    } catch (e) {
+      setState({ busy: false, ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  return (
+    <>
+      <span>
+        <button
+          type="button"
+          disabled={state.busy}
+          onClick={() => void load()}
+          style={{
+            padding: "4px 6px", border: `1px solid ${theme.border}`, borderRadius: 4,
+            background: theme.inputBg, color: theme.text, cursor: "pointer", fontSize: 11,
+          }}
+        >
+          Von Link laden
+        </button>
+      </span>
+      {state.text && <span style={{ fontSize: 10, color: state.ok ? theme.textMuted : "#dc2626" }}>{state.text}</span>}
     </>
   );
 }
@@ -416,6 +455,13 @@ export function PropertiesPanel() {
             {prop.key === "filePath" && (
               <SourceFileControls
                 path={String(prop.value)}
+                onLoad={(name) => updateComponentProperty(component.id, "filePath", name)}
+              />
+            )}
+            {prop.key === "fileUrl" && (
+              <RemoteFileControls
+                url={String(prop.value)}
+                path={String((component as { filePath?: string }).filePath ?? "")}
                 onLoad={(name) => updateComponentProperty(component.id, "filePath", name)}
               />
             )}
