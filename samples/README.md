@@ -46,7 +46,9 @@ Eine Dateiquelle kann im Feld **„Link (Nextcloud-Freigabe)"** einen
 Die App lädt die Datei dann beim Öffnen der Schaltung von dort — hier muss
 nichts liegen. „Datei" bleibt der Name, unter dem die Datei gespeichert und in
 die `.asc` geschrieben wird (LTSpice kennt keine Links); ist er leer, wird der
-Name aus der Freigabe übernommen. Der Link reist im Share-Link und im
+Name aus der Freigabe übernommen. Der Link darf auch eine **Ordnerfreigabe**
+sein: Dann wird im Ordner die Datei mit dem Namen aus „Datei" geholt (das Feld
+muss dann ausgefüllt sein). Der Link reist im Share-Link und im
 Autosave mit, nicht in der `.asc`.
 
 Nextcloud sendet keine CORS-Header, deshalb läuft der Abruf über den eigenen
@@ -56,4 +58,4 @@ genauso). Damit daraus kein offener Proxy wird:
 * nur `https`, nur Hosts aus `LIBRESPICE_REMOTE_HOSTS` (Komma-Liste,
   Standard `cloud.fes-es.de`), Weiterleitungen nur auf diese Hosts;
 * höchstens `LIBRESPICE_REMOTE_MAX_MB` (Standard 50) MB pro Datei;
-* Freigaben mit Passwort und Ordnerfreigaben ohne `files=` gehen nicht.
+* Freigaben mit Passwort gehen nicht.

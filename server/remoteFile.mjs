@@ -1,6 +1,7 @@
 /**
  * Fetch a source file (`wavefile=`, `PWL file=`) from a Nextcloud share on the
- * browser's behalf: <base>/api/remote-file?url=<share link>.
+ * browser's behalf: <base>/api/remote-file?url=<share link>[&name=<file name>].
+ * The name lets the link be a folder share holding that file.
  *
  * Why a detour through the server at all: Nextcloud answers a public share
  * without `Access-Control-Allow-Origin`, so the browser may download the file
@@ -31,13 +32,29 @@ const MAX_REDIRECTS = 3;
  * Anything else on an allowed host is fetched as given.
  */
 export function nextcloudDownloadUrl(link) {
+  return downloadCandidates(link, "")[0];
+}
+
+/**
+ * The addresses to try, in order. A bare share link (`/s/TOKEN`, no `files=`)
+ * may be a file or a folder — the link alone does not say which. So when the
+ * source names its file, `TOKEN/<name>` is the second try: a file share answers
+ * the first (and 404s the second), a folder share the second. The name is only
+ * a base name, so it cannot leave the shared folder.
+ */
+export function downloadCandidates(link, name) {
   const u = new URL(link);
   const share = /^(?:\/index\.php)?\/s\/([A-Za-z0-9]+)(?:\/download)?\/?$/.exec(u.pathname);
-  if (!share) return u;
+  if (!share) return [u];
   const dir = (u.searchParams.get("path") ?? "/").replace(/^\/+|\/+$/g, "");
   const file = u.searchParams.get("files") ?? "";
-  const rest = [dir, file].filter(Boolean).map((p) => p.split("/").map(encodeURIComponent).join("/")).join("/");
-  return new URL(`/public.php/dav/files/${share[1]}${rest ? `/${rest}` : ""}`, u.origin);
+  const davUrl = (...parts) => {
+    const rest = parts.filter(Boolean).map((p) => p.split("/").map(encodeURIComponent).join("/")).join("/");
+    return new URL(`/public.php/dav/files/${share[1]}${rest ? `/${rest}` : ""}`, u.origin);
+  };
+  const base = name.trim().replace(/^"(.*)"$/, "$1").split(/[\\/]/).pop() ?? "";
+  const inFolder = !file && base && base !== "." && base !== "..";
+  return inFolder ? [davUrl(dir, file), davUrl(dir, base)] : [davUrl(dir, file)];
 }
 
 function allowed(u) {
@@ -60,32 +77,45 @@ export async function handleRemoteFile(req, res) {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.end(msg);
   };
-  let target;
+  let candidates;
   try {
-    const link = new URL(req.url, "http://x").searchParams.get("url") ?? "";
-    target = nextcloudDownloadUrl(link);
+    const params = new URL(req.url, "http://x").searchParams;
+    candidates = downloadCandidates(params.get("url") ?? "", params.get("name") ?? "");
   } catch {
     return fail(400, "Kein gültiger Link");
   }
-  if (!allowed(target)) {
+  if (!allowed(candidates[0])) {
     return fail(403, `Nur https-Links auf ${ALLOWED_HOSTS.join(", ") || "(keinem Host)"} sind freigegeben`);
   }
 
   try {
     let upstream;
-    for (let hop = 0; ; hop++) {
-      upstream = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(30_000) });
-      const loc = upstream.headers.get("location");
-      if (upstream.status < 300 || upstream.status >= 400 || !loc) break;
-      target = new URL(loc, target);
-      if (hop >= MAX_REDIRECTS || !allowed(target)) return fail(502, "Weiterleitung auf einen nicht freigegebenen Host");
+    let problem;
+    for (const [i, candidate] of candidates.entries()) {
+      let target = candidate;
+      for (let hop = 0; ; hop++) {
+        upstream = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(30_000) });
+        const loc = upstream.headers.get("location");
+        if (upstream.status < 300 || upstream.status >= 400 || !loc) break;
+        target = new URL(loc, target);
+        if (hop >= MAX_REDIRECTS || !allowed(target)) return fail(502, "Weiterleitung auf einen nicht freigegebenen Host");
+      }
+      const type = upstream.headers.get("content-type") ?? "";
+      if (upstream.status === 404 && i > 0) {
+        const name = decodeURIComponent(candidate.pathname.split("/").pop());
+        problem = [404, `„${name}" liegt nicht im freigegebenen Ordner (Groß-/Kleinschreibung beachten)`];
+      } else if (!upstream.ok) problem = [upstream.status === 404 ? 404 : 502, `Nextcloud antwortet ${upstream.status}`];
+      // The share's web page instead of the file: a link to a folder, or one
+      // that needs a password. A folder may also answer as a listing or a zip.
+      else if (/text\/html|unix-directory|application\/zip/.test(type)) {
+        problem = [422, "Der Link liefert keine Datei (Ordner ohne passenden Dateinamen unter „Datei\", oder Passwortschutz?)"];
+      } else {
+        problem = undefined;
+        break;
+      }
+      await upstream.body?.cancel().catch(() => {});
     }
-    if (!upstream.ok) return fail(upstream.status === 404 ? 404 : 502, `Nextcloud antwortet ${upstream.status}`);
-    // The share's web page instead of the file: a link to a folder, or one
-    // that needs a password.
-    if ((upstream.headers.get("content-type") ?? "").includes("text/html")) {
-      return fail(422, "Der Link liefert eine Webseite, keine Datei (Ordner oder Passwortschutz?)");
-    }
+    if (problem) return fail(...problem);
     if (Number(upstream.headers.get("content-length")) > MAX_BYTES) return fail(413, "Datei zu groß");
 
     const chunks = [];

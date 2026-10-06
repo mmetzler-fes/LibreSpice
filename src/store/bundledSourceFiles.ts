@@ -69,7 +69,9 @@ export function loadRemoteSourceFile(url: string, name: string): Promise<string>
 
 async function fetchRemote(url: string, name: string): Promise<string> {
   await hydrateSourceFiles();
-  const res = await fetch(`${import.meta.env.BASE_URL}api/remote-file?url=${encodeURIComponent(url)}`);
+  // The name lets the link be a folder share holding the file (server/remoteFile.mjs).
+  const query = `url=${encodeURIComponent(url)}&name=${encodeURIComponent(signalFileName(name))}`;
+  const res = await fetch(`${import.meta.env.BASE_URL}api/remote-file?${query}`);
   if (!res.ok) throw new Error((await res.text().catch(() => "")) || `Laden fehlgeschlagen (${res.status})`);
   if ((res.headers.get("content-type") ?? "").includes("text/html")) {
     throw new Error("Der Server kennt keine Link-Quellen (älterer Server?)");
